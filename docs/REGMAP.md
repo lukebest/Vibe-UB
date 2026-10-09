@@ -35,7 +35,7 @@
 
 ## 2. 字段表
 
-未实现的保留位读 0、写忽略。
+未实现的保留位读 0、写忽略。多值字段的保留编码（如 `RETRY_REQ_ST` 5–7、`RETRY_ACK_ST` 2–3、`NUM_LANES_*` 除 1/2/4/8 外）由 RTL **永不产出**；TB assert。
 
 ### 2.1 CTRL / STATUS（`0x0000`）
 
@@ -50,8 +50,8 @@
 | 0x0004 | STATUS | DLL_STATUS_UP | 2 | 2 | RO | 0x0 | 可发 DLLDP | proj; UB-DL §4.2 |
 | 0x0004 | STATUS | LMSM_ST | 7 | 3 | RO | 0x0 | 同 `tb_obs_lmsm_st` 编码，见 SPEC §10.3 | proj; UB-PHY §3.4.3 |
 | 0x0004 | STATUS | DLL_SM_ST | 9 | 8 | RO | 0x0 | 同 `tb_obs_dll_sm_st` 编码，见 SPEC §10.3 | proj; UB-DL §4.2 |
-| 0x0004 | STATUS | RETRY_REQ_ST | 12 | 10 | RO | 0x0 | RETRY_REQ_SM 编码。0=NORMAL … 具体映射 **待定**（对照 §4.7.3.3） | proj; UB-DL §4.7.3.3 |
-| 0x0004 | STATUS | RETRY_ACK_ST | 14 | 13 | RO | 0x0 | RETRY_ACK_SM 编码 **待定** | proj; UB-DL §4.7.3.4 |
+| 0x0004 | STATUS | RETRY_REQ_ST | 12 | 10 | RO | 0x0 | 0=`NORMAL`，1=`REQ`，2=`WAIT`，3=`RETRAIN`，4=`ERROR`，5–7 保留。RTL 永不产出保留值；TB assert | proj; UB-DL §4.7.3.3 |
+| 0x0004 | STATUS | RETRY_ACK_ST | 14 | 13 | RO | 0x0 | 0=`NORMAL`，1=`ACK`，2–3 保留。RTL 永不产出保留值；TB assert | proj; UB-DL §4.7.3.4 |
 | 0x0004 | STATUS | RSVD | 31 | 15 | RO | 0x0 | 保留 | proj |
 | 0x0008 | IRQ_STATUS | FEC_UNCORR | 0 | 0 | W1C | 0x0 | FEC 不可纠正曾发生 | proj; UB-PHY §3.2.3.5 |
 | 0x0008 | IRQ_STATUS | CRC_FAIL | 1 | 1 | W1C | 0x0 | BCRC 失败曾发生 | proj; UB-DL §4.7.2 |
@@ -75,8 +75,8 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 0x0100 | PARAM_PHY | PHY_MODE | 1 | 0 | RO | 0x2 | 1=Mode-1，2=Mode-2。M1=2 | proj; UB-PHY §3.1.2 |
 | 0x0100 | PARAM_PHY | DATA_RATE | 5 | 2 | RO | 0x0 | Data Rate 编号。M1=0（2.578125G NRZ） | proj; UB-PHY §3.1.2 |
-| 0x0100 | PARAM_PHY | NUM_LANES_TX | 9 | 6 | RO | 0x1 | 当前/静态 TX lane 数（1/2/4/8 的编码 **待定**；复位按 bring-up x1=1） | proj; UB-PHY §3.1.1 |
-| 0x0100 | PARAM_PHY | NUM_LANES_RX | 13 | 10 | RO | 0x1 | RX lane 数，默认等于 TX | proj |
+| 0x0100 | PARAM_PHY | NUM_LANES_TX | 9 | 6 | RO | 0x1 | 二进制 TX lane 数。合法 1/2/4/8，其余保留。RTL 永不产出保留值；TB assert。复位 1 | proj; UB-PHY §3.1.1 |
+| 0x0100 | PARAM_PHY | NUM_LANES_RX | 13 | 10 | RO | 0x1 | 二进制 RX lane 数。合法 1/2/4/8，其余保留。RTL 永不产出保留值；TB assert。复位 1；默认等于 TX | proj |
 | 0x0100 | PARAM_PHY | PMA_W | 21 | 14 | RO | 0x20 | PMA–PCS 每 lane 位宽，M1=32 | proj |
 | 0x0100 | PARAM_PHY | ALLOW_ASYM | 22 | 22 | RO | 0x0 | 1=允许非对称。M1=0 | proj |
 | 0x0100 | PARAM_PHY | RSVD | 31 | 23 | RO | 0x0 | 保留 | proj |

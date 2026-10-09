@@ -568,7 +568,7 @@ M1 bring-up 裁剪（默认参数已确认）：
 
 `link_up` / `link_ready` 在哪些状态置位：见 UB-PHY §3.4.3.6–§3.4.3.8，不在此复制条件表。设计要求：`link_up` 为电平；DLL 只看电平，不看边沿脉冲。
 
-软件启动 LMSM：CSR 写「启动」位（见 REGMAP `LMSM_CTRL.START`）。这是实现手段，对应规范「上层指示进入下一状态」（§3.4.3.1）。
+软件启动 LMSM：CSR 写 `CTRL.LMSM_START`（REGMAP `0x0000` bit1）。这是实现手段，对应规范「上层指示进入下一状态」（§3.4.3.1）。
 
 ### 6.2 DLL 状态机（UB-DL §4.2）
 
@@ -594,7 +594,7 @@ stateDiagram-v2
 
 ### 6.3 RETRY_REQ_SM（UB-DL §4.7.3.3）
 
-状态：`NORMAL`，`REQ`，`WAIT`，`RETRAIN`，`ERROR`。
+状态：`NORMAL`，`REQ`，`WAIT`，`RETRAIN`，`ERROR`。CSR `STATUS.RETRY_REQ_ST[12:10]`（已定）：0=`NORMAL`，1=`REQ`，2=`WAIT`，3=`RETRAIN`，4=`ERROR`，5–7 保留。RTL 永不产出保留编码；TB assert。
 
 | 从 → 到 | 条件（短述） |
 | --- | --- |
@@ -611,7 +611,7 @@ stateDiagram-v2
 
 ### 6.4 RETRY_ACK_SM（UB-DL §4.7.3.4）
 
-两个状态（标识符见该节）。职责：对端请求时发应答集，并从 retry buffer 重放。未实现细节：**待定**（按该节，不在此发明子条件）。
+两个状态：`NORMAL`、`ACK`（标识符见该节）。CSR `STATUS.RETRY_ACK_ST[14:13]`（已定）：0=`NORMAL`，1=`ACK`，2–3 保留。RTL 永不产出保留编码；TB assert。职责：对端请求时发应答集，并从 retry buffer 重放。转移条件等未实现细节：**待定**（按该节，不在此发明子条件）。
 
 ---
 
@@ -675,8 +675,8 @@ M1 列中 Xia 提出的默认值已由船长确认。仍标「草案」的是规
 | --- | --- | --- | --- | --- |
 | PHY 模式 | `PHY_MODE` | Mode-2 | Mode-2 | UB-PHY §3.1.2；已确认 |
 | 数据速率 | `DATA_RATE` | 2.578125G NRZ（Data Rate 0） | 106.25G PAM4 | §3.1.2、§3.4.2.5；已确认 |
-| TX lane 数 | `NUM_LANES_TX` | 1…4 bring-up；参数到 8 | 8 | §3.1.1、§3.4.2.2；已确认 |
-| RX lane 数 | `NUM_LANES_RX` | 默认等于 TX | 8 | 非对称默认关；已确认 |
+| TX lane 数 | `NUM_LANES_TX` | 1…4 bring-up；参数到 8 | 8 | §3.1.1、§3.4.2.2；已确认。CSR `PARAM_PHY.NUM_LANES_TX[9:6]`：**二进制 lane 数**，合法 1/2/4/8，其余保留；复位 1。RTL 永不产出保留值；TB assert |
+| RX lane 数 | `NUM_LANES_RX` | 默认等于 TX | 8 | 非对称默认关；已确认。CSR `PARAM_PHY.NUM_LANES_RX[13:10]`：同上，合法 1/2/4/8，复位 1 |
 | 非对称 | `ALLOW_ASYM` | 0 | 规范允许 | §3.1.1；已确认 |
 | PMA–PCS 每 lane 位宽 | `PMA_W` | 32 | 256 | 已确认。与 `F_CORE` 对齐；加扰数据口同宽 |
 | 加扰 LFSR 宽度 | `SCR_W` | 23 | 23 | PRBS23（UB-PHY §3.2.6）；抽头 **待定** |

@@ -39,8 +39,8 @@ def verilator_gflags() -> str:
     bits = seed_map_w()
     sm = elab_seed_map()
     return (
-        f"-GSCR_TAPS={ELAB_SCR_TAPS} "
-        f"-GLFSR_INIT={ELAB_LFSR_INIT} "
+        f"-GSCR_TAPS={P.SCR_W}'h{ELAB_SCR_TAPS:x} "
+        f"-GLFSR_INIT={P.SCR_W}'h{ELAB_LFSR_INIT:x} "
         f"-GSEED_MAP={bits}'h{sm:x}"
     )
 
@@ -49,7 +49,7 @@ def yosys_chparam_cmd() -> str:
     bits = seed_map_w()
     sm = elab_seed_map()
     return (
-        f"chparam -set SCR_TAPS {ELAB_SCR_TAPS} "
-        f"-set LFSR_INIT {ELAB_LFSR_INIT} "
+        f"chparam -set SCR_TAPS {P.SCR_W}'h{ELAB_SCR_TAPS:x} "
+        f"-set LFSR_INIT {P.SCR_W}'h{ELAB_LFSR_INIT:x} "
         f"-set SEED_MAP {bits}'h{sm:x}"
     )

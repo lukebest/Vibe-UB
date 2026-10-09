@@ -137,6 +137,7 @@ def main() -> int:
     assert "bi = 7" in bcrc
     assert "15A94AD5" in bcrc
     assert "NBYTE - BCRC_BYTES" in bcrc
+    assert "n_eat" not in bcrc
 
     chk = (rtl / "dll/ub_dll_bcrc_check.v").read_text(encoding="utf-8")
     chk_ports = _ports_block(chk)

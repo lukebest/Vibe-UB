@@ -64,14 +64,13 @@ module ub_dll_bcrc_check #(
       end else if (valid_in) begin
         begin : eat
           reg [CRC_W-1:0] t;
-          integer         n_eat;
-          t     = crc_q;
+          t = crc_q;
           // SPEC §2.6: cover data before the CRC30 field. Last flit's
           // trailing WORD_W/8 bytes are the BCRC word — do not CRC them.
-          n_eat = last ? (NBYTE - BCRC_BYTES) : NBYTE;
-          for (by = 0; by < n_eat; by = by + 1)
-            for (bi = 7; bi >= 0; bi = bi - 1)
-              t = crc_step(t, data_in[by*8 + bi]);
+          for (by = 0; by < NBYTE; by = by + 1)
+            if (!(last && (by >= (NBYTE - BCRC_BYTES))))
+              for (bi = 7; bi >= 0; bi = bi - 1)
+                t = crc_step(t, data_in[by*8 + bi]);
           crc_q <= t;
           if (last) begin
             word_q <= {1'b0, 1'b0, t};

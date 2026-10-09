@@ -357,7 +357,7 @@ LMB 为 16 个 8-bit 符号（见 UB-PHY §3.4.1）。种类：LTB、EEIB（§3.
 | --- | --- | --- | --- |
 | `lmsm2pcs_pattern` | out | 2 | 0=电气空闲，1=EEIB，2=LTB（用字段口），3=DLL 业务码流 |
 | `lmsm2pcs_ltb_valid` | out | 1 | 与字段一并在 LMB 起始锁存。无多拍稳定要求 |
-| `lmsm2pcs_lane_id_mode` | out | 2 | 0=`PHYS`：该物理 TX lane 编号写入 Lane_ID（§3.4.2 Discovery.Active）。1=`ASCEND`：用 `lane_id_map` / `lane_id_base`（§3.4.2 Config）。2=`NULL`：写入该状态要求的空值（取值见 §3.4.1.1） |
+| `lmsm2pcs_lane_id_mode` | out | 2 | 0=`PHYS`：该物理 TX lane 编号写入 Lane_ID（§3.4.2 Discovery.Active）。1=`ASCEND`：用 `lane_id_map` / `lane_id_base`（§3.4.2 Config）。2=`NULL`：写入该状态要求的空值（取值见 §3.4.1.1）。3=`RESERVED`：LMSM 永不驱动（TB assert）。PCS 与 2 走同一分支，按 NULL 解码；无不可达分支、无需 waiver |
 | `lmsm2pcs_lane_id_base` | out | 8 | `ASCEND` 时逻辑 Tx_0 的 Lane_ID；`PHYS`/`NULL` 忽略 |
 | `lmsm2pcs_lane_id_map` | out | `8*NUM_LANES_TX` | `ASCEND` 时每物理 TX lane 一字节：该 lane 的 Lane_ID（唯一递增 Tx_0..Tx_M-1，或该 lane 为 NULL）。字节 i 对应物理 TX lane i。`PHYS`/`NULL` 忽略 |
 | `pcs2lmsm_ltb_valid` | in | 1 | RX 收到一帧 CRC 通过的 LTB（单拍） |
@@ -365,7 +365,7 @@ LMB 为 16 个 8-bit 符号（见 UB-PHY §3.4.1）。种类：LTB、EEIB（§3.
 | `pcs_lid_bad` | in | 1 | 训练所见 Link_ID 非法/不一致。可被 `tb_inj_lid_bad` 旁路，不回灌 PCS |
 | `pcs_deskew_ok` | in | 1 | deskew 完成 |
 
-`ASCEND`：PCS 把物理 lane i 的 Lane_ID 取自 `lmsm2pcs_lane_id_map` 对应字节；`lmsm2pcs_lane_id_base` 等于逻辑 Tx_0 那一字节，供对照。`PHYS`：PCS 写物理 lane 号，不用 map/base。`NULL`：各激活 lane 的 Lane_ID 均为 §3.4.1.1 的空值。
+`ASCEND`：PCS 把物理 lane i 的 Lane_ID 取自 `lmsm2pcs_lane_id_map` 对应字节；`lmsm2pcs_lane_id_base` 等于逻辑 Tx_0 那一字节，供对照。`PHYS`：PCS 写物理 lane 号，不用 map/base。`NULL`（mode=2 或 3）：各激活 lane 的 Lane_ID 均为 §3.4.1.1 的空值。
 
 **LTB 字段口**（TX 前缀 `lmsm2pcs_`，RX 前缀 `pcs2lmsm_`；同名同宽。标识符取自 §3.4.1.1，宽度为字段位宽，不含保留位。Type / 宽度编码等枚举值实现时对照该节，不在此抄表。）
 

@@ -14,8 +14,34 @@ IRQ_MASK = 0x000C
 PORT_CNA = 0x0010
 
 CTRL_PORT_RST = 0
-CTRL_LMSM_START = 1
+CTRL_LMSM_START = 1  # REGMAP 0x0000 bit1; was LMSM_CTRL.START
 CTRL_IRQ_EN = 2
+
+# STATUS encodings closed on PR #4 4ed4eae. Reserved values: RTL never
+# produces them; TB asserts (REGMAP §2 preamble, SPEC §6.3 / §6.4).
+STATUS_LMSM_ST = (7, 3)
+STATUS_DLL_SM_ST = (9, 8)
+STATUS_RETRY_REQ_ST = (12, 10)
+STATUS_RETRY_ACK_ST = (14, 13)
+
+RETRY_REQ_ST = {
+    "NORMAL": 0,
+    "REQ": 1,
+    "WAIT": 2,
+    "RETRAIN": 3,
+    "ERROR": 4,
+}
+RETRY_REQ_ST_RESERVED = frozenset({5, 6, 7})
+
+RETRY_ACK_ST = {
+    "NORMAL": 0,
+    "ACK": 1,
+}
+RETRY_ACK_ST_RESERVED = frozenset({2, 3})
+
+PARAM_PHY = 0x0100
+# PARAM_PHY.NUM_LANES_{TX,RX}: binary lane count. Legal 1/2/4/8 only.
+NUM_LANES_LEGAL = frozenset({1, 2, 4, 8})
 
 # ERR counters (RO, saturate) + CNT_CLR (WO, self-clear)
 CNT_FEC_UNCORR = 0x0200
@@ -67,6 +93,36 @@ APPD_LINK_CAP = 0x1100
 APPD_LINK_LOG = 0x1200
 APPD_LMSM_ST = 0x1E00
 APPD_PORT_ERR = 0x1F00
+
+
+def _field(word: int, hi: int, lo: int) -> int:
+    return (word >> lo) & ((1 << (hi - lo + 1)) - 1)
+
+
+def assert_retry_req_st(value: int) -> int:
+    if value in RETRY_REQ_ST_RESERVED:
+        raise AssertionError(f"STATUS.RETRY_REQ_ST reserved encoding {value} (REGMAP §2.1)")
+    return value
+
+
+def assert_retry_ack_st(value: int) -> int:
+    if value in RETRY_ACK_ST_RESERVED:
+        raise AssertionError(f"STATUS.RETRY_ACK_ST reserved encoding {value} (REGMAP §2.1)")
+    return value
+
+
+def assert_num_lanes(value: int, name: str = "NUM_LANES") -> int:
+    if value not in NUM_LANES_LEGAL:
+        raise AssertionError(f"{name} reserved encoding {value}; legal {sorted(NUM_LANES_LEGAL)}")
+    return value
+
+
+def retry_req_st(status: int) -> int:
+    return assert_retry_req_st(_field(status, *STATUS_RETRY_REQ_ST))
+
+
+def retry_ack_st(status: int) -> int:
+    return assert_retry_ack_st(_field(status, *STATUS_RETRY_ACK_ST))
 
 
 def is_aligned(addr: int) -> bool:

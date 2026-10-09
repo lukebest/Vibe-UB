@@ -2,21 +2,24 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import cocotb
-from cocotb.triggers import RisingEdge, Timer
-from uvm.base.uvm_config_db import UVMConfigDb
-from uvm.base.uvm_globals import run_test, uvm_fatal, uvm_info
-from uvm.base.uvm_object_globals import UVM_LOW
-from uvm.base.uvm_test import UVMTest
-from uvm.macros import uvm_component_utils
+from cocotb.triggers import RisingEdge
+from uvm import (
+    UVMConfigDb,
+    UVMTest,
+    UVM_LOW,
+    run_test,
+    uvm_component_utils,
+    uvm_fatal,
+    uvm_info,
+)
 
-from tb.uvm.coverage import export_functional, sample_selfcheck
-from tb.uvm.env import UbEnv
-from tb.uvm.items import CsrItem, VoItem, VrItem
-from tb.uvm.seed_log import log_seed, resolve_seed
+from tb.vibe_uvm.coverage import export_functional, sample_selfcheck
+from tb.vibe_uvm.env import UbEnv
+from tb.vibe_uvm.items import CsrItem, VoItem, VrItem
+from tb.vibe_uvm.seed_log import log_seed, resolve_seed
 
 REPO = Path(__file__).resolve().parents[2]
 REPORTS = REPO / "tb" / "reports"
@@ -159,10 +162,8 @@ uvm_component_utils(TbSelfcheckTest)
 async def test_tb_skeleton(dut):
     seed = log_seed(resolve_seed())
     UVMConfigDb.set(None, "*", "vif", dut)
-    # Give unused outputs a driver-friendly idle before UVM starts.
     if hasattr(dut, "vr_out_ready"):
         dut.vr_out_ready.value = 1
-    await Timer(1, units="ns")
     await run_test("TbSelfcheckTest")
     # Keep seed in the log after UVM shuts down.
     print(f"SEED {seed}", flush=True)

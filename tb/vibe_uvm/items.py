@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from cocotb_coverage.crv import Randomized
-from uvm.macros import uvm_object_utils
-from uvm.seq.uvm_sequence_item import UVMSequenceItem
+from uvm import UVMSequenceItem, uvm_object_utils
 
 
 class VrItem(UVMSequenceItem, Randomized):

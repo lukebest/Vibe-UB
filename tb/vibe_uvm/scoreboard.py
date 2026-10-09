@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from uvm.base.uvm_component import UVMComponent
-from uvm.base.uvm_globals import uvm_error, uvm_info
-from uvm.base.uvm_object_globals import UVM_LOW
-from uvm.macros import uvm_component_utils
+from uvm import UVMComponent, UVM_LOW, uvm_component_utils, uvm_error, uvm_info
 
 
 class ScoreboardBase(UVMComponent):

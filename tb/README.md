@@ -20,7 +20,7 @@ tb/
     bcrc.py                 UB-DL §4.3.2.2.4 / §4.7.2
     config.py               pending knobs
     tests/                  pytest
-  uvm/                      uvm-python skeleton
+  vibe_uvm/                 uvm-python skeleton (named so it does not shadow the `uvm` package)
     clk_rst.py              core_clk ≈ 80.57 MHz; rst_n async assert / sync deassert
     seed_log.py             prints `SEED <n>` (D8)
     items.py                randomize() via cocotb-coverage crv

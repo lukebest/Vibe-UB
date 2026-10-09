@@ -7,7 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
-from tb.uvm.coverage import export_functional
+from tb.vibe_uvm.coverage import export_functional
 
 
 def main() -> None:

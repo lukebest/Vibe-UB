@@ -5,8 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from cocotb.triggers import RisingEdge
-from uvm.base.uvm_component import UVMComponent
-from uvm.macros import uvm_component_utils
+from uvm import UVMComponent, uvm_component_utils
 
 # SPEC §10.2 — exhaustive list. Do not add ports here.
 INJ_PORTS = ("tb_inj_am_lock", "tb_inj_lid_bad", "tb_inj_crd_cells")

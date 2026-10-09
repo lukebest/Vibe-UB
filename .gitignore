@@ -9,10 +9,11 @@ __pycache__/
 .coverage
 htmlcov/
 sim_build/
+coverage.dat
+results.xml
 *.vcd
 *.fst
 *.vvp
-results.xml
 tb/reports/regress/**
 tb/reports/cov_func/**
 tb/reports/cov_line/**

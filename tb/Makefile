@@ -56,7 +56,7 @@ cov-line:
 	mkdir -p $(TB_ROOT)/reports/cov_line
 	$(MAKE) SIM=verilator TEST_HOOKS=1 LINE_COV=1 sim
 	-verilator_coverage --annotate $(TB_ROOT)/reports/cov_line/selfcheck \
-		sim_build/coverage.dat || true
+		$(TB_ROOT)/coverage.dat sim_build/coverage.dat 2>/dev/null || true
 
 summarize:
 	python3 $(TB_ROOT)/scripts/summarize_tp.py

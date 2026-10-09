@@ -5,8 +5,7 @@ from __future__ import annotations
 import os
 import random
 
-from uvm.base.uvm_globals import uvm_info
-from uvm.base.uvm_object_globals import UVM_LOW
+from uvm import UVM_LOW, uvm_info
 
 
 def resolve_seed(explicit: int | None = None) -> int:

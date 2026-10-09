@@ -5,8 +5,7 @@ from __future__ import annotations
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, Timer
-from uvm.base.uvm_component import UVMComponent
-from uvm.macros import uvm_component_utils
+from uvm import UVMComponent, uvm_component_utils
 
 # F_CORE = 2.578125e9 / 32  (SPEC §4.1)
 CORE_CLK_PERIOD_PS = 12410  # 12.410 ns ≈ 80.58 MHz (target 80.57 MHz)

@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from cocotb.triggers import RisingEdge
-from uvm.base.uvm_globals import uvm_error
-from uvm.comps.uvm_agent import UVMAgent
-from uvm.comps.uvm_driver import UVMDriver
-from uvm.comps.uvm_monitor import UVMMonitor
-from uvm.macros import uvm_component_utils
-from uvm.tlm1.uvm_analysis_port import UVMAnalysisPort
+from uvm import (
+    UVMAgent,
+    UVMAnalysisPort,
+    UVMDriver,
+    UVMMonitor,
+    uvm_component_utils,
+    uvm_error,
+)
 
-from tb.uvm.items import CsrItem
+from tb.vibe_uvm.items import CsrItem
 
 
 class _CsrVif:
@@ -65,6 +67,8 @@ class CsrDriver(UVMDriver):
         if self.vif is None:
             return
         await self.idle()
+        if self.seq_item_port is None or getattr(self.seq_item_port, "m_imp", None) is None:
+            return
         while True:
             got = []
             await self.seq_item_port.get_next_item(got)

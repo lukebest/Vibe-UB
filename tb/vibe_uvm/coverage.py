@@ -8,7 +8,7 @@ from pathlib import Path
 from cocotb_coverage.coverage import CoverCross, CoverPoint, coverage_db
 
 
-@CoverPoint("tp.handshake.kind", xf=lambda kind: kind, bins=["vr", "vo", "csr", "hook"])
+@CoverPoint("tp.handshake.kind", xf=lambda kind, hooks: kind, bins=["vr", "vo", "csr", "hook"])
 @CoverPoint("tp.netlist.hooks", xf=lambda kind, hooks: hooks, bins=[0, 1])
 @CoverCross("tp.handshake_x_hooks", items=["tp.handshake.kind", "tp.netlist.hooks"])
 def sample_selfcheck(kind: str, hooks: int) -> None:

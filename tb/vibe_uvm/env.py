@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from uvm.base.uvm_env import UVMEnv
-from uvm.macros import uvm_component_utils
+from uvm import UVMEnv, uvm_component_utils
 
-from tb.uvm.agents.csr import CsrAgent
-from tb.uvm.agents.hook import HookAgent
-from tb.uvm.agents.valid_only import ValidOnlyAgent
-from tb.uvm.agents.valid_ready import ValidReadyAgent
-from tb.uvm.clk_rst import ClkRstAgent
-from tb.uvm.scoreboard import ScoreboardBase
+from tb.vibe_uvm.agents.csr import CsrAgent
+from tb.vibe_uvm.agents.hook import HookAgent
+from tb.vibe_uvm.agents.valid_only import ValidOnlyAgent
+from tb.vibe_uvm.agents.valid_ready import ValidReadyAgent
+from tb.vibe_uvm.clk_rst import ClkRstAgent
+from tb.vibe_uvm.scoreboard import ScoreboardBase
 
 
 class UbEnv(UVMEnv):

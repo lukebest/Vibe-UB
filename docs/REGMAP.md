@@ -1,0 +1,167 @@
+# Vibe-UB M1 寄存器表
+
+| 项 | 值 |
+| --- | --- |
+| 配套规格 | [SPEC.md](SPEC.md) |
+| 规范基线 | UB Base Spec Rev 2.0，附录 D **子集**（见 [SPEC_INDEX.md](SPEC_INDEX.md)） |
+| 总线 | [SPEC.md](SPEC.md) §3.2.3：32-bit 数据，16-bit 字节地址，4 字节对齐，`core_clk` |
+| 字节序 | 小端；位 0 为 LSB |
+
+**引用约定：** 不抄录规范字段说明、表或复位表。App. D / Init Block 只给 **节号**。实现对照官方规范展开位域。本表足够生成头文件与 Python 寄存器模型。
+
+**机器可读列：** `offset_hex,reg_name,field_name,hi,lo,access,reset_hex,description,spec_ref`
+
+- `offset_hex`：相对 M1 CSR 窗口的字节偏移。
+- `access`：`RW` / `RO` / `W1C` / `RW1S` / `WO`。
+- `reset_hex`：字段复位。`NA` = 本仓库不抄规范复位，实现时对照 `spec_ref`。
+- `spec_ref`：规范节号，或 `proj`（项目本地）。
+- 测试寄存器（`TEST_*` 窗口）仅当 `tb_test_mode=1` 且 `TEST_HOOKS=1` 时生效，除非行内另注。见 [SPEC.md](SPEC.md) §10.4、§11。
+
+---
+
+## 1. 窗口划分
+
+| 窗口 | 字节范围 | 内容 |
+| --- | --- | --- |
+| CTRL/STATUS | `0x0000`–`0x00FF` | 端口复位、启动训练、链路/DLL 状态、irq |
+| PARAM | `0x0100`–`0x01FF` | M1 / spec-max 参数读回 |
+| ERR | `0x0200`–`0x02FF` | 错误计数（W1C 或读清，见各行） |
+| TEST | `0x0300`–`0x03FF` | 测试控制：代替 deposit 的缩放/关闭位 |
+| APPD_PORT | `0x1000`–`0x1FFF` | App. D 端口子集镜像。相对偏移与规范 PORT0（基址 `0x0002_0000`）对齐，便于日后并入完整配置空间 |
+
+不实现：CFG0_BASIC 设备级、CFG1_*、CFG0_ROUTE_TABLE、热插拔 / 眼图 / QDLWS / 多 DATA_RATE 切片（M1 固定 Data Rate 0）。
+
+---
+
+## 2. 字段表
+
+未实现的保留位读 0、写忽略。
+
+### 2.1 CTRL / STATUS（`0x0000`）
+
+| offset_hex | reg_name | field_name | hi | lo | access | reset_hex | description | spec_ref |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0x0000 | CTRL | PORT_RST | 0 | 0 | RW1S | 0x0 | 写 1 请求端口复位（同步），自清。LMSM→Link_Idle，DLL→Disabled | proj; UB-DL §4.2 |
+| 0x0000 | CTRL | LMSM_START | 1 | 1 | RW | 0x0 | 软件启动 LMSM 离开 Link_Idle（实现「上层指示」） | proj; UB-PHY §3.4.3.1 |
+| 0x0000 | CTRL | IRQ_EN | 2 | 2 | RW | 0x0 | 顶层 `irq` 总使能 | proj |
+| 0x0000 | CTRL | RSVD | 31 | 3 | RO | 0x0 | 保留 | proj |
+| 0x0004 | STATUS | LINK_UP | 0 | 0 | RO | 0x0 | 与顶层 `link_up` 同 | proj; UB-PHY §3.4.3 |
+| 0x0004 | STATUS | LINK_READY | 1 | 1 | RO | 0x0 | 与顶层 `link_ready` 同 | proj; UB-PHY §3.4.3.7 |
+| 0x0004 | STATUS | DLL_STATUS_UP | 2 | 2 | RO | 0x0 | 可发 DLLDP | proj; UB-DL §4.2 |
+| 0x0004 | STATUS | LMSM_ST | 7 | 3 | RO | 0x0 | 同 `tb_obs_lmsm_st` 编码，见 SPEC §10.3 | proj; UB-PHY §3.4.3 |
+| 0x0004 | STATUS | DLL_SM_ST | 9 | 8 | RO | 0x0 | 同 `tb_obs_dll_sm_st` 编码，见 SPEC §10.3 | proj; UB-DL §4.2 |
+| 0x0004 | STATUS | RETRY_REQ_ST | 12 | 10 | RO | 0x0 | RETRY_REQ_SM 编码。0=NORMAL … 具体映射 **待定**（对照 §4.7.3.3） | proj; UB-DL §4.7.3.3 |
+| 0x0004 | STATUS | RETRY_ACK_ST | 14 | 13 | RO | 0x0 | RETRY_ACK_SM 编码 **待定** | proj; UB-DL §4.7.3.4 |
+| 0x0004 | STATUS | RSVD | 31 | 15 | RO | 0x0 | 保留 | proj |
+| 0x0008 | IRQ_STATUS | FEC_UNCORR | 0 | 0 | W1C | 0x0 | FEC 不可纠正曾发生 | proj; UB-PHY §3.2.3.5 |
+| 0x0008 | IRQ_STATUS | CRC_FAIL | 1 | 1 | W1C | 0x0 | BCRC 失败曾发生 | proj; UB-DL §4.7.2 |
+| 0x0008 | IRQ_STATUS | RETRY_ERR | 2 | 2 | W1C | 0x0 | 重传进 ERROR 或超过阈值 | proj; UB-DL §4.8.2 |
+| 0x0008 | IRQ_STATUS | CRD_PROTO | 3 | 3 | W1C | 0x0 | 信用协议类错误（溢出/归还超时） | proj; UB-DL §4.8.1 |
+| 0x0008 | IRQ_STATUS | TRAIN_FAIL | 4 | 4 | W1C | 0x0 | LMSM 回到 Link_Idle 且训练未成功 | proj; UB-PHY §3.4.3 |
+| 0x0008 | IRQ_STATUS | RSVD | 31 | 5 | RO | 0x0 | 保留 | proj |
+| 0x000C | IRQ_MASK | MASK | 4 | 0 | RW | 0x1F | 对应 IRQ_STATUS[4:0]，1=屏蔽。复位全屏蔽 | proj |
+| 0x000C | IRQ_MASK | RSVD | 31 | 5 | RO | 0x0 | 保留 | proj |
+| 0x0010 | PORT_CNA | CNA | 31 | 0 | RW | 0x0 | 本地 CNA。软件读/写；**无** `tb_*` 钩子 | proj; App. D.5.5 |
+
+`irq` 极性 **待定**（SPEC §3.2.6）。建议：`IRQ_EN=1` 且任一未屏蔽 STATUS 位置位则为 1。
+
+### 2.2 PARAM 读回（`0x0100`）
+
+只读，反映编译/协商后的生效值。复位列为 M1 已确认默认（船长确认），协商完成后 STATUS 类镜像以 App. D 节为准。
+
+| offset_hex | reg_name | field_name | hi | lo | access | reset_hex | description | spec_ref |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0x0100 | PARAM_PHY | PHY_MODE | 1 | 0 | RO | 0x2 | 1=Mode-1，2=Mode-2。M1=2 | proj; UB-PHY §3.1.2 |
+| 0x0100 | PARAM_PHY | DATA_RATE | 5 | 2 | RO | 0x0 | Data Rate 编号。M1=0（2.578125G NRZ） | proj; UB-PHY §3.1.2 |
+| 0x0100 | PARAM_PHY | NUM_LANES_TX | 9 | 6 | RO | 0x1 | 当前/静态 TX lane 数（1/2/4/8 的编码 **待定**；复位按 bring-up x1=1） | proj; UB-PHY §3.1.1 |
+| 0x0100 | PARAM_PHY | NUM_LANES_RX | 13 | 10 | RO | 0x1 | RX lane 数，默认等于 TX | proj |
+| 0x0100 | PARAM_PHY | PMA_W | 21 | 14 | RO | 0x20 | PMA–PCS 每 lane 位宽，M1=32 | proj |
+| 0x0100 | PARAM_PHY | ALLOW_ASYM | 22 | 22 | RO | 0x0 | 1=允许非对称。M1=0 | proj |
+| 0x0100 | PARAM_PHY | RSVD | 31 | 23 | RO | 0x0 | 保留 | proj |
+| 0x0104 | PARAM_FEC | FEC_MODE | 1 | 0 | RO | 0x0 | 0=T4，1=T2，2=bypass。编码与 `pcs_fec_mode` 对齐，**待定** | proj; UB-PHY §3.2.2.1 |
+| 0x0104 | PARAM_FEC | CODEC_NUM | 3 | 2 | RO | 0x1 | FEC 交织路数。默认建议 1，**待定** | proj; UB-PHY §3.2.2.3 |
+| 0x0104 | PARAM_FEC | RSVD | 31 | 4 | RO | 0x0 | 保留 | proj |
+| 0x0108 | PARAM_DLL | NUM_VL | 4 | 0 | RO | 0x2 | 使能 VL 数。M1=2 | proj; UB-DL §4.5.1 |
+| 0x0108 | PARAM_DLL | FLOW_CTRL_SIZE | 12 | 5 | RO | 0x1 | cell 对应 flit 数。M1=1 | proj; UB-DL §4.3.3.9 |
+| 0x0108 | PARAM_DLL | ACK_GRAIN | 20 | 13 | RO | 0x20 | credit/ACK 粒度（flit 或 cell，见协商）。M1=32 | proj; UB-DL §4.3.3.9、§4.6 |
+| 0x0108 | PARAM_DLL | CREDIT_EXCL | 21 | 21 | RO | 0x1 | 1=独占模式 | proj; UB-DL §4.6.1.2 |
+| 0x0108 | PARAM_DLL | RSVD | 31 | 22 | RO | 0x0 | 保留 | proj |
+| 0x010C | PARAM_RETRY | RETRY_BUF_DEPTH | 15 | 0 | RO | 0x0100 | 重传缓冲深度（flit）。M1=256 | proj; UB-DL §4.7.3.2、§4.3.3.9 |
+| 0x010C | PARAM_RETRY | NUM_RETRY_TH | 23 | 16 | RO | 0x0F | **草案** 15 | proj; UB-DL §4.7.3.3 |
+| 0x010C | PARAM_RETRY | NUM_PHY_REINIT_TH | 31 | 24 | RO | 0x04 | **草案** 4 | proj; UB-DL §4.7.3.3 |
+| 0x0110 | PARAM_CRD | INIT_CRD | 15 | 0 | RO | 0x0280 | 每 VL 初始信用（cell）。M1=640 | proj; UB-DL §4.6.1 |
+| 0x0110 | PARAM_CRD | CRD_BP_TH | 31 | 16 | RO | 0x0400 | `CRD_BP_THRESHOLD`，**草案** 1024 | proj; SPEC §10 |
+| 0x0114 | PARAM_INIT_FEATURE | FEATURE_ID | 15 | 0 | RO | 0x1 | Init Block 协议版本标识读回 | UB-DL §4.3.3.9 |
+| 0x0114 | PARAM_INIT_FEATURE | RXBUF_VL_SHARE | 16 | 16 | RO | 0x0 | 本端是否支持 VL 共享缓冲。M1 独占=0 | UB-DL §4.3.3.9 |
+| 0x0114 | PARAM_INIT_FEATURE | VL_ENABLE | 31 | 17 | RO | 0x3 | bit0→VL0。M1 低 2 bit=1。宽度不足 16 VL 时高位置 0，完整 16 bit 见 0x0118 | UB-DL §4.3.3.9、§4.5 |
+| 0x0118 | PARAM_INIT_VL | VL_ENABLE | 15 | 0 | RO | 0x0003 | 16-bit VL 使能，M1=VL0+VL1 | UB-DL §4.3.3.9 |
+| 0x0118 | PARAM_INIT_VL | RSVD | 31 | 16 | RO | 0x0 | 保留 | proj |
+
+Init Block 其余字段（`DATA_ACK_GRAIN_SIZE`、`CTRL_ACK_GRAIN_SIZE`、`DATA_CREDIT_GRAIN_SIZE`、`CTRL_CREDIT_GRAIN_SIZE`、`PACKET_MIN_INTERVAL`）的位打包 **不在本仓库展开**，实现按 UB-DL §4.3.3.9；协商后的只读镜像落在 App. D.6.2.3 窗口（§2.5）。
+
+### 2.3 ERR 计数（`0x0200`）
+
+计数饱和到全 1。写 1 清零对应计数（各寄存器的 `CLR` 位）或整寄存器 W1C，见行。
+
+| offset_hex | reg_name | field_name | hi | lo | access | reset_hex | description | spec_ref |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0x0200 | CNT_FEC_UNCORR | COUNT | 31 | 0 | RW | 0x0 | FEC 不可纠正次数。写任意值清零 | proj; UB-PHY §3.2.3.5 |
+| 0x0204 | CNT_CRC_FAIL | COUNT | 31 | 0 | RW | 0x0 | BCRC 失败次数。写清 | proj; UB-DL §4.7.2 |
+| 0x0208 | CNT_RETRY_REQ | COUNT | 31 | 0 | RW | 0x0 | 进入 RETRY_REQ_SM.REQ 次数。写清 | proj; UB-DL §4.7.3.3 |
+| 0x020C | CNT_RETRY_TO | COUNT | 31 | 0 | RW | 0x0 | Retry ACK 超时次数。写清 | proj; UB-DL §4.8.2 |
+| 0x0210 | CNT_CRD_OF | COUNT | 31 | 0 | RW | 0x0 | 信用/RX 缓冲溢出次数。写清 | proj; UB-DL §4.8.1 |
+| 0x0214 | CNT_CRD_TO | COUNT | 31 | 0 | RW | 0x0 | 信用归还超时次数。写清。`CRD_TO_DIS=1` 时不递增 | proj; UB-DL §4.8.1 |
+| 0x0218 | CNT_TRAIN_TO | COUNT | 31 | 0 | RW | 0x0 | LMSM 训练超时回到 Idle 次数。写清 | proj; UB-PHY §3.4.3 |
+| 0x021C | CNT_BAD_VL | COUNT | 31 | 0 | RW | 0x0 | 非法 `nw_tx_vl` 次数。写清 | proj |
+
+App. D PORT_CAP2 的 flit/LTB 错误计数切片（D.6.3）为规范镜像，不在本窗口重复抄字段。
+
+### 2.4 TEST（`0x0300`）— 代替内部 deposit
+
+**生效条件：** `TEST_HOOKS=1` **且** `tb_test_mode=1`（除非行内另注）。`tb_test_mode=0` 或 PRODUCT 网表（`TEST_HOOKS=0`，见 SPEC §11）下写忽略、读 0，功能路径不介入。
+
+复位 = 不介入。
+
+| offset_hex | reg_name | field_name | hi | lo | access | reset_hex | description | spec_ref |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0x0300 | LMSM_TMR_SCALE | SCALE | 7 | 0 | RW | 0x00 | 代替向 LMSM 定时器 deposit。0=实时。非 0 时加速超时计数，使训练沿真实路径到 Link_Active。编码 **待定**（建议每拍加 SCALE，SCALE=0 时加 1） | proj; SPEC §10.4 |
+| 0x0300 | LMSM_TMR_SCALE | RSVD | 31 | 8 | RO | 0x0 | 保留 | proj |
+| 0x0304 | CRD_TO_DIS | DIS | 0 | 0 | RW | 0x0 | 1=关闭 Crd_Ack 超时检错（不把 pending 钉 0）。0=检查使能 | proj; SPEC §10.4; UB-DL §4.8.1 |
+| 0x0304 | CRD_TO_DIS | RSVD | 31 | 1 | RO | 0x0 | 保留 | proj |
+| 0x0308 | PCS_TX_TEST | AM_IVL_SCALE | 7 | 0 | RW | 0x00 | 代替向 AM 符号计数器 deposit。缩放 PCS TX AMCTL 间隔。0=规范间隔。非 0 编码 **待定**（建议与 LMSM_TMR_SCALE 相同） | proj; SPEC §10.4; UB-PHY §3.2.4 |
+| 0x0308 | PCS_TX_TEST | RSVD | 31 | 8 | RO | 0x0 | 保留 | proj |
+| 0x030C | TEST_VL_SEL | VL | 3 | 0 | RW | 0x0 | `tb_inj_crd_cells` / `tb_obs_crd_*` 对应的 VL。默认 0。多 VL 选择 **待定**（见 SPEC §10.2） | proj |
+| 0x030C | TEST_VL_SEL | RSVD | 31 | 4 | RO | 0x0 | 保留 | proj |
+
+不在本窗口提供：FSM 状态 force、叶子内部（CRC/FEC/deskew/缓冲）观察。见 SPEC §10.5。
+
+`TEST_HOOKS=0` 的 PRODUCT 网表中，本窗口译码可整段绑成读 0 / 写忽略，以便与 HOOKS 网表在 `tb_test_mode=0` 下形式等价（SPEC §11 (d)）。
+
+### 2.5 App. D 端口镜像（`0x1000`）
+
+相对 `0x1000` 的偏移 = 规范 PORT0 相对 `0x0002_0000` 的偏移。字段级位定义 **不在本仓库展开**；一行表示一个 32-bit 软件窗口或切片基址。生成器可按节号对照规范展开。
+
+| offset_hex | reg_name | field_name | hi | lo | access | reset_hex | description | spec_ref |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 0x1000 | APPD_PORT_BASIC | WINDOW | 31 | 0 | MIX | NA | CFG0_PORT_BASIC 切片窗口（含 PORT_CAP Bitmap、Port Info、Port CNA、Port Rst）。CNA 亦映射到 `0x0010` | App. D.5、D.5.1–D.5.6 |
+| 0x1100 | APPD_LINK_CAP | WINDOW | 31 | 0 | MIX | NA | PORT_CAP1_LINK：能力 / 配置 / 状态（含协商后的粒度与 DLL SM 状态） | App. D.6.2、D.6.2.1–D.6.2.3 |
+| 0x1200 | APPD_LINK_LOG | WINDOW | 31 | 0 | MIX | NA | PORT_CAP2_LINK_LOG：flit/LTB 错误日志与计数 | App. D.6.3 |
+| 0x2400 | APPD_LMSM_ST | WINDOW | 31 | 0 | MIX | NA | PORT_CAP20_LMSM_ST：LMSM 能力/控制/状态 | App. D.6.21 |
+| 0x2500 | APPD_PORT_ERR | WINDOW | 31 | 0 | MIX | NA | PORT_CAP21_PORT_ERR_RECORD：端口可纠/不可纠错误 | App. D.6.22 |
+
+`MIX` = 切片内既有 RO 也有 RW/W1C，以对应节为准。`NA` 复位：对照该节，不在此抄。
+
+M1 不实现的 PORT_CAP 切片（DATA_RATE2–9、EYE_MONITOR、QDLWS 等）在 Bitmap 中报不存在。DATA_RATE1（D.6.5）是否只读反映 Data Rate 0：**待定**（建议最小只读镜像，不实现改速控制）。
+
+---
+
+## 3. 生成约定
+
+头文件 / Python 模型应按 §2 表逐行生成：
+
+- 同一 `offset_hex` + `reg_name` 合成一个 32-bit 寄存器。
+- 字段拼进该字；未列的位为保留，读 0。
+- `WINDOW` 行不生成字段，只生成基址常量与 `spec_ref` 注释，提示从官方 App. D 展开。
+- `TEST_*` 寄存器在 PRODUCT 网表绑定为无副作用（§2.4、SPEC §11）。
+
+访问类型缩写供生成器使用，勿改拼写：`RW` `RO` `W1C` `RW1S` `WO` `MIX`。

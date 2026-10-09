@@ -395,7 +395,8 @@ FEC / BCRC 错由 D3 PMA 模型改符号，无对应钩子。
 | TP-UNIT-PCS-039 | SPEC §3.3.4 | `fec_mode_ctrl[2:0]` **取代** `pcs_fec_mode`；覆盖合法取值（对照 UB-PHY §3.4.1.1，含 T=4 / T=2 / bypass） | 扫合法编码 | PCS 数据通路 FEC 只跟此字段；无 `pcs_fec_mode` 口 | cp_fec_ctrl | M1 | 计划 |
 | TP-UNIT-PCS-040 | SPEC §3.3.4 | RX：`pcs2lmsm_lane_id[7:0]` 与其它 `pcs2lmsm_*` 仅在 `pcs2lmsm_ltb_valid` 单拍（CRC 通过）有效 | 对端出 DLTB/CLTB | CRC 失败无 valid；TX 无 `lmsm2pcs_lane_id` | cp_ltb_rx | M1 | 计划 |
 | TP-UNIT-PCS-041 | SPEC §3.3.4 | **ASCEND** 下 `lmsm2pcs_lane_id_base[7:0]` 与 `lmsm2pcs_lane_id_map[8*NUM_LANES_TX-1:0]`：字节 i 给物理 lane i；`base` 等于逻辑 Tx_0 那一字节 | mode=1；扫 map 递增 / 单 lane NULL / base≠map[Tx_0] | lane i 用 map 字节 i；base 仅对照。PHYS/NULL 不走本 TP | cp_lid_map | M1 | 计划 |
-| TP-UNIT-PCS-042 | SPEC §3.3.4 | `lmsm2pcs_lane_id_mode=3`（2-bit 剩余编码） | 置 3 | **SPEC 缺口**：§3.3.4 只定义 0/1/2，未写 mode=3。本 TP 记账，不选边 | cp_lid_rsvd | M1 | **待定**（SPEC 缺口） |
+| TP-UNIT-PCS-042 | SPEC §3.3.4 | PCS leaf：端口驱动 `lmsm2pcs_lane_id_mode=3`（`RESERVED`）。与 `=2` **同一解码分支**，按 NULL（mode=2 或 3）处理；无不可达分支 | leaf TB 分别打 2 与 3 | Lane_ID/CRC 与 mode=2 相同。**无 waiver** | cp_lid_3 | M1 | 计划 |
+| TP-UNIT-PCS-043 | SPEC §3.3.4 | LMSM **永不驱动** `lane_id_mode=3`。TB 断言：训练全过程 `lmsm2pcs_lane_id_mode != 3` | 完整 LMSM 路径（真实转移） | 断言永不触发。不 force LMSM 出 3 | cp_lid_no3 | M1 | 计划 |
 
 ### 8.2 单元级 — DLL
 
@@ -736,20 +737,20 @@ Xia 已写死：存在两份网表，不得混用验收口径。
 
 | 层 | 总行 | M1（D12 分母） | 后续 | 推迟 | 一期不做 |
 | --- | --- | --- | --- | --- | --- |
-| 单元 PCS/LMSM | 42 | 37 | 3 | 0 | 2（皆 D4） |
+| 单元 PCS/LMSM | 43 | 38 | 3 | 0 | 2（皆 D4） |
 | 单元 DLL | 25 | 23 | 0 | 0 | 2（皆 D4） |
 | 单元 CSR/CDC/IF/PMA/HOOK | 49 | 44 | 0 | 5 | 0 |
 | 子系统 PCS | 20 | 15 | 0 | 0 | 5（皆 D4） |
 | 子系统 DLL | 21 | 20 | 1 | 0 | 0 |
 | 顶层 | 21 | 18 | 1 | 1 | 1（D11） |
 | 推迟占位 NW/TP/TA/钩子 | 7 | 0 | 0 | 7 | 0 |
-| **合计** | **185** | **157** | **5** | **13** | **10** |
+| **合计** | **186** | **158** | **5** | **13** | **10** |
 
-157 + 5 + 13 + 10 = 185。
+158 + 5 + 13 + 10 = 186。
 
-M1 分母拆分：计划 109 + 计划（waiver）2 + RTL未就绪 28 + 待定 18 = 157。未实现的 RTL未就绪 / 待定 记 SKIP，不算 PASS，也不算功能覆盖达成。
+M1 分母拆分：计划 111 + 计划（waiver）2 + RTL未就绪 28 + 待定 17 = 158。未实现的 RTL未就绪 / 待定 记 SKIP，不算 PASS，也不算功能覆盖达成。
 
-待定 18 条：等 SPEC 澄清 1（CSR-014）+ SPEC 缺口 1（PCS-042 mode=3）+ SPEC §13 映射 15 + unpack drain 1（PCS-026）。
+待定 17 条：等 SPEC 澄清 1（CSR-014）+ SPEC §13 映射 15 + unpack drain 1（PCS-026）。`lane_id_mode=3` 已定，不再列缺口。
 
 ---
 
@@ -790,7 +791,7 @@ M1 分母拆分：计划 109 + 计划（waiver）2 + RTL未就绪 28 + 待定 18
 
 ### 14.2 已关闭（含 Q4）
 
-Q4 已关：TX Lane_ID 口（`lmsm2pcs_lane_id_mode` / `base` / `map`）、LMB 起始锁存全部 `lmsm2pcs_*`、`ltb_valid` 无多拍保持（SPEC §3.3.4、§5）。§13.2 **不再**列 TX `lane_id` 改写或 valid 对齐拍数。对应 TP 为计划。
+Q4 已关：TX Lane_ID 口（`lmsm2pcs_lane_id_mode` / `base` / `map`）、LMB 起始锁存全部 `lmsm2pcs_*`、`ltb_valid` 无多拍保持（SPEC §3.3.4、§5）。`lane_id_mode=3` 为 `RESERVED`（SPEC §3.3.4）：LMSM 永不驱动（TB 断言 PCS-043）；PCS 与 2 同分支按 NULL（PCS-042 leaf 端口打 3，结果同 2）。无不可达分支，**无 waiver**，不再列 SPEC 缺口。§13.2 **不再**列 TX `lane_id` 改写或 valid 对齐拍数。
 
 另已关：清零、APPD 址、`PORT_RST`、TEST 窗、信用钩子每拍覆盖、`ub_rst_sync` 2 级、`CRD_UF` waiver、valid-only RX。
 
@@ -801,7 +802,6 @@ Q4 已关：TX Lane_ID 口（`lmsm2pcs_lane_id_mode` / `base` / `map`）、LMB �
 | X1 | SPEC §6.1 vs REGMAP `CTRL.LMSM_START` | SPEC 写「见 REGMAP `LMSM_CTRL.START`」，REGMAP 字段名是 `CTRL.LMSM_START` | TP-UNIT-CSR-014、TP-UNIT-PCS-021 |
 | X2 | REGMAP `STATUS.RETRY_REQ_ST` / `RETRY_ACK_ST` | 编码标待定 | TP-UNIT-CSR-022 |
 | X3 | REGMAP `PARAM_PHY.NUM_LANES_*` | 1/2/4/8 的编码待定 | TP-UNIT-CSR-015、TP-UNIT-PMA-005 |
-| X4 | SPEC §3.3.4 | `lmsm2pcs_lane_id_mode[1:0]=3` **未定义**（只写 0=PHYS / 1=ASCEND / 2=NULL） | TP-UNIT-PCS-042 |
 
 ### 14.4 工程项（不阻规范对齐）
 
@@ -836,7 +836,7 @@ Xia 标准：每条 SPEC **功能需求**至少一条 TP。下表按 SPEC 章节
 | §3.3.1 | DLL→PCS TX valid/ready；sop/eop 待定 | SUB-PCS-001、SUB-PCS-017 |
 | §3.3.2 | PCS→DLL RX valid-only；**无** `pcs2dll_ready`；`fec_ok`/`uncorr` 对齐 | SUB-PCS-002/005/018/020、IF-005 |
 | §3.3.3 | LMSM↔DLL `link_*` 与重训电平握手 | SUB-PCS-011/019、SUB-DLL-012 |
-| §3.3.4 / §5 | LTB 字段口、`fec_mode_ctrl`、pattern 0–3、Lane_ID PHYS/ASCEND/NULL、ASCEND base+map、中途改任意 `lmsm2pcs_*`、RX `pcs2lmsm_lane_id[7:0]` | PCS-030–042、SUB-PCS-006/009/010 |
+| §3.3.4 / §5 | LTB 字段口、`fec_mode_ctrl`、pattern 0–3、Lane_ID PHYS/ASCEND/NULL、ASCEND base+map、3=`RESERVED`（PCS 与 2 同 NULL 分支、无不可达分支、无 waiver）、LMSM 永不驱动 3（TB 断言）、中途改任意 `lmsm2pcs_*`、RX `pcs2lmsm_lane_id[7:0]` | PCS-030–043、SUB-PCS-006/009/010 |
 | §3.3.5 | CSR→各块电平、无跨时钟脉冲 | CSR-024、CLK-001 |
 | §4.1 | 单时钟 80.57 MHz，`USE_PMA_CLK=0` | CLK-001、TOP-019、TOP-009 |
 | §4.2 | `rst_n` 异步置位同步释放；`ub_rst_sync` 2 级 + `ub_pyc_rst_adapt` | RST-001/002、CDC-001、TOP-008 |

@@ -1,4 +1,7 @@
 # Regenerate and lint ub_lmsm (PRODUCT + HOOKS).
+# Generated location follows SPEC §2.2 / CODING_STYLE §5: rtl/lmsm/
+#   PRODUCT → rtl/lmsm/ub_lmsm.v
+#   HOOKS   → rtl/lmsm/ub_lmsm_hooks.v
 #   make -C rtl/lmsm
 #   make -C rtl/lmsm lint
 #   make -C rtl/lmsm yosys
@@ -7,8 +10,8 @@ PYTHON ?= python3
 VERILATOR ?= verilator
 YOSYS ?= yosys
 
-PRODUCT = product/ub_lmsm.v
-HOOKS   = hooks/ub_lmsm.v
+PRODUCT = ub_lmsm.v
+HOOKS   = ub_lmsm_hooks.v
 
 .PHONY: all gen lint yosys clean
 
@@ -27,3 +30,4 @@ yosys: gen
 
 clean:
 	rm -f $(PRODUCT) $(HOOKS)
+	rm -rf product hooks

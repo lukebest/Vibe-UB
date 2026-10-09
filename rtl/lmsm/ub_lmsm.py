@@ -9,8 +9,14 @@ Regenerate both netlists:
 
     python3 rtl/lmsm/ub_lmsm.py
 
-PRODUCT (TEST_HOOKS=0) → ``rtl/lmsm/product/ub_lmsm.v``
-HOOKS   (TEST_HOOKS=1) → ``rtl/lmsm/hooks/ub_lmsm.v``
+SPEC §2.2 / CODING_STYLE §5 place generated RTL in ``rtl/lmsm/``
+(not PR #5 ``rtl/gen/``, which exists to avoid overwriting D10
+legacy under ``rtl/pcs`` / ``rtl/dll``). PRODUCT and HOOKS:
+
+    PRODUCT (TEST_HOOKS=0) → ``rtl/lmsm/ub_lmsm.v``
+    HOOKS   (TEST_HOOKS=1) → ``rtl/lmsm/ub_lmsm_hooks.v``
+
+Module name ``ub_lmsm`` = ``ub_<层>_<功能>`` (CODING_STYLE §5 / SPEC §2.2).
 
 Mapped to SPEC §2.5 / §3.2.5 / §3.3.3 / §3.3.4 / §4.2 / §6.1 / §9 / §10.
 Does not compute LMB CRC (PCS does, §3.3.4). Does not generate the
@@ -26,40 +32,39 @@ from pathlib import Path
 # Parameters (SPEC §9). Identifiers match the spec table.
 # ---------------------------------------------------------------------------
 
-NUM_LANES_TX = 1
-NUM_LANES_RX = 1
-NLANE = NUM_LANES_RX
+NUM_LANES_TX = 1  # SPEC §9 / REGMAP PARAM_PHY: binary, legal 1/2/4/8, reset 1
+NUM_LANES_RX = 1  # SPEC §9: default equals TX; same legal set
+NLANE = NUM_LANES_RX  # SPEC §9 / §10 hook width
 
-# Implementation-defined timeouts in core_clk cycles (≈80.57 MHz).
-# SPEC §13.2: values that the official text calls "implementation related"
-# are not copied here. Xia to confirm. Scaled by LMSM_TMR_SCALE (§10.4).
+# Implementation-defined timeouts in core_clk cycles (F_CORE SPEC §4.1 / §9).
+# SPEC §13.2 / §7: official "implementation related" µs not in-repo. Stubs.
 TMR_W = 32
-P_TMR_PROBE_WAIT = 806  # ~10 us @ 80.57 MHz; stub (§13.2)
-P_TMR_PROBE_CONFIRM = 806
-P_TMR_RXEQ = 80570  # ~1 ms stub; EQ/RXEQ empty-spin (§13.2)
-P_TMR_DISC_ACTIVE = 1933680  # ~24 ms stub
-P_TMR_DISC_CONFIRM = 3867360  # ~48 ms stub
-P_TMR_CFG = 161140  # ~2 ms stub
-P_TMR_NULL = 161140
-P_TMR_RETRAIN_ACTIVE = 1933680
-P_TMR_RETRAIN_CONFIRM = 3867360
-P_TMR_CHG_SPD = 80570
-P_TMR_EQ = 5156480  # ~64 ms stub
-P_NULL_BLK_NEED = 8
-P_MAX_RETRAIN = 4  # draft NUM_PHY_REINIT_THRESHOLD (§13.1)
-P_PROBE_MAX_RETRY = 8
+P_TMR_PROBE_WAIT = 806  # stub ~10 us @ F_CORE; SPEC §13.2
+P_TMR_PROBE_CONFIRM = 806  # stub; SPEC §13.2
+P_TMR_RXEQ = 80570  # stub ~1 ms; EQ/RXEQ empty-spin SPEC §6.1 / §13.2
+P_TMR_DISC_ACTIVE = 1933680  # stub ~24 ms; SPEC §13.2
+P_TMR_DISC_CONFIRM = 3867360  # stub ~48 ms; SPEC §13.2
+P_TMR_CFG = 161140  # stub ~2 ms; SPEC §13.2
+P_TMR_NULL = 161140  # stub; SPEC §6.1 Send_NullBlock / §13.2
+P_TMR_RETRAIN_ACTIVE = 1933680  # stub; SPEC §13.2
+P_TMR_RETRAIN_CONFIRM = 3867360  # stub; SPEC §13.2
+P_TMR_CHG_SPD = 80570  # stub; SPEC §6.1 Change_Speed / §13.2
+P_TMR_EQ = 5156480  # stub ~64 ms; SPEC §6.1 / §13.2
+P_NULL_BLK_NEED = 8  # stub cycle count; SPEC §6.1 「连续空块」 (no LMB tick)
+P_MAX_RETRAIN = 4  # SPEC §9 NUM_PHY_REINIT_THRESHOLD (draft §13.1)
+P_PROBE_MAX_RETRY = 8  # stub; SPEC §13.2 / §13.3 Probe
 
-# LTB Type encodings are NOT in this repo (UB-PHY §3.4.1.1). Stubs.
+# LTB Type encodings are NOT in this repo (UB-PHY §3.4.1.1 / SPEC §3.3.4). Stubs.
 P_LTB_TYPE_DLTB = 1
 P_LTB_TYPE_CLTB = 2
 P_LTB_TYPE_RLTB = 3
 P_LTB_TYPE_ELTB = 4
 P_LTB_TYPE_NULL = 0
 
-# Lane_ID NULL sentinel is in §3.4.1.1 (not copied). Stub.
+# Lane_ID NULL sentinel is in UB-PHY §3.4.1.1 (not copied). Stub.
 P_LANE_ID_NULL = 0xFF
 
-# data_rate_support_2 Change_Speed bit position: unknown (§3.4.1.1).
+# data_rate_support_2 Change_Speed bit: unknown (SPEC §3.3.4 / UB-PHY §3.4.1.1).
 P_CHG_SPD_BIT = 0
 
 # Top-level LMSM encoding (SPEC §10.3). tb_obs_lmsm_st is this only.
@@ -92,8 +97,8 @@ LANE_ID_NULL = 2
 # LANE_ID_RESERVED = 3  — LMSM must never drive this.
 
 HERE = Path(__file__).resolve().parent
-PRODUCT_V = HERE / "product" / "ub_lmsm.v"
-HOOKS_V = HERE / "hooks" / "ub_lmsm.v"
+PRODUCT_V = HERE / "ub_lmsm.v"
+HOOKS_V = HERE / "ub_lmsm_hooks.v"
 
 
 def _header(test_hooks: int) -> str:
@@ -119,36 +124,37 @@ def emit_verilog(test_hooks: bool) -> str:
         lines.append(s)
 
     w("module ub_lmsm #(")
-    w(f"  parameter NUM_LANES_TX = {ntx},")
-    w(f"  parameter NUM_LANES_RX = {nrx},")
-    w(f"  parameter TMR_W        = {TMR_W},")
-    w(f"  parameter P_TMR_PROBE_WAIT        = {P_TMR_PROBE_WAIT},")
-    w(f"  parameter P_TMR_PROBE_CONFIRM     = {P_TMR_PROBE_CONFIRM},")
-    w(f"  parameter P_TMR_RXEQ              = {P_TMR_RXEQ},")
-    w(f"  parameter P_TMR_DISC_ACTIVE       = {P_TMR_DISC_ACTIVE},")
-    w(f"  parameter P_TMR_DISC_CONFIRM      = {P_TMR_DISC_CONFIRM},")
-    w(f"  parameter P_TMR_CFG               = {P_TMR_CFG},")
-    w(f"  parameter P_TMR_NULL              = {P_TMR_NULL},")
-    w(f"  parameter P_TMR_RETRAIN_ACTIVE    = {P_TMR_RETRAIN_ACTIVE},")
-    w(f"  parameter P_TMR_RETRAIN_CONFIRM   = {P_TMR_RETRAIN_CONFIRM},")
-    w(f"  parameter P_TMR_CHG_SPD           = {P_TMR_CHG_SPD},")
-    w(f"  parameter P_TMR_EQ                = {P_TMR_EQ},")
-    w(f"  parameter P_NULL_BLK_NEED         = {P_NULL_BLK_NEED},")
-    w(f"  parameter P_MAX_RETRAIN           = {P_MAX_RETRAIN},")
-    w(f"  parameter P_PROBE_MAX_RETRY       = {P_PROBE_MAX_RETRY},")
-    w(f"  parameter P_LTB_TYPE_DLTB         = {P_LTB_TYPE_DLTB},")
-    w(f"  parameter P_LTB_TYPE_CLTB         = {P_LTB_TYPE_CLTB},")
-    w(f"  parameter P_LTB_TYPE_RLTB         = {P_LTB_TYPE_RLTB},")
-    w(f"  parameter P_LTB_TYPE_ELTB         = {P_LTB_TYPE_ELTB},")
-    w(f"  parameter P_LTB_TYPE_NULL         = {P_LTB_TYPE_NULL},")
-    w(f"  parameter P_LANE_ID_NULL          = {P_LANE_ID_NULL},")
-    w(f"  parameter P_CHG_SPD_BIT           = {P_CHG_SPD_BIT}")
+    w(f"  parameter NUM_LANES_TX              = {ntx},      // SPEC §9 / REGMAP PARAM_PHY; binary 1/2/4/8")
+    w(f"  parameter NUM_LANES_RX              = {nrx},      // SPEC §9; default equals TX")
+    w(f"  parameter TMR_W                     = {TMR_W},     // core_clk counter width; F_CORE SPEC §4.1 / §9")
+    w(f"  parameter P_TMR_PROBE_WAIT          = {P_TMR_PROBE_WAIT},    // stub cycles; SPEC §13.2")
+    w(f"  parameter P_TMR_PROBE_CONFIRM       = {P_TMR_PROBE_CONFIRM},    // stub; SPEC §13.2")
+    w(f"  parameter P_TMR_RXEQ                = {P_TMR_RXEQ},  // stub; SPEC §6.1 / §13.2 EQ empty-spin")
+    w(f"  parameter P_TMR_DISC_ACTIVE         = {P_TMR_DISC_ACTIVE}, // stub; SPEC §13.2")
+    w(f"  parameter P_TMR_DISC_CONFIRM        = {P_TMR_DISC_CONFIRM}, // stub; SPEC §13.2")
+    w(f"  parameter P_TMR_CFG                 = {P_TMR_CFG},  // stub; SPEC §13.2")
+    w(f"  parameter P_TMR_NULL                = {P_TMR_NULL},  // stub; SPEC §6.1 Send_NullBlock / §13.2")
+    w(f"  parameter P_TMR_RETRAIN_ACTIVE      = {P_TMR_RETRAIN_ACTIVE}, // stub; SPEC §13.2")
+    w(f"  parameter P_TMR_RETRAIN_CONFIRM     = {P_TMR_RETRAIN_CONFIRM}, // stub; SPEC §13.2")
+    w(f"  parameter P_TMR_CHG_SPD             = {P_TMR_CHG_SPD},  // stub; SPEC §6.1 Change_Speed / §13.2")
+    w(f"  parameter P_TMR_EQ                  = {P_TMR_EQ}, // stub; SPEC §6.1 / §13.2")
+    w(f"  parameter P_NULL_BLK_NEED           = {P_NULL_BLK_NEED},      // stub cycles; SPEC §6.1 「连续空块」")
+    w(f"  parameter P_MAX_RETRAIN             = {P_MAX_RETRAIN},      // SPEC §9 NUM_PHY_REINIT_THRESHOLD (draft §13.1)")
+    w(f"  parameter P_PROBE_MAX_RETRY         = {P_PROBE_MAX_RETRY},      // stub; SPEC §13.2 / §13.3 Probe")
+    w(f"  parameter P_LTB_TYPE_DLTB           = {P_LTB_TYPE_DLTB},      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4")
+    w(f"  parameter P_LTB_TYPE_CLTB           = {P_LTB_TYPE_CLTB},      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4")
+    w(f"  parameter P_LTB_TYPE_RLTB           = {P_LTB_TYPE_RLTB},      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4")
+    w(f"  parameter P_LTB_TYPE_ELTB           = {P_LTB_TYPE_ELTB},      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4")
+    w(f"  parameter P_LTB_TYPE_NULL           = {P_LTB_TYPE_NULL},      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4")
+    w(f"  parameter P_LANE_ID_NULL            = {P_LANE_ID_NULL},   // stub; UB-PHY §3.4.1.1 NULL Lane_ID")
+    w(f"  parameter P_CHG_SPD_BIT             = {P_CHG_SPD_BIT}       // stub; SPEC §3.3.4 / UB-PHY §3.4.1.1")
     w(") (")
     w("  input  wire                    core_clk,")
     w("  input  wire                    rst_pyc,")
     w("  input  wire                    port_rst,")
     w()
     w("  // CSR / App. D advertisement (SPEC §3.3.5). Level, no handshake.")
+    w("  // csr_lmsm_start = CTRL.LMSM_START (REGMAP 0x0000 bit1; SPEC §6.1).")
     w("  input  wire                    csr_lmsm_start,")
     w("  input  wire                    csr_bypass_probe,")
     w("  input  wire                    cfg_fixed_rate_rxeq,")
@@ -463,6 +469,10 @@ def emit_verilog(test_hooks: bool) -> str:
     w("    to_idle_timeout = 1'b0;")
     w("    case (st)")
     w("      ST_LINK_IDLE: begin")
+    w("        // SPEC §6.1 mermaid + CTRL.LMSM_START (0x0000 bit1):")
+    w("        //   !bypass & phy_ready & start → Probe")
+    w("        //   bypass & fixed-rate & start → RXEQ_Optimize")
+    w("        //   bypass & !fixed-rate & start → Discovery")
     w("        sub_n = SUB_0;")
     w("        if (csr_lmsm_start & pma_phy_ready) begin")
     w("          if (!csr_bypass_probe) begin")
@@ -728,10 +738,18 @@ def emit_verilog(test_hooks: bool) -> str:
     w("  assign train_fail   = train_fail_q;")
     w("  assign train_to_inc = train_to_q;")
     w()
-    w("  // PMA sideband. Width encoding is SPEC §13.2 待定 — raw lane count.")
-    w("  assign pma_data_rate_sel   = 4'd0;")
-    w("  assign pma_tx_width        = NUM_LANES_TX[3:0];")
-    w("  assign pma_rx_width        = NUM_LANES_RX[3:0];")
+    w("  // PMA sideband. pma_*_width encoding table still 待定 (SPEC §3.2.5 / §13.2).")
+    w("  // CSR PARAM_PHY.NUM_LANES_* is now binary 1/2/4/8 (SPEC §9 / REGMAP);")
+    w("  // drive the same legal set here so reserved 0/3/5/6/7 are never produced.")
+    w("  assign pma_data_rate_sel   = 4'd0; // SPEC §9 DATA_RATE = 0")
+    w("  assign pma_tx_width =")
+    w("      (NUM_LANES_TX == 8) ? 4'd8 :")
+    w("      (NUM_LANES_TX == 4) ? 4'd4 :")
+    w("      (NUM_LANES_TX == 2) ? 4'd2 : 4'd1;")
+    w("  assign pma_rx_width =")
+    w("      (NUM_LANES_RX == 8) ? 4'd8 :")
+    w("      (NUM_LANES_RX == 4) ? 4'd4 :")
+    w("      (NUM_LANES_RX == 2) ? 4'd2 : 4'd1;")
     w("  assign pma_lane_reverse_tx = cfg_lane_reverse_tx;")
     w("  assign pma_lane_reverse_rx = cfg_lane_reverse_rx;")
     w("  assign pma_polarity_inv    = cfg_polarity_inv;")

@@ -6,36 +6,37 @@
 // PORT_RST 16-cycle pulse: ub_csr; this leaf sees port_rst as sync clear.
 
 module ub_lmsm #(
-  parameter NUM_LANES_TX = 1,
-  parameter NUM_LANES_RX = 1,
-  parameter TMR_W        = 32,
-  parameter P_TMR_PROBE_WAIT        = 806,
-  parameter P_TMR_PROBE_CONFIRM     = 806,
-  parameter P_TMR_RXEQ              = 80570,
-  parameter P_TMR_DISC_ACTIVE       = 1933680,
-  parameter P_TMR_DISC_CONFIRM      = 3867360,
-  parameter P_TMR_CFG               = 161140,
-  parameter P_TMR_NULL              = 161140,
-  parameter P_TMR_RETRAIN_ACTIVE    = 1933680,
-  parameter P_TMR_RETRAIN_CONFIRM   = 3867360,
-  parameter P_TMR_CHG_SPD           = 80570,
-  parameter P_TMR_EQ                = 5156480,
-  parameter P_NULL_BLK_NEED         = 8,
-  parameter P_MAX_RETRAIN           = 4,
-  parameter P_PROBE_MAX_RETRY       = 8,
-  parameter P_LTB_TYPE_DLTB         = 1,
-  parameter P_LTB_TYPE_CLTB         = 2,
-  parameter P_LTB_TYPE_RLTB         = 3,
-  parameter P_LTB_TYPE_ELTB         = 4,
-  parameter P_LTB_TYPE_NULL         = 0,
-  parameter P_LANE_ID_NULL          = 255,
-  parameter P_CHG_SPD_BIT           = 0
+  parameter NUM_LANES_TX              = 1,      // SPEC §9 / REGMAP PARAM_PHY; binary 1/2/4/8
+  parameter NUM_LANES_RX              = 1,      // SPEC §9; default equals TX
+  parameter TMR_W                     = 32,     // core_clk counter width; F_CORE SPEC §4.1 / §9
+  parameter P_TMR_PROBE_WAIT          = 806,    // stub cycles; SPEC §13.2
+  parameter P_TMR_PROBE_CONFIRM       = 806,    // stub; SPEC §13.2
+  parameter P_TMR_RXEQ                = 80570,  // stub; SPEC §6.1 / §13.2 EQ empty-spin
+  parameter P_TMR_DISC_ACTIVE         = 1933680, // stub; SPEC §13.2
+  parameter P_TMR_DISC_CONFIRM        = 3867360, // stub; SPEC §13.2
+  parameter P_TMR_CFG                 = 161140,  // stub; SPEC §13.2
+  parameter P_TMR_NULL                = 161140,  // stub; SPEC §6.1 Send_NullBlock / §13.2
+  parameter P_TMR_RETRAIN_ACTIVE      = 1933680, // stub; SPEC §13.2
+  parameter P_TMR_RETRAIN_CONFIRM     = 3867360, // stub; SPEC §13.2
+  parameter P_TMR_CHG_SPD             = 80570,  // stub; SPEC §6.1 Change_Speed / §13.2
+  parameter P_TMR_EQ                  = 5156480, // stub; SPEC §6.1 / §13.2
+  parameter P_NULL_BLK_NEED           = 8,      // stub cycles; SPEC §6.1 「连续空块」
+  parameter P_MAX_RETRAIN             = 4,      // SPEC §9 NUM_PHY_REINIT_THRESHOLD (draft §13.1)
+  parameter P_PROBE_MAX_RETRY         = 8,      // stub; SPEC §13.2 / §13.3 Probe
+  parameter P_LTB_TYPE_DLTB           = 1,      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4
+  parameter P_LTB_TYPE_CLTB           = 2,      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4
+  parameter P_LTB_TYPE_RLTB           = 3,      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4
+  parameter P_LTB_TYPE_ELTB           = 4,      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4
+  parameter P_LTB_TYPE_NULL           = 0,      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4
+  parameter P_LANE_ID_NULL            = 255,   // stub; UB-PHY §3.4.1.1 NULL Lane_ID
+  parameter P_CHG_SPD_BIT             = 0       // stub; SPEC §3.3.4 / UB-PHY §3.4.1.1
 ) (
   input  wire                    core_clk,
   input  wire                    rst_pyc,
   input  wire                    port_rst,
 
   // CSR / App. D advertisement (SPEC §3.3.5). Level, no handshake.
+  // csr_lmsm_start = CTRL.LMSM_START (REGMAP 0x0000 bit1; SPEC §6.1).
   input  wire                    csr_lmsm_start,
   input  wire                    csr_bypass_probe,
   input  wire                    cfg_fixed_rate_rxeq,
@@ -330,6 +331,10 @@ module ub_lmsm #(
     to_idle_timeout = 1'b0;
     case (st)
       ST_LINK_IDLE: begin
+        // SPEC §6.1 mermaid + CTRL.LMSM_START (0x0000 bit1):
+        //   !bypass & phy_ready & start → Probe
+        //   bypass & fixed-rate & start → RXEQ_Optimize
+        //   bypass & !fixed-rate & start → Discovery
         sub_n = SUB_0;
         if (csr_lmsm_start & pma_phy_ready) begin
           if (!csr_bypass_probe) begin
@@ -595,10 +600,18 @@ module ub_lmsm #(
   assign train_fail   = train_fail_q;
   assign train_to_inc = train_to_q;
 
-  // PMA sideband. Width encoding is SPEC §13.2 待定 — raw lane count.
-  assign pma_data_rate_sel   = 4'd0;
-  assign pma_tx_width        = NUM_LANES_TX[3:0];
-  assign pma_rx_width        = NUM_LANES_RX[3:0];
+  // PMA sideband. pma_*_width encoding table still 待定 (SPEC §3.2.5 / §13.2).
+  // CSR PARAM_PHY.NUM_LANES_* is now binary 1/2/4/8 (SPEC §9 / REGMAP);
+  // drive the same legal set here so reserved 0/3/5/6/7 are never produced.
+  assign pma_data_rate_sel   = 4'd0; // SPEC §9 DATA_RATE = 0
+  assign pma_tx_width =
+      (NUM_LANES_TX == 8) ? 4'd8 :
+      (NUM_LANES_TX == 4) ? 4'd4 :
+      (NUM_LANES_TX == 2) ? 4'd2 : 4'd1;
+  assign pma_rx_width =
+      (NUM_LANES_RX == 8) ? 4'd8 :
+      (NUM_LANES_RX == 4) ? 4'd4 :
+      (NUM_LANES_RX == 2) ? 4'd2 : 4'd1;
   assign pma_lane_reverse_tx = cfg_lane_reverse_tx;
   assign pma_lane_reverse_rx = cfg_lane_reverse_rx;
   assign pma_polarity_inv    = cfg_polarity_inv;

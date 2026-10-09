@@ -345,24 +345,27 @@ Flit 宽度 160 bit 来自项目既有设计说明与 Xia 重传公式（160b）
 
 LMB 为 16 个 8-bit 符号（见 UB-PHY §3.4.1）。种类：LTB、EEIB（§3.4.1.2）。LTB 再分为 DLTB / CLTB / RLTB / ELTB（§3.4.1.1）。
 
-**拼装分工（已定）：** LMSM 给出字段；PCS 计算 LTB CRC（符号 12–13）、填 padding（符号 14–15）、按 §3.2.4 / §3.4.1 插入码流。CRC 多项式与符号级位图见规范该节，本仓库不抄。
+**拼装分工（已定）：** LMSM 给出各 lane **相同**的公共字段（UB-PHY §3.4.1「identical LMBs」适用于 Lane_ID **以外**的字段）。PCS 按模式为 **每个物理 TX lane** 填 Lane_ID，然后 **按 lane** 算 CRC（符号 12–13）和 padding（符号 14–15），再插入码流（§3.2.4、§3.4.1）。Lane_ID 规则见 UB-PHY §3.4.2（如 Discovery.Active：DLTB.Lane_ID = 当前物理 lane；Config：各 lane 编号唯一、沿 Tx_0..Tx_M-1 递增，或该状态要求的 NULL）。
 
-**valid 时序：**
+**TX 采样时序（已定）：** PCS 在 **每一帧即将插入的 LMB 起始边界** 锁存全部 `lmsm2pcs_*` LTB/CLTB 字段、`lmsm2pcs_pattern`、以及下列 Lane_ID 控制口。LMSM **任意拍** 都可改这些信号；改动从 **下一帧 LMB 起始** 生效。`lmsm2pcs_ltb_valid` **没有** 多拍保持要求。
 
-- TX：`lmsm2pcs_ltb_valid` 为 **电平**。为 1 时下表 TX 字段保持稳定；PCS 在插入边界采样。更新字段须先把 valid 拉低至少 1 拍，或保证变化发生在两次插入之间且采样沿稳定。
-- RX：PCS 仅在 LTB CRC 通过时给出 `pcs2lmsm_ltb_valid` **单拍**；无 ready，LMSM 当拍采样。CRC 失败不产生 valid。
-- `lmsm2pcs_pattern==EEIB` 时 PCS 按当前 Data Rate 生成 EEIB（§3.4.1.2），不用 LTB 字段。
+**RX valid：** PCS 仅在 LTB CRC 通过时给出 `pcs2lmsm_ltb_valid` **单拍**；无 ready，LMSM 当拍采样。CRC 失败不产生 valid。`lmsm2pcs_pattern==EEIB` 时 PCS 按当前 Data Rate 生成 EEIB（§3.4.1.2），不用 LTB 字段。
 
-**图案与锁定：**
+**图案、锁定、Lane_ID 控制（TX 无 `lmsm2pcs_lane_id`）：**
 
 | 信号 | 方向（相对 LMSM） | 宽度 | 含义 |
 | --- | --- | --- | --- |
 | `lmsm2pcs_pattern` | out | 2 | 0=电气空闲，1=EEIB，2=LTB（用字段口），3=DLL 业务码流 |
-| `lmsm2pcs_ltb_valid` | out | 1 | TX LTB 字段有效（电平） |
+| `lmsm2pcs_ltb_valid` | out | 1 | 与字段一并在 LMB 起始锁存。无多拍稳定要求 |
+| `lmsm2pcs_lane_id_mode` | out | 2 | 0=`PHYS`：该物理 TX lane 编号写入 Lane_ID（§3.4.2 Discovery.Active）。1=`ASCEND`：用 `lane_id_map` / `lane_id_base`（§3.4.2 Config）。2=`NULL`：写入该状态要求的空值（取值见 §3.4.1.1） |
+| `lmsm2pcs_lane_id_base` | out | 8 | `ASCEND` 时逻辑 Tx_0 的 Lane_ID；`PHYS`/`NULL` 忽略 |
+| `lmsm2pcs_lane_id_map` | out | `8*NUM_LANES_TX` | `ASCEND` 时每物理 TX lane 一字节：该 lane 的 Lane_ID（唯一递增 Tx_0..Tx_M-1，或该 lane 为 NULL）。字节 i 对应物理 TX lane i。`PHYS`/`NULL` 忽略 |
 | `pcs2lmsm_ltb_valid` | in | 1 | RX 收到一帧 CRC 通过的 LTB（单拍） |
 | `pcs_am_locked` | in | `NLANE` | 每 lane AM/AMCTL 锁定。可被 `tb_inj_am_lock` 旁路，不回灌 PCS |
 | `pcs_lid_bad` | in | 1 | 训练所见 Link_ID 非法/不一致。可被 `tb_inj_lid_bad` 旁路，不回灌 PCS |
 | `pcs_deskew_ok` | in | 1 | deskew 完成 |
+
+`ASCEND`：PCS 把物理 lane i 的 Lane_ID 取自 `lmsm2pcs_lane_id_map` 对应字节；`lmsm2pcs_lane_id_base` 等于逻辑 Tx_0 那一字节，供对照。`PHYS`：PCS 写物理 lane 号，不用 map/base。`NULL`：各激活 lane 的 Lane_ID 均为 §3.4.1.1 的空值。
 
 **LTB 字段口**（TX 前缀 `lmsm2pcs_`，RX 前缀 `pcs2lmsm_`；同名同宽。标识符取自 §3.4.1.1，宽度为字段位宽，不含保留位。Type / 宽度编码等枚举值实现时对照该节，不在此抄表。）
 
@@ -370,7 +373,7 @@ LMB 为 16 个 8-bit 符号（见 UB-PHY §3.4.1）。种类：LTB、EEIB（§3.
 | --- | --- | --- | --- |
 | `ltb_type` | 8 | 全部 LTB。DLTB/CLTB/RLTB/ELTB 的 Type | §3.4.1.1 |
 | `link_id` | 8 | DLTB、CLTB 的 Link_ID | §3.4.1.1 |
-| `lane_id` | 8 | DLTB、CLTB 的 Lane_ID。TX 是否由 PCS 按物理 lane 改写：见 §13 | §3.4.1.1 |
+| `lane_id` | 8 | **仅 RX**（`pcs2lmsm_lane_id`）：该次 valid 对应 LMB 里的 Lane_ID。TX 由 PCS 按 `lane_id_mode`/`map`/`base` 填写，无 `lmsm2pcs_lane_id` | §3.4.1.1、§3.4.2 |
 | `tlw` | 6 | DLTB、CLTB 的 TX Link Width | §3.4.1.1 |
 | `rlw` | 6 | DLTB、CLTB 的 RX Link Width | §3.4.1.1 |
 | `data_rate_support_1` | 8 | DLTB、RLTB 的 Data_Rate_Support_1 | §3.4.1.1 |
@@ -470,6 +473,7 @@ pyc4.0 的 CDC 原语仍只允许按 §4.3 使用；M1 生成网表中不应出�
 | PCS 组帧反压 DLL TX | 允许持续 `dll2pcs_ready==0` | 不得丢 flit |
 | PMA→PCS | 每拍一字，无 `pma_rx_ready` | PCS 必须收 |
 | PCS→DLL RX | valid-only，无 `pcs2dll_ready` | DLL 必须收；RX 缓冲深度待定 |
+| LMSM→PCS LMB 字段 / `pattern` / Lane_ID 控制 | 每帧 LMB **起始边界**锁存 | 见 §3.3.4。LMSM 任意拍可改；下一帧 LMB 起始生效。`lmsm2pcs_ltb_valid` 无多拍稳定要求 |
 | 重传从 REQ 到重发首 flit | **待定** | 受 retry buffer 读口约束 |
 | 信用归还从 RX 收齐到 TX 发出 | **待定** | 粒度 32（已确认） |
 
@@ -832,8 +836,6 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 - `LMSM_TMR_SCALE` / `AM_IVL_SCALE` 的具体缩放编码。
 - `tb_inj_am_lock` / `tb_inj_lid_bad`：M1 保留；**待定**是否在 PMA 模型证明能出真实 AM 之后删除。
 - PCS RX unpack `n==0 && have` drain 分支：验证确认端口可达性，否则删除分支或 waiver。
-- TX `lane_id`：§3.4.1 要求各激活 lane 同时发相同 LMB，但 Lane_ID 字段按 lane 编号。由 PCS 按物理 lane 改写，还是各 lane 真相同： **待定**（实现先按 per-lane 填 Lane_ID，其余字段各 lane 相同）。
-- `lmsm2pcs_ltb_valid` 拉低与 AMCTL/LMB 插入边界的对齐拍数。
 
 ### 13.3 未知
 

@@ -5,7 +5,7 @@
 ### Added
 
 - `TOOLCHAIN.lock` + `tb/` uvm-python 骨架、golden-model 接口、双网表自检入口（叠在 M1 SPEC 上；不改 `rtl/` / SPEC 类文档）。
-- TB 模型按 CODING_STYLE §5 命名：`ub_pcs_scrambler` / `ub_dll_bcrc` 仅为接口（核心计算 `NotImplementedError("pending SPEC")`）；`ub_pcs_lane_dist` 已实现（符号 0 先发、PMA 字 LSB、0 拍）。无 LMB/LTB golden。
+- TB 模型按 CODING_STYLE §5 命名：`ub_pcs_scrambler` / `ub_dll_bcrc` 仅为接口（核心计算 `NotImplementedError("pending SPEC")`，不写多项式/初值/取反/`DATA_W` 默认值）；`ub_pcs_lane_dist` 已实现（符号 0 先发、PMA 字 LSB、0 拍）。无 LMB/LTB golden。扰码和 BCRC 的模型等 SPEC 定了再补。
 - `tb/vibe_uvm/ub_csr_map.py` + harness：`CNT_CLR` `0x0224` bit0–8（含 `CNT_CRD_UF`）；`APPD_LMSM_ST` `0x1E00`；`APPD_PORT_ERR` `0x1F00`；TEST 窗按 SPEC §3.2.3 / §10 / §11、REGMAP §2.4。`CTRL.LMSM_START`、`RETRY_*_ST` 与 `NUM_LANES_*` 合法编码及保留值 TB assert。
 - `docs/SPEC.md`：M1 功能规格（范围、模块划分、接口、时钟复位、状态机、异常、参数、测试钩子、两套 `TEST_HOOKS` 网表）。
 - `docs/REGMAP.md`：M1 寄存器表（CTRL/STATUS/PARAM/ERR/TEST + App. D 端口子集镜像）。

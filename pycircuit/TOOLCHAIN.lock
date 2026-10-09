@@ -1,0 +1,21 @@
+# Pin for D5. Do not silently float.
+#
+# Preferred install (when the wheel is published):
+#   python3 -m pip install pycircuit-hisi==0.1.0
+#
+# Fallback used by this tree (same pin as lukebest/Vibe-UB-Switch):
+#   git clone https://github.com/lukebest/pyCircuit
+#   git -C pyCircuit checkout 43cc5918e3d09ecc0c814cabef6c1384cb9980ae
+#   python3 -m pip install -e pyCircuit
+#
+# Frontend import path remains `pycircuit`. Compiler command is `pycc`.
+# Editable install is frontend-only. `pycc` (Verilog via MLIR) needs LLVM 19.
+# This repo's PRODUCT .v is reproduced by `make emit` (Python emitter) so
+# the netlist does not depend on LLVM. `make emit` also tries `pycc` when
+# it is on PATH.
+
+PYCIRCUIT_REPO=https://github.com/lukebest/pyCircuit
+PYCIRCUIT_COMMIT=43cc5918e3d09ecc0c814cabef6c1384cb9980ae
+PYCIRCUIT_PACKAGE=pycircuit-hisi
+PYCIRCUIT_PACKAGE_VERSION=0.1.0
+PYCIRCUIT_RELEASE=pyc4.0

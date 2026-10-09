@@ -4,7 +4,7 @@
 | --- | --- |
 | 配套规格 | [SPEC.md](SPEC.md) |
 | 规范基线 | UB Base Spec Rev 2.0，附录 D **子集**（见 [SPEC_INDEX.md](SPEC_INDEX.md)） |
-| 总线 | [SPEC.md](SPEC.md) §3.2.3：32-bit 数据，16-bit 字节地址，4 字节对齐，`core_clk` |
+| 总线 | [SPEC.md](SPEC.md) §3.2.3：32-bit 整字，无 `csr_wstrb`；16-bit 字节地址，4 字节对齐；读固定 1 拍；未映射读 0/`csr_err=1`，写忽略/`csr_err=1` |
 | 字节序 | 小端；位 0 为 LSB |
 
 **引用约定：** 不抄录规范字段说明、表或复位表。App. D / Init Block 只给 **节号**。实现对照官方规范展开位域。本表足够生成头文件与 Python 寄存器模型。
@@ -58,12 +58,14 @@
 | 0x0008 | IRQ_STATUS | RETRY_ERR | 2 | 2 | W1C | 0x0 | 重传进 ERROR 或超过阈值 | proj; UB-DL §4.8.2 |
 | 0x0008 | IRQ_STATUS | CRD_PROTO | 3 | 3 | W1C | 0x0 | 信用协议类错误（溢出/归还超时） | proj; UB-DL §4.8.1 |
 | 0x0008 | IRQ_STATUS | TRAIN_FAIL | 4 | 4 | W1C | 0x0 | LMSM 回到 Link_Idle 且训练未成功 | proj; UB-PHY §3.4.3 |
-| 0x0008 | IRQ_STATUS | RSVD | 31 | 5 | RO | 0x0 | 保留 | proj |
-| 0x000C | IRQ_MASK | MASK | 4 | 0 | RW | 0x1F | 对应 IRQ_STATUS[4:0]，1=屏蔽。复位全屏蔽 | proj |
-| 0x000C | IRQ_MASK | RSVD | 31 | 5 | RO | 0x0 | 保留 | proj |
+| 0x0008 | IRQ_STATUS | BAD_VL | 5 | 5 | W1C | 0x0 | 未使能 VL 的包曾被丢弃（粘滞） | proj; SPEC §7 |
+| 0x0008 | IRQ_STATUS | CRD_UF | 6 | 6 | W1C | 0x0 | 信用下溢（计数减过 0）曾发生（粘滞）。RTL irq 源，不是 RTL assert | proj; SPEC §7 |
+| 0x0008 | IRQ_STATUS | RSVD | 31 | 7 | RO | 0x0 | 保留 | proj |
+| 0x000C | IRQ_MASK | MASK | 6 | 0 | RW | 0x7F | 对应 IRQ_STATUS[6:0]，1=屏蔽。复位 **全部屏蔽** | proj |
+| 0x000C | IRQ_MASK | RSVD | 31 | 7 | RO | 0x0 | 保留 | proj |
 | 0x0010 | PORT_CNA | CNA | 31 | 0 | RW | 0x0 | 本地 CNA。软件读/写；**无** `tb_*` 钩子 | proj; App. D.5.5 |
 
-`irq` 极性 **待定**（SPEC §3.2.6）。建议：`IRQ_EN=1` 且任一未屏蔽 STATUS 位置位则为 1。
+`irq`：高有效电平。`IRQ_EN=1` 且任一未屏蔽 `IRQ_STATUS` 位置位则为 1。复位后 `IRQ_MASK` 全 1、`IRQ_EN=0`，全部源屏蔽。
 
 ### 2.2 PARAM 读回（`0x0100`）
 
@@ -112,7 +114,8 @@ Init Block 其余字段（`DATA_ACK_GRAIN_SIZE`、`CTRL_ACK_GRAIN_SIZE`、`DATA_
 | 0x0210 | CNT_CRD_OF | COUNT | 31 | 0 | RW | 0x0 | 信用/RX 缓冲溢出次数。写清 | proj; UB-DL §4.8.1 |
 | 0x0214 | CNT_CRD_TO | COUNT | 31 | 0 | RW | 0x0 | 信用归还超时次数。写清。`CRD_TO_DIS=1` 时不递增 | proj; UB-DL §4.8.1 |
 | 0x0218 | CNT_TRAIN_TO | COUNT | 31 | 0 | RW | 0x0 | LMSM 训练超时回到 Idle 次数。写清 | proj; UB-PHY §3.4.3 |
-| 0x021C | CNT_BAD_VL | COUNT | 31 | 0 | RW | 0x0 | 非法 `nw_tx_vl` 次数。写清 | proj |
+| 0x021C | CNT_BAD_VL | COUNT | 31 | 0 | RW | 0x0 | 未使能 VL 丢包次数。写清 | proj; SPEC §7 |
+| 0x0220 | CNT_CRD_UF | COUNT | 31 | 0 | RW | 0x0 | 信用下溢次数。写清。RTL 计数，不做 assertion | proj; SPEC §7 |
 
 App. D PORT_CAP2 的 flit/LTB 错误计数切片（D.6.3）为规范镜像，不在本窗口重复抄字段。
 
@@ -130,8 +133,8 @@ App. D PORT_CAP2 的 flit/LTB 错误计数切片（D.6.3）为规范镜像，不
 | 0x0304 | CRD_TO_DIS | RSVD | 31 | 1 | RO | 0x0 | 保留 | proj |
 | 0x0308 | PCS_TX_TEST | AM_IVL_SCALE | 7 | 0 | RW | 0x00 | 代替向 AM 符号计数器 deposit。缩放 PCS TX AMCTL 间隔。0=规范间隔。非 0 编码 **待定**（建议与 LMSM_TMR_SCALE 相同） | proj; SPEC §10.4; UB-PHY §3.2.4 |
 | 0x0308 | PCS_TX_TEST | RSVD | 31 | 8 | RO | 0x0 | 保留 | proj |
-| 0x030C | TEST_VL_SEL | VL | 3 | 0 | RW | 0x0 | `tb_inj_crd_cells` / `tb_obs_crd_*` 对应的 VL。默认 0。多 VL 选择 **待定**（见 SPEC §10.2） | proj |
-| 0x030C | TEST_VL_SEL | RSVD | 31 | 4 | RO | 0x0 | 保留 | proj |
+
+信用钩子（`tb_inj_crd_cells` / `tb_obs_crd_*`）固定对 **VL0**，无 VL 选择寄存器。
 
 不在本窗口提供：FSM 状态 force、叶子内部（CRC/FEC/deskew/缓冲）观察。见 SPEC §10.5。
 

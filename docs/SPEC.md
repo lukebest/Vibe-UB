@@ -49,6 +49,7 @@ M1 默认参数（船长已确认，出处见 §9）：
 | --- | --- |
 | 第 5 章 Network Layer 及之后（TP/TA/FUN/MEM/RSC/SEC） | D2；SPEC_INDEX deferred |
 | 规范可选特性（D4）：不把「可选」当成 M1 必做 | D4 |
+| M1 多时钟域（独立 `pma_clk`） | 架构已定：单时钟；见 §4.1 |
 | 真实 SerDes / PMA 模拟电路 | D3 |
 | FPGA 原型 | D11 |
 | 多端口、路由表、Entity / CFG1、热插拔、光模块管理、眼图监测 | App. D 中与 NW/设备管理相关的切片；UB-PHY 光互连细节 |
@@ -126,7 +127,7 @@ PCS 交给 PMA 的是 **已按 8-bit 符号分发到各 lane 的并行比特**�
 | 串并转换、CDR、均衡模拟 | PMA 模型 | 见 UB-PHY §3.3。M1 模型深度 **待定** |
 | Probe 脉冲与远端端接检测 | PMA 模型 + LMSM | 见 UB-PHY §3.4.3.2。检测算法 **未知**（实现相关） |
 
-M1 默认 NRZ Data Rate 0：Gray **不启用**（Gray 针对 PAM4）。预编码默认 **待定**（M1 建议关）。ASIC 范围已确认：只做 PCS + DLL 数字；PMA 为行为模型（D3）。
+M1 默认 NRZ Data Rate 0：Gray **不启用**（Gray 针对 PAM4）。预编码默认 **关**（已定）。ASIC 范围已确认：只做 PCS + DLL 数字；PMA 为行为模型（D3）。
 
 ### 2.4 PCS
 
@@ -203,16 +204,14 @@ CSR 用独立的 req/ready，不用 valid/ready 数据流语义，见 §3.3。
 
 ### 3.2 顶层端口 `ub_controller`
 
-时钟域列 `core_clk` 表示 M1 建议的单时钟域（见 §4）。宽度中的参数见 §9。
+时钟域列 `core_clk` 表示 M1 **唯一**时钟域（见 §4）。宽度中的参数见 §9。无 `pma_clk` / `pma_rst_n` 端口。
 
 #### 3.2.1 时钟复位
 
 | 端口 | 方向 | 宽度 | 时钟域 | 含义 |
 | --- | --- | --- | --- | --- |
-| `core_clk` | in | 1 | — | 业务时钟 |
-| `rst_n` | in | 1 | async 输入 → 白名单同步后为 sync | 低有效复位。进业务逻辑前必须经白名单 async-reset 同步器变成 **同步复位** |
-| `pma_clk` | in | 1 | PMA | **待定**。单时钟方案下不存在或与 `core_clk` 绑在一起 |
-| `pma_rst_n` | in | 1 | PMA | **待定**。仅当存在独立 PMA 时钟 |
+| `core_clk` | in | 1 | — | 唯一时钟。等于 PMA 并行字时钟：2.578125 Gb/s / 32 bit ≈ **80.57 MHz** |
+| `rst_n` | in | 1 | 异步输入 | 低有效。异步置位、经白名单同步器同步释放；下游见 §4.2 |
 
 #### 3.2.2 上层 flit（替代 Network Layer）
 
@@ -225,7 +224,7 @@ Flit 宽度 160 bit 来自项目既有设计说明与 Xia 重传公式（160b）
 | `nw_tx_ready` | out | 1 | `core_clk` | DLL 可收。无信用、未 `dll_status_up`、或重传占用时可为 0 |
 | `nw_tx_sop` | in | 1 | `core_clk` | DLLDP 首 flit |
 | `nw_tx_eop` | in | 1 | `core_clk` | DLLDP 末 flit |
-| `nw_tx_vl` | in | 4 | `core_clk` | VL ID。M1 合法值 0–1；其它值：**待定**（建议丢弃并计数） |
+| `nw_tx_vl` | in | 4 | `core_clk` | VL ID。未使能的 VL（M1 合法为 0–1）：整包丢弃，计数 +1，置位粘滞状态（见 §7） |
 | `nw_rx_data` | out | 160 | `core_clk` | 投递给上层的 flit 净荷 |
 | `nw_rx_valid` | out | 1 | `core_clk` | RX valid |
 | `nw_rx_ready` | in | 1 | `core_clk` | 上层可收。DLL 必须能反压；RX 缓冲深度 **待定** |
@@ -244,14 +243,13 @@ Flit 宽度 160 bit 来自项目既有设计说明与 Xia 重传公式（160b）
 | `csr_req` | in | 1 | `core_clk` | 本拍有一次访问 |
 | `csr_wr` | in | 1 | `core_clk` | 1=写，0=读 |
 | `csr_addr` | in | 16 | `core_clk` | 字节地址，须 4 字节对齐 |
-| `csr_wdata` | in | 32 | `core_clk` | 写数据 |
-| `csr_wstrb` | in | 4 | `core_clk` | 字节写使能。M1 是否支持非整字写：**待定**（建议只支持 `4'b1111`） |
-| `csr_ready` | out | 1 | `core_clk` | 接受本拍 `csr_req`（req/ready，同一拍握手） |
-| `csr_rvalid` | out | 1 | `core_clk` | 读数据有效 |
-| `csr_rdata` | out | 32 | `core_clk` | 读数据 |
-| `csr_err` | out | 1 | `core_clk` | 未映射地址或对齐错误。是否上报 **待定** |
+| `csr_wdata` | in | 32 | `core_clk` | 写数据。**仅 32-bit 整字写**，无 `csr_wstrb` |
+| `csr_ready` | out | 1 | `core_clk` | 当拍接受 `csr_req`。M1 恒 1（无等待） |
+| `csr_rvalid` | out | 1 | `core_clk` | 读响应：请求的 **下一拍** 为 1（固定 1 拍延迟） |
+| `csr_rdata` | out | 32 | `core_clk` | 与 `csr_rvalid` 同拍。未映射读回 0 |
+| `csr_err` | out | 1 | `core_clk` | 与响应同拍（请求的下一拍）。未映射：读回 0 且本位置 1；写忽略且本位置 1 |
 
-读延迟：目标 1 拍（§5）；`rvalid` 与 `ready` 是否绑在同一拍：**待定**（建议写：`ready` 当拍；读：`ready` 当拍且同拍 `rvalid`）。
+无 `csr_wstrb`。未对齐地址按未映射处理。写响应：下一拍 `csr_rvalid=0`，`csr_err` 有效。
 
 #### 3.2.4 PCS–PMA 数据（模型边界）
 
@@ -259,13 +257,13 @@ Flit 宽度 160 bit 来自项目既有设计说明与 Xia 重传公式（160b）
 
 | 端口 | 方向 | 宽度 | 时钟域 | 含义 |
 | --- | --- | --- | --- | --- |
-| `pma_tx_data` | out | `NUM_LANES_TX*PMA_W` | `core_clk`（或 `pma_clk`，待定） | 每 lane 并行字，lane0 在 LSB |
-| `pma_tx_valid` | out | 1 | 同上 | 本拍字有效。训练期由 LMSM/PCS 出图案 |
-| `pma_tx_ready` | in | 1 | 同上 | 模型常就绪时恒 1。独立时钟时由 FIFO 反压 |
-| `pma_tx_elec_idle` | out | `NUM_LANES_TX` | 同上 | 每 lane 电气空闲请求 |
-| `pma_rx_data` | in | `NUM_LANES_RX*PMA_W` | 同上 | 每 lane 并行字（模型已完成串并；PAM4 时已 Gray 反变换） |
-| `pma_rx_valid` | in | 1 | 同上 | RX 字有效 |
-| `pma_rx_ready` | out | 1 | 同上 | PCS 可收 |
+| `pma_tx_data` | out | `NUM_LANES_TX*PMA_W` | `core_clk` | 每 lane 并行字，lane0 在 LSB |
+| `pma_tx_valid` | out | 1 | `core_clk` | 本拍字有效。训练期由 LMSM/PCS 出图案 |
+| `pma_tx_ready` | in | 1 | `core_clk` | 模型常就绪时恒 1 |
+| `pma_tx_elec_idle` | out | `NUM_LANES_TX` | `core_clk` | 每 lane 电气空闲请求 |
+| `pma_rx_data` | in | `NUM_LANES_RX*PMA_W` | `core_clk` | 每 lane 并行字（模型已完成串并；PAM4 时已 Gray 反变换） |
+| `pma_rx_valid` | in | 1 | `core_clk` | RX 字有效 |
+| `pma_rx_ready` | out | 1 | `core_clk` | PCS 可收 |
 | `pma_rx_data_valid_lane` | in | `NUM_LANES_RX` | 同上 | **待定**。是否需要 per-lane valid（deskew 前） |
 
 位序、AMCTL 与数据字是否共用 `pma_tx_data`：**待定**（建议共用，由 PCS 在数据流里插 AMCTL，见 §3.2.4）。
@@ -281,9 +279,9 @@ Flit 宽度 160 bit 来自项目既有设计说明与 Xia 重传公式（160b）
 | `pma_lane_reverse_rx` | out | 1 | `core_clk` | RX lane 反转 |
 | `pma_polarity_inv` | out | `NUM_LANES_RX` | `core_clk` | 极性翻转（§3.4.2.6）。每 bit 对应一 lane |
 | `pma_probe_pulse_en` | out | 1 | `core_clk` | 请求模型发探测脉冲 |
-| `pma_term_detect` | in | `NUM_LANES_TX` | `core_clk` 或 PMA | 模型报告远端端接。跨时钟则逐 bit `pyc_cdc_sync` |
-| `pma_rx_eidle_exit` | in | `NUM_LANES_RX` | 同上 | RX 退出电气空闲。1-bit 电平，禁止做成单周期脉冲跨时钟 |
-| `pma_phy_ready` | in | 1 | 同上 | 模型时钟/模拟就绪 |
+| `pma_term_detect` | in | `NUM_LANES_TX` | `core_clk` | 模型报告远端端接 |
+| `pma_rx_eidle_exit` | in | `NUM_LANES_RX` | `core_clk` | RX 退出电气空闲（电平，不是脉冲） |
+| `pma_phy_ready` | in | 1 | `core_clk` | 模型就绪 |
 
 均衡系数、FEC 模式旁路到 PMA 的其它针脚：**未知**（M1 Data Rate 0 / NRZ 可能用不到）。需要时只加电平信号，不加脉冲。
 
@@ -293,7 +291,7 @@ Flit 宽度 160 bit 来自项目既有设计说明与 Xia 重传公式（160b）
 | --- | --- | --- | --- | --- |
 | `link_up` | out | 1 | `core_clk` | LMSM 置位，DLL 用来离开 Disabled（§3.4.3、§4.2） |
 | `link_ready` | out | 1 | `core_clk` | 物理层可承载业务（§3.4.3.7） |
-| `irq` | out | 1 | `core_clk` | 错误/完成汇总。掩码见 REGMAP。极性 **待定**（建议高有效电平） |
+| `irq` | out | 1 | `core_clk` | 高有效电平。任一未屏蔽源为 1。复位后 **全部源屏蔽**（见 REGMAP `IRQ_MASK`） |
 
 测试钩子：顶层另有 `tb_test_mode` 与 `tb_inj_*` / `tb_obs_*`，见 §10。`TEST_HOOKS=0` 时这些端口不存在。
 
@@ -353,35 +351,33 @@ CSR 输出均为 `core_clk` 电平寄存器，不握手。各块输出的计数/
 
 ## 4. 时钟与复位
 
-### 4.1 M1 是否单时钟域
+### 4.1 M1 单时钟域（已定）
 
-**建议：M1 bring-up 做成单时钟域 `core_clk`。**
+M1 **只有** `core_clk`。它就是 PMA 并行字时钟：
 
-理由：
+`F_CORE = 2.578125 Gb/s / 32 bit ≈ 80.57 MHz`
 
-- PMA 是行为模型（D3，船长已确认 ASIC 只做 PCS+DLL 数字）。
-- pyc4.0：`pyc_cdc_sync` **只支持 1 bit**；多 bit 必须 `pyc_async_fifo`；**没有** pulse / req-ack 同步原语。单时钟可避开这些约束。
-- PMA–PCS 32 bit/lane 已确认，Data Rate 0 下字速率约 80.6 MHz。若 `core_clk` 就取该字速率，xN 时接口宽度为 `N*32`，无需齿轮箱。
+- 无独立 `pma_clk`。`USE_PMA_CLK=0` **已定**（不是草案）。
+- 多时钟是 M1 **非目标**。产品通路不做 CDC。
+- PMA 模型与 PCS 同拍于 `core_clk`。xN 时接口宽度 `N*32`，无需跨时钟齿轮箱。
+- 工艺节点仍为 **未知，待船长定**。`F_CORE` 已按上式确定。
 
-**工艺节点 / 目标频率：未知，待船长定。** 80.6 MHz 只是按 Data Rate 0、32 bit/lane 算出的字速率参考，不是时序收敛目标。
+pyc4.0 的 CDC 原语仍只允许按 §4.3 使用；M1 生成网表中不应出现跨时钟 FIFO。后续里程碑若引入第二时钟，再开新决策，不在 M1 预留 `pma_clk` 端口。
 
-若船长决定 `core_clk` ≠ PMA 字时钟：
-
-- PCS↔PMA 数据走 `pyc_async_fifo`（多 bit）。
-- `link_up`、`term_detect` 等 1-bit 电平走 `pyc_cdc_sync`。
-- 不得设计「跨时钟单周期脉冲」或 req-ack 同步。
-
-独立 `pma_clk` 是否存在： **待定**。未批准前，RTL 参数 `USE_PMA_CLK=0`。
-
-### 4.2 复位
+### 4.2 复位（已定）
 
 | 规则 | 说明 |
 | --- | --- |
-| 业务逻辑 | **同步复位**（D6）。`always` 只允许 `posedge clk` 敏感表；复位在时钟沿采样 |
-| 极性 | 顶层输入 `rst_n` 低有效。经白名单同步器后，生成逻辑见同步 `rst_n` 或库要求的 `rst`。与 `pyc_reg` 的极性对接：**待定**（对照 pyc4.0 API） |
-| 异步复位同步器 | **唯一**允许把异步 `rst_n` 收进时钟域的手写单元，见 [CODING_STYLE.md](CODING_STYLE.md) 白名单 |
-| 释放 | 各时钟域各自同步释放。多时钟时不得假设同拍释放 |
-| Entity 复位 vs 端口复位 | 规范区分二者（见 UB-DL §4.2 对 Disabled 的说明）。M1 无 Entity：`rst_n` 与 CSR 端口复位都回到 LMSM Link_Idle + DLL Disabled |
+| 顶层端口 | `rst_n`，低有效 |
+| 置位 / 释放 | **异步置位、同步释放**，只允许经白名单复位同步器（见 [CODING_STYLE.md](CODING_STYLE.md)） |
+| 业务逻辑 | **同步复位**（D6）。`always` 只对 `posedge core_clk` 敏感 |
+| 极性对接 | 同步器之后用封装把复位接到 `pyc_reg` 的 **原生极性**（见下） |
+| Entity vs 端口复位 | 规范区分二者（UB-DL §4.2）。M1 无 Entity：`rst_n` 与 CSR 端口复位都回到 LMSM Link_Idle + DLL Disabled |
+
+**封装（唯一对接点）：**
+
+1. 白名单单元 `ub_rst_sync`：输入异步 `rst_n` + `core_clk`，输出 `rst_n_sync`（仍低有效；异步置位、同步释放）。
+2. 生成逻辑封装 `ub_pyc_rst_adapt`：把 `rst_n_sync` 转成 `rst_pyc`，极性等于 **pyc4.0 `pyc_reg` 原生极性**。若库原生已是低有效，本封装退化为连线。业务模块只看见 `rst_pyc`，不直接采样顶层 `rst_n`。
 
 现有 `rtl/` 使用 `posedge clk or negedge rst_n`，**不合**本规格，重写时删除。
 
@@ -389,7 +385,7 @@ CSR 输出均为 `core_clk` 电平寄存器，不握手。各块输出的计数/
 
 | 原语 | 用途 | 限制 |
 | --- | --- | --- |
-| 手写 async-reset 同步器 | 把 `rst_n` 同步到某 `*_clk` | 仅复位 |
+| 手写 `ub_rst_sync` | 异步置位、同步释放 `rst_n` → `rst_n_sync` | 仅复位；M1 只对 `core_clk` |
 | `pyc_cdc_sync` | 1-bit 电平 | 禁止多 bit、禁止脉冲 |
 | `pyc_async_fifo` | 多 bit 总线 | 数据通路跨时钟的唯一手段 |
 | 其它手写 CDC | 禁止 | 无 pulse/req-ack 原语可用，故接口不得依赖它们 |
@@ -403,7 +399,7 @@ CSR 输出均为 `core_clk` 电平寄存器，不握手。各块输出的计数/
 | 路径 | 目标 | 备注 |
 | --- | --- | --- |
 | CSR 写生效到控制电平 | 1 拍 | 同步寄存器 |
-| CSR 读 | 1 拍返回 | 见 §3.2.3 |
+| CSR 读 | 固定 1 拍：请求下一拍 `csr_rvalid` | 见 §3.2.3；无 `csr_wstrb` |
 | NW TX valid/ready | 无气泡当 `ready==1` | 信用不足时 `ready==0` |
 | DLL 分段插入 LPH/LBH/BCRC | **待定** | 至少 1 拍打头、BCRC 在段末 |
 | FEC 编码 | **待定** | RS(128,120) 组 120 符号；并行度 **待定** |
@@ -527,19 +523,20 @@ stateDiagram-v2
 | 重传次数过多 | `NUM_RETRY` | 进 RETRAIN / 上报 | §4.7.3.3、§4.8.2 |
 | 重传仍失败 | `NUM_PHY_REINIT` | 进 ERROR；停发停收；等复位 | §4.7.3.3、§4.8.2 |
 | Retry ACK 超时 | WAIT 计时 | 回 REQ 或按 §4.8.2 上报 | §4.7.3.3、§4.8.2 |
-| 信用下溢（本地要发但信用为 0） | TX credit | **不是**对端协议错误：只反压 `nw_tx_ready`。若实现误减到负：视为设计错误，断言/计数，**待定** |
+| 信用为 0（正常反压） | TX credit == 0 | 停发 DLLDP，`nw_tx_ready=0`。不是错误 | UB-DL §4.6 |
+| 信用下溢（计数被减到负 / 在 0 时仍减） | TX credit 记账 | RTL：计数 +1、粘滞状态、`irq` 源。**不是** RTL assertion。TB 另外 assert | proj |
 | Receive Buffer Overflow | RX | 上报，链路不能继续，等复位 | §4.8.1 |
 | Flow Control Overflow | 信用超过初值 | 同上 | §4.8.1 |
 | 信用归还超时 | 定时器 | 上报 DL Protocol Error，等复位 | §4.8.1 |
 | retry 指针/NumFreeBuf 溢出 | ACK 释放 | 上报，等复位 | §4.8.2 |
 | `link_up` 变 0 | LMSM | DLL → Disabled；丢弃已从上层收下、未完成的发送；RX 丢弃未完成重组 | §4.8.4 |
 | LMSM 训练超时 | 各状态超时 | 回 Link_Idle 或 Retrain，见 §3.4.3 | §3.4.3 |
-| 非法 VL | NW TX | **待定**（建议不写入，计数） | §4.5 |
-| CSR 未映射地址 | 译码 | `csr_err`；不改功能寄存器 | 项目约定 |
+| 非法 / 未使能 VL | NW TX `nw_tx_vl` | 整包丢弃；`CNT_BAD_VL` +1；粘滞 `IRQ_STATUS.BAD_VL` | §4.5 |
+| CSR 未映射地址 | 译码 | 读返回 0 且 `csr_err=1`；写忽略且 `csr_err=1`（响应在请求下一拍） | 项目约定 |
 
 超时的具体微秒/拍数：规范有的以节号为准（例如部分 LMSM 超时在 §3.4.3.x），实现时对照，**不抄进本仓库**。规范写「实现相关」的：标 **待定**。
 
-信用下溢与「对端少归还」的区分：前者是本地调度在 0 信用时仍试图减；后者是超时（§4.8.1）。M1 调度必须在 0 时停发 DLLDP。
+信用：0 信用只反压。下溢（实现把计数减过 0）才走错误计数 / 粘滞 / irq。对端少归还走超时（§4.8.1）。RTL 不对下溢做 assertion。
 
 带 `ERROR_FLAG` 的 DLLDP：按 §4.8.3 当正常包交给上层，不单因该标志重传。M1 是否在 TX 路径置位该标志：**待定**（无 ECC 存储器时可能用不到）。
 
@@ -547,7 +544,7 @@ stateDiagram-v2
 
 ## 8. 性能与延迟目标
 
-工艺 / 频率：**未知，待船长定。**
+工艺节点：**未知，待船长定。** `core_clk` ≈ **80.57 MHz**（已定，见 §4.1）。
 
 | 指标 | M1 目标 | 说明 |
 | --- | --- | --- |
@@ -565,7 +562,7 @@ stateDiagram-v2
 
 ## 9. 参数表
 
-M1 列中 Xia 提出的默认值已由船长确认。仍标「草案」的是规范推荐或验证侧阈值，不是该确认集。工艺 / `F_CORE` 仍未知。
+M1 列中 Xia 提出的默认值已由船长确认。仍标「草案」的是规范推荐或验证侧阈值。工艺节点仍未知；`F_CORE` 已定。
 
 | 参数 | 标识符 | M1 | spec-max | 出处 / 备注 |
 | --- | --- | --- | --- | --- |
@@ -574,7 +571,7 @@ M1 列中 Xia 提出的默认值已由船长确认。仍标「草案」的是规
 | TX lane 数 | `NUM_LANES_TX` | 1…4 bring-up；参数到 8 | 8 | §3.1.1、§3.4.2.2；已确认 |
 | RX lane 数 | `NUM_LANES_RX` | 默认等于 TX | 8 | 非对称默认关；已确认 |
 | 非对称 | `ALLOW_ASYM` | 0 | 规范允许 | §3.1.1；已确认 |
-| PMA–PCS 每 lane 位宽 | `PMA_W` | 32 | 256 | 规范未定义宽度；已确认。字速率约 80.6 MHz @ DR0 |
+| PMA–PCS 每 lane 位宽 | `PMA_W` | 32 | 256 | 已确认。与 `F_CORE` 对齐 |
 | FEC | `FEC_MODE` | RS(128,120,T=4)；T=2/bypass 可协商 | 同 | §3.2.2.1–2；已确认 |
 | FEC 交织 CodecNum | `FEC_CODEC_NUM` | **待定**（建议 1） | **待定** | §3.2.2.3 |
 | VL 数 | `NUM_VL` | 2 | 16 | UB-DL §4.5.1；已确认 |
@@ -588,10 +585,11 @@ M1 列中 Xia 提出的默认值已由船长确认。仍标「草案」的是规
 | DLLDP 最大 flit | `MAX_DP_FLITS` | **待定**（规范上限对照 §4.3.2） | 同 | 不抄具体表 |
 | `NUM_RETRY_THRESHOLD` | 同名 | 15（规范推荐，草案） | 同 | §4.7.3.3 |
 | `NUM_PHY_REINIT_THRESHOLD` | 同名 | 4（规范推荐，草案） | 同 | §4.7.3.3 |
+| 预编码 | `PRECODE_EN` | 0（关） | **待定** | UB-PHY §3.3.2；M1 默认关，已定 |
 | 工艺 | — | **未知，待船长定** | — | 船长未定 |
-| 目标频率 | `F_CORE` | **未知，待船长定** | — | 80.6 MHz 仅为字速率参考 |
+| 目标频率 | `F_CORE` | ≈80.57 MHz | **待定** | `2.578125e9/32`；已定。工艺仍未知 |
 | ASIC 范围 | — | 仅 PCS+DLL 数字；PMA 行为模型 | 同 | D3；已确认 |
-| 单时钟 | `USE_PMA_CLK` | 0（建议） | **待定** | 本规格 §4.1 |
+| 单时钟 | `USE_PMA_CLK` | 0 | 多时钟为后续阶段 | §4.1；已定。M1 无 `pma_clk` |
 | 测试钩子生成 | `TEST_HOOKS` | 见 §11：Python 生成期展开，两套网表 | 同 | §10、§11 |
 | 钩子 lane 宽 | `NLANE` | `NUM_LANES_RX` | 同 | §10。`tb_inj_am_lock` 宽度 |
 | 信用反压观察阈值 | `CRD_BP_THRESHOLD` | 1024 | **待定** | §10 `tb_obs_crd_bp`；**草案** |
@@ -636,17 +634,17 @@ Retry 深度下界公式见 UB-DL §4.7.3.2（含 FEC 120/128 与 RTT）。M1 25
 | 端口 | 方向 | 宽度 | 时钟域 | 接入模块 | 含义 |
 | --- | --- | --- | --- | --- | --- |
 | `tb_test_mode` | in | 1 | `core_clk` | 顶层门控 | 为 1 且 `TEST_HOOKS=1` 时钩子生效 |
-| `tb_inj_am_lock` | in | `NLANE` | `core_clk` | `ub_lmsm` | 电平。mux 到 LMSM 的 `am_locked` 输入，不回灌 PCS。PMA 行为模型（D3）若已产生真实 AM，本钩子可改为可选/不用 |
-| `tb_inj_lid_bad` | in | 1 | `core_clk` | `ub_lmsm` | 电平。mux 到 LMSM 的 `lid_bad` 输入，不回灌 PCS。同上，PMA 出真实 AM 后可改为可选 |
-| `tb_inj_crd_cells` | in | 16 | `core_clk` | `ub_dll` 信用子块 | 电平。预置远端信用库存（cell）。对应哪条 VL：**待定**（M1 建议 VL0，或由 CSR 选择；未定前按单总线对接 VL0） |
+| `tb_inj_am_lock` | in | `NLANE` | `core_clk` | `ub_lmsm` | 电平。mux 到 LMSM 的 `am_locked` 输入，不回灌 PCS。M1 **保留**。是否在 PMA 模型证明能出真实 AM 之后删除： **待定**（触发条件仅此） |
+| `tb_inj_lid_bad` | in | 1 | `core_clk` | `ub_lmsm` | 电平。mux 到 LMSM 的 `lid_bad` 输入，不回灌 PCS。M1 **保留**。删除条件同 `tb_inj_am_lock` |
+| `tb_inj_crd_cells` | in | 16 | `core_clk` | `ub_dll` 信用子块 | 电平。预置 **VL0** 远端信用库存（cell）。M1 信用钩子只对 VL0 |
 | `tb_obs_link_ready` | out | 1 | `core_clk` | `ub_lmsm` | `LMSM==Link_Active`（ACTIVE） |
 | `tb_obs_link_up` | out | 1 | `core_clk` | `ub_lmsm` | `LMSM==Send_NullBlock`（NULL）或 `Link_Active`（ACTIVE） |
-| `tb_obs_lmsm_st` | out | 5 | `core_clk` | `ub_lmsm` | LMSM 主状态编码，见 §10.3 |
-| `tb_obs_crd_cells` | out | 16 | `core_clk` | `ub_dll` 信用子块 | 当前远端信用库存（与 `tb_inj_crd_cells` 同一 VL 视图） |
-| `tb_obs_crd_pend` | out | 16 | `core_clk` | `ub_dll` 信用子块 | 未决信用/未完成归还量（项目计数，单位 cell） |
-| `tb_obs_crd_low` | out | 1 | `core_clk` | `ub_dll` 信用子块 | `cells==0` |
-| `tb_obs_crd_bp` | out | 1 | `core_clk` | `ub_dll` 信用子块 | `pend >= CRD_BP_THRESHOLD`。阈值参数 **草案** 1024 |
-| `tb_obs_crd_to` | out | 11 | `core_clk` | `ub_dll` 信用子块 | Crd_Ack 超时计数器当前值 |
+| `tb_obs_lmsm_st` | out | 5 | `core_clk` | `ub_lmsm` | **仅** LMSM 顶层状态，不含子状态。编码见 §10.3（已定） |
+| `tb_obs_crd_cells` | out | 16 | `core_clk` | `ub_dll` 信用子块 | **VL0** 远端信用库存 |
+| `tb_obs_crd_pend` | out | 16 | `core_clk` | `ub_dll` 信用子块 | **VL0** 未决信用（项目计数，单位 cell） |
+| `tb_obs_crd_low` | out | 1 | `core_clk` | `ub_dll` 信用子块 | VL0 `cells==0` |
+| `tb_obs_crd_bp` | out | 1 | `core_clk` | `ub_dll` 信用子块 | VL0 `pend >= CRD_BP_THRESHOLD`。阈值 **草案** 1024 |
+| `tb_obs_crd_to` | out | 11 | `core_clk` | `ub_dll` 信用子块 | VL0 Crd_Ack 超时计数器 |
 | `tb_obs_dll_sm_st` | out | 2 | `core_clk` | `ub_dll` | DLL SM 编码，见 §10.3 |
 | `tb_obs_consume_flits` | out | 10 | `core_clk` | `ub_dll` TX | 本拍 DLL TX 消耗的 flit 数 |
 
@@ -659,7 +657,7 @@ Retry 深度下界公式见 UB-DL §4.7.3.2（含 FEC 120/128 与 RTT）。M1 25
 
 ### 10.3 观察编码（项目约定）
 
-`tb_obs_lmsm_st[4:0]` 主状态（子状态是否占用剩余编码：**待定**，M1 先只报主状态）：
+`tb_obs_lmsm_st[4:0]`：**只编码顶层 LMSM 状态**，不含 Probe.Wait 等子状态。未列出的值保留。项目编码（已定）：
 
 | 值 | 状态 |
 | --- | --- |
@@ -746,43 +744,32 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 
 ### 13.1 草案（非已确认的 Xia 默认集）
 
-- 预编码 M1 默认关闭。
 - `NUM_RETRY_THRESHOLD=15`、`NUM_PHY_REINIT_THRESHOLD=4`（规范推荐）。
-- 单时钟、`USE_PMA_CLK=0`。
-- CSR 总线形态（§3.2.3 的 req/ready）作为项目约定。
 - `CRD_BP_THRESHOLD=1024`。
-- `tb_obs_lmsm_st` / `tb_obs_dll_sm_st` 项目编码（§10.3）。
+- `tb_obs_dll_sm_st` 项目编码（§10.3；LMSM 顶层编码已定）。
 
 ### 13.2 待定
 
-- 工艺节点、目标频率（是否采用 ~80.6 MHz 作 `core_clk`）。
-- 是否存在独立 `pma_clk`。
-- `pyc_reg` 复位极性与顶层 `rst_n` 的封装。
-- `csr_wstrb`、`csr_err`、读返回是否同拍。
-- `nw_tx` 非法 VL 策略；RX 缓冲深度。
+- RX 缓冲深度。
 - per-lane RX valid；AMCTL 是否与数据口共用。
-- `pma_tx_width` 编码；均衡/预编码针脚。
+- `pma_tx_width` 编码；均衡针脚。
 - LMB 由谁拼装；`lmsm_tx_pattern_sel` 枚举。
 - DLL↔PCS 是否需要 sop/eop；FEC bypass 时 `fec_ok` 含义。
 - FEC 交织 CodecNum；并行度与编解码拍数。
 - RETRY_ACK_SM 实现细节；ERROR_FLAG 发送。
 - 规范写「实现相关」的超时（Probe 等待、部分计数）。
-- 信用下溢（本地指针走负）是断言还是计数。
-- `irq` 极性与默认掩码。
 - PMA 模型存放路径与模型保真度（是否模拟 RC 探测波形）。
 - Data Rate 0 下 EQ/RXEQ 空转策略。
 - `MAX_DP_FLITS` 取值。
-- 齿轮箱拍数关系（若时钟或位宽改变）。
+- 齿轮箱拍数关系（flit 160b 与 PMA 字宽不对齐时的拍数，不是跨时钟）。
 - `pcs_fec_mode` 编码。
-- `tb_inj_crd_cells` / 观察信用总线对应哪条 VL（建议 VL0）。
-- `tb_obs_lmsm_st` 是否包含子状态。
 - `LMSM_TMR_SCALE` / `AM_IVL_SCALE` 的具体缩放编码。
-- `tb_inj_am_lock` / `tb_inj_lid_bad` 在 PMA 模型产出真实 AM 之后是否删除。
+- `tb_inj_am_lock` / `tb_inj_lid_bad`：M1 保留；**待定**是否在 PMA 模型证明能出真实 AM 之后删除。
 - PCS RX unpack `n==0 && have` drain 分支：验证确认端口可达性，否则删除分支或 waiver。
 
 ### 13.3 未知
 
-- 工艺节点、目标频率（**未知，待船长定**）。
+- 工艺节点（**未知，待船长定**）。
 - Probe 端接检测的电路级算法（规范交给实现）。
 - 真实 SerDes 的模拟参数（M1 不包含）。
 - 完整附录 D 字段复位值（本仓库不抄规范复位表；镜像窗口复位标「见对应节 / 待实现对照」）。

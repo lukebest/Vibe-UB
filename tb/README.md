@@ -15,11 +15,11 @@ tb/
   Makefile                  dual-netlist entry (TEST_HOOKS=0 and 1)
   pytest.ini                golden-model unit tests
   models/                   Python golden (no RTL)
-    ub_pcs_scrambler.py     interface only — pending SPEC (UB-PHY §3.2.2.4)
+    ub_pcs_scrambler.py     PRBS23; taps and LID→seed required (SPEC §13)
     ub_pcs_lane_dist.py     UB-PHY §3.2.2.3 / §3.2.5 / SPEC §3.3
-    ub_dll_bcrc.py          interface only — pending SPEC (UB-DL §4.3.2.2.4)
-    config.py               closed widths + pending knobs
-    tests/                  pytest (scrambler/BCRC compute skipped)
+    ub_dll_bcrc.py          CRC30 per SPEC §2.6
+    config.py               remaining §13 knobs
+    tests/                  pytest
   vibe_uvm/                 uvm-python skeleton (named so it does not shadow the `uvm` package)
     ub_csr_map.py           REGMAP offsets (CNT_CLR 0x0224, APPD 0x1E00/0x1F00)
     clk_rst.py              core_clk ≈ 80.57 MHz; rst_n async assert / sync deassert
@@ -79,9 +79,9 @@ Icarus does not produce line coverage.
 
 | Model | Spec | SPEC | Status |
 | --- | --- | --- | --- |
-| `UbPcsScrambler` | UB-PHY §3.2.2.4, §3.2.3.2 | §2.4 | **Interface only.** Core step raises `NotImplementedError("pending SPEC")`. Known: seed = `AMCTL.LID` (not phys / LTB.Lane_ID); LSB first. No poly / init / invert / `DATA_W` default. 1-cycle valid-only leaf (PR #5 ports, wiring only). |
-| `UbPcsLaneDist` | UB-PHY §3.2.2.3, §3.2.5, §3.4.1 | §2.4, §3.3, §9 | **Implemented.** 8-bit symbols; x1/x4/x8; CodecNum 1/2 formula; symbol 0 first; PMA word symbol 0 at LSB; 0-cycle. |
-| `UbDllBcrc` | UB-DL §4.3.2.2.4, §4.7.2 | §2.6 | **Interface only.** Compute raises `NotImplementedError("pending SPEC")`. Known packing: `{rsvd, ERROR_FLAG, CRC30[29:0]}`. No poly / init / invert default. 1-cycle valid-only leaf (PR #5 ports, wiring only). |
+| `UbPcsScrambler` | UB-PHY §3.2.2.4, §3.2.3.2, §3.2.6 | §2.4, §13 | **Implemented** with required `poly_taps` and `lid_to_seed` (no defaults). PRBS23, `SCR_W=23`, `DATA_W=32`, LSB first, seed source = `AMCTL.LID`, EDF/SDF reload rules. |
+| `UbPcsLaneDist` | UB-PHY §3.2.2.3, §3.2.5, §3.4.1 | §2.4, §3.3, §9 | **Implemented.** 8-bit symbols; symbol 0 first; PMA word symbol 0 at LSB; 0-cycle. |
+| `UbDllBcrc` | UB-DL §4.3.2.2.4, §4.7.2 | §2.6 | **Implemented.** CRC30 `30'h15A94AD5`, init all-1s, no invert/reorder, Byte 0 upward MSB-first, pack `{1'b0, ERROR_FLAG, crc[29:0]}`. |
 
 No LMB/LTB golden in this PR. LTB/CLTB field ports are SPEC §3.3.4 / UB-PHY §3.4.1 (`fec_mode_ctrl[2:0]`, `lmsm2pcs_pattern`, per-lane Lane_ID + CRC, latch at next LMB). Names wait for the next PR #4 commit.
 
@@ -91,11 +91,10 @@ Leaf agents use the generic valid-only / valid-ready agents. Port lists on the m
 
 See `models/config.py` and SPEC §13.
 
-1. Scrambler polynomial, init, invert, `DATA_W` — pending SPEC. Do not copy PR #5 / Switch.
-2. `AMCTL.LID` → seed map (seed *source* is known).
-3. BCRC polynomial, init, invert, bit-order of the step — pending SPEC. Packing is known.
-4. `FEC_CODEC_NUM` (SPEC §9 / §13.2, suggest 1).
-5. All other SPEC §13 items — not modelled here.
+1. Scrambler `poly_taps` and `lid_to_seed` — SPEC §13. Required arguments; tests pass 示例 values, not project defaults.
+2. Power-on LFSR before the first LID load — SPEC §13. This model loads the map for the constructor `amctl_lid`.
+3. `FEC_CODEC_NUM` (SPEC §9 / §13.2, suggest 1).
+4. All other SPEC §13 items — not modelled here.
 
 ## SPEC gaps / tensions seen while writing models
 

@@ -1,8 +1,8 @@
-"""M1 leaf defaults. SPEC §9 identifiers kept as UPPER_SNAKE.
+"""M1 leaf identifiers. Only SPEC-closed values live here (SPEC §9 / §2.4 / §2.6).
 
-Values that the in-repo SPEC does not pin (polynomial, seed, BCRC width)
-are parameters. Defaults follow lukebest/Vibe-UB-Switch (D9) and are listed
-under Open questions for Xia — they are not invented as closed SPEC text.
+OPEN items (PRBS23 taps, AMCTL.LID→seed map, LFSR power-on init) have
+**no** product default in this file. Parent / selfcheck / lint must pass
+them explicitly. See SPEC §13.2.
 """
 
 from __future__ import annotations
@@ -10,25 +10,25 @@ from __future__ import annotations
 # SPEC §9
 PMA_W = 32
 FLIT_W = 160
-NUM_LANES_DEFAULT = 4
+NUM_LANES_DEFAULT = 4  # bring-up target; RTL parameter to 8 (SPEC §9)
 NUM_LANES_MAX = 8
-PRECODE_EN = 0
-TEST_HOOKS = 0
-F_CORE_HZ = 80_570_000  # ≈ 2.578125e9 / 32
+PRECODE_EN = 0  # SPEC §9; PMA, not this batch
+TEST_HOOKS = 0  # SPEC §10: no hooks on these leaves
+F_CORE_HZ = 80_570_000  # ≈ 2.578125e9 / 32; SPEC §4.1 / §9
 
-# PCS symbol stripe (SPEC §2.4, UB-PHY §3.2.2.3)
+# PCS 8-bit stripe (SPEC §2.4, UB-PHY §3.2.2.3; bit order SPEC §3.3)
 SYM_W = 8
 
-# Scrambler (UB-PHY §3.2.2.4). Default algorithm from Vibe-UB-Switch.
-# DATA_W default = PMA_W (per-lane word after 8-bit dist). Not pinned in SPEC.
+# Scrambler — closed widths only (SPEC §2.4 / §9)
 SCR_W = 23
-SCR_TAP = 17  # feedback s[SCR_W-1] ^ s[SCR_TAP]  → x^23 + x^18 + 1
-LANE_ID_W = 3  # parameterized to x8
-DATA_W_SCR = PMA_W
+DATA_W_SCR = PMA_W  # per-lane instance; SPEC §2.4 / §9
+AMCTL_LID_W = 4  # SPEC §2.4: 0–7 Lane0–7, 8=NULL, 9–15 reserved
+SEED_MAP_SLOTS = 9  # lid 0..8 inclusive
 
-# BCRC (UB-DL §4.3.2.2). Default CRC30 from Vibe-UB-Switch AS-0.1 §12.
-# x^30+x^28+x^26+x^24+x^23+x^21+x^19+x^16+x^14+x^11+x^9+x^7+x^6+x^4+x^2+1
+# BCRC — closed by SPEC §2.6 / §9 / UB-DL §4.3.2.2.4 / §4.7.2
 BCRC_W = 30
-BCRC_POLY = 0x15A94AD5
-BCRC_INIT = (1 << BCRC_W) - 1
+BCRC_POLY = 0x15A94AD5  # x^30 implicit; SPEC §2.6 / §9
+BCRC_INIT = (1 << BCRC_W) - 1  # all-ones; SPEC §2.6
 BCRC_WORD_W = 32
+BCRC_BYTES = BCRC_WORD_W // 8  # last-flit field; not in the CRC (SPEC §2.6)
+# TX ERROR_FLAG constant 0 (SPEC §7: no ECC, no nw_tx_err)

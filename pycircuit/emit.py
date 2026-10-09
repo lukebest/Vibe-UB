@@ -5,10 +5,10 @@ CODING_STYLE §1: submitted .v must be reproducible from current Python.
 `pycc` (MLIR → Verilog) is used when present; the committed netlist is
 always written by this emitter so LLVM 19 is not required.
 
-Layout (does not overwrite D10 legacy `rtl/*.v`):
-  rtl/gen/common/  ub_pyc_rst_adapt.v
-  rtl/gen/pcs/     ub_pcs_*.v
-  rtl/gen/dll/     ub_dll_bcrc*.v
+Layout (SPEC §2.2 / CODING_STYLE §5; same as PR #7 ub_lmsm):
+  PRODUCT  rtl/<block>/<module>.v
+  HOOKS    rtl/<block>/hooks/<module>.v   (not emitted here — SPEC §10
+           lists no hooks on these leaves, so PRODUCT is the only netlist)
 Whitelist SV is handwritten: rtl/common/ub_rst_sync.sv
 """
 
@@ -22,7 +22,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
-GEN = REPO / "rtl" / "gen"
+RTL = REPO / "rtl"
 
 # pycircuit/ on sys.path — do NOT put REPO root on PYTHONPATH (shadows
 # the toolchain package also named pycircuit).
@@ -48,7 +48,7 @@ LEAVES = (
 )
 
 
-def emit_all(out_root: Path = GEN) -> list[Path]:
+def emit_all(out_root: Path = RTL) -> list[Path]:
     written: list[Path] = []
     for layer, name, fn in LEAVES:
         dest = out_root / layer / f"{name}.v"
@@ -72,7 +72,7 @@ def try_pycc() -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, default=GEN)
+    parser.add_argument("--out", type=Path, default=RTL)
     args = parser.parse_args()
     paths = emit_all(args.out)
     print(try_pycc())

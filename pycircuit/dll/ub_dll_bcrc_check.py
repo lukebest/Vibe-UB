@@ -1,8 +1,9 @@
-"""ub_dll_bcrc_check — DLL BCRC checker (SPEC §2.6; UB-DL §4.3.2.2 / §4.7.2).
+"""ub_dll_bcrc_check — DLL BCRC checker (SPEC §2.6; UB-DL §4.3.2.2.4 / §4.7.2 / §7).
 
-Same CRC as ``ub_dll_bcrc``. On ``last``, compares the computed remainder
-against ``crc_recv[CRC_W-1:0]`` (reserved bit and ERROR_FLAG are not part
-of the remainder compare — packing is a parameter / open question).
+Same CRC30 / byte-MSB-first stream as ``ub_dll_bcrc``. On ``last``:
+  - compare computed CRC30 to ``crc_recv[29:0]`` only (ERROR_FLAG not in the check)
+  - ``error_flag_rx`` = ``crc_recv[30]`` for the parent to drive ``nw_rx_err``
+  - bit31 reserved, ignored on receive
 """
 
 from __future__ import annotations

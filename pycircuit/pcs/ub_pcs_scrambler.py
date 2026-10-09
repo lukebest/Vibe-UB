@@ -1,16 +1,30 @@
-"""ub_pcs_scrambler — additive PCS scrambler (SPEC §2.4; UB-PHY §3.2.2.4).
+"""ub_pcs_scrambler — per-lane additive PRBS23 (SPEC §2.4; UB-PHY §3.2.2.4 / §3.2.6).
 
-Per-lane LFSR, valid-only, sync ``rst_pyc``. Default polynomial / seed
-are parameters (not closed in-repo SPEC text); defaults match
-Vibe-UB-Switch ``vibe_pcs_scramble`` (D9): PRBS23 ``x^23+x^18+1``,
-seed ``{{prefix=1, lane_id, 2'b01}}``, LSB-first window.
+Closed by SPEC:
+  - one instance per physical lane; DATA_W = PMA_W = 32 (§2.4, §9)
+  - 23-bit state SCR_W (§2.4, §9)
+  - seed source is AMCTL.LID (port ``amctl_lid[3:0]``), not physical
+    lane index and not LTB.Lane_ID (§2.4)
+  - LID encoding: 0–7 = Lane0–Lane7, 8 = NULL, 9–15 reserved (§2.4, §3.2.4.2)
+  - each scrambled symbol LSB first; data[0] is the first bit of the beat (§2.4, §3.3)
+  - en=0: bypass, LFSR does not step (AMCTL / EEIB)
+  - seed_load: load SEED_MAP[amctl_lid]. This **is** the SPEC §2.4 /
+    §3.2.2.4 / §3.4.3.6 / §3.4.3.7 reseed. Parent must drive it as:
+      seed_load = amctl_edf & ~lmsm_in_Send_NullBlock_or_Link_Active
+    SDF while LMSM is in those two states must keep seed_load=0 (do not
+    reseed). Same-cycle seed_load wins over LFSR advance (AMCTL beat has
+    en=0). Leaf does not invent EDF/SDF ports — SPEC §2.4 leaf table.
+  - 1-cycle latency (§5)
+  - sync rst_pyc; no TEST_HOOKS (§10)
 
-``en=0`` passes data and does not step the LFSR (AMCTL/EEIB later).
-``seed_load`` reloads the lane seed. If ``seed_load`` and ``valid_in && en``
-are both 1, the advance from the *current* LFSR wins (Switch NBA last-wins).
+OPEN per SPEC §13.2 (no product default, not authoritative):
+  - PRBS23 tap mask ``SCR_TAPS`` (bit k = include s[k] in Fibonacci XOR;
+    degree d ↔ bit d-1, matching the TB model convention)
+  - AMCTL.LID → 23-bit seed map ``SEED_MAP`` (slots 0..8)
+  - power-on LFSR init before first seed_load ``LFSR_INIT``
 
-Precoding is PMA, ``PRECODE_EN=0`` (SPEC §9) — this leaf does not precode.
-No TEST_HOOKS (SPEC §10 / CODING_STYLE §4).
+Parent / selfcheck / lint **must** pass those three. Emit does not bake
+Switch or any guessed g(x).
 """
 
 from __future__ import annotations
@@ -24,11 +38,15 @@ def emit_verilog(
     *,
     data_w: int = P.DATA_W_SCR,
     scr_w: int = P.SCR_W,
-    scr_tap: int = P.SCR_TAP,
-    lane_id_w: int = P.LANE_ID_W,
+    amctl_lid_w: int = P.AMCTL_LID_W,
+    seed_slots: int = P.SEED_MAP_SLOTS,
 ) -> str:
     return _emit_scramble_module(
-        MODULE, data_w=data_w, scr_w=scr_w, scr_tap=scr_tap, lane_id_w=lane_id_w
+        MODULE,
+        data_w=data_w,
+        scr_w=scr_w,
+        amctl_lid_w=amctl_lid_w,
+        seed_slots=seed_slots,
     )
 
 
@@ -37,45 +55,52 @@ def _emit_scramble_module(
     *,
     data_w: int,
     scr_w: int,
-    scr_tap: int,
-    lane_id_w: int,
+    amctl_lid_w: int,
+    seed_slots: int,
 ) -> str:
-    seed_prefix_w = scr_w - lane_id_w - 2
-    if seed_prefix_w < 1:
-        raise ValueError("SCR_W must be > LANE_ID_W + 2")
+    seed_map_w = scr_w * seed_slots
     return f"""// GENERATED from pycircuit/pcs/{name}.py — do not edit.
 // Reproduce: make emit
-// SPEC §2.4 / UB-PHY §3.2.2.4. TEST_HOOKS=0 (no §10 hooks on this leaf).
-// Registers are pyc_reg semantics: posedge core_clk, sync active-high rst_pyc.
-// Polynomial / seed are parameters (Open questions for Xia). PRECODE_EN=0.
+// SPEC §2.4 / UB-PHY §3.2.2.4 / §3.2.6 / §3.3 / §3.4.3.6 / §3.4.3.7.
+// TEST_HOOKS=0. pyc_reg: posedge core_clk, sync active-high rst_pyc.
+// PRECODE_EN=0 (PMA; SPEC §9) — this leaf does not precode.
+//
+// Fibonacci LFSR: output = MSB; feedback = XOR of s[k]&SCR_TAPS[k];
+// next = {{s[SCR_W-2:0], fb}}. data[0] gets the first output bit (LSB-first).
+//
+// SPEC §2.4 reseed (TX/RX same). Leaf pin is seed_load; parent decodes:
+//   seed_load = amctl_edf & ~lmsm_in_Send_NullBlock_or_Link_Active;
+//   SDF while in those two LMSM states → seed_load must stay 0.
+//
+// OPEN per SPEC §13, not authoritative — parent / selfcheck MUST pass:
+//   SCR_TAPS, SEED_MAP, LFSR_INIT
+// No product default (no Switch g(x), no invented LID map).
 
 module {name} #(
-  parameter integer DATA_W     = {data_w},
-  parameter integer SCR_W      = {scr_w},
-  parameter integer SCR_TAP    = {scr_tap},
-  parameter integer LANE_ID_W  = {lane_id_w}
+  parameter integer DATA_W        = {data_w},
+  parameter integer SCR_W         = {scr_w},
+  parameter integer AMCTL_LID_W   = {amctl_lid_w},
+  parameter integer SEED_MAP_SLOTS = {seed_slots},
+  parameter integer SEED_MAP_W    = SCR_W * SEED_MAP_SLOTS,
+  // OPEN per SPEC §13, not authoritative. Parent / selfcheck must override.
+  parameter [SCR_W-1:0]      SCR_TAPS  = {{SCR_W{{1'b0}}}},
+  parameter [SCR_W-1:0]      LFSR_INIT = {{SCR_W{{1'b0}}}},
+  parameter [SEED_MAP_W-1:0] SEED_MAP  = {{SEED_MAP_W{{1'b0}}}}
 ) (
-  input  wire                 core_clk,
-  input  wire                 rst_pyc,
-  input  wire [LANE_ID_W-1:0] lane_id,
-  input  wire                 seed_load,
-  input  wire                 en,
-  input  wire                 valid_in,
-  input  wire [DATA_W-1:0]    data_in,
-  output wire                 valid_out,
-  output wire [DATA_W-1:0]    data_out
+  input  wire                   core_clk,
+  input  wire                   rst_pyc,
+  input  wire [AMCTL_LID_W-1:0] amctl_lid,
+  input  wire                   seed_load,
+  input  wire                   en,
+  input  wire                   valid_in,
+  input  wire [DATA_W-1:0]      data_in,
+  output wire                   valid_out,
+  output wire [DATA_W-1:0]      data_out
 );
-
-  localparam integer SEED_PREFIX_W = SCR_W - LANE_ID_W - 2;
 
   reg  [SCR_W-1:0]  lfsr_q;
   reg               valid_q;
   reg  [DATA_W-1:0] data_q;
-
-  wire [SCR_W-1:0] seed;
-  wire [SCR_W-1:0] rst_seed;
-  assign seed     = {{ {{SEED_PREFIX_W-1{{1'b0}}}}, 1'b1, lane_id, 2'b01 }};
-  assign rst_seed = {{ {{SCR_W-2{{1'b0}}}}, 2'b01 }};
 
   reg  [DATA_W-1:0] xmask;
   reg  [SCR_W-1:0]  t_mask;
@@ -84,8 +109,23 @@ module {name} #(
 
   function automatic [SCR_W-1:0] lfsr_step;
     input [SCR_W-1:0] s;
+    reg               fb;
+    integer           tk;
     begin
-      lfsr_step = {{s[SCR_W-2:0], s[SCR_W-1] ^ s[SCR_TAP]}};
+      fb = 1'b0;
+      for (tk = 0; tk < SCR_W; tk = tk + 1)
+        fb = fb ^ (s[tk] & SCR_TAPS[tk]);
+      lfsr_step = {{s[SCR_W-2:0], fb}};
+    end
+  endfunction
+
+  function automatic [SCR_W-1:0] seed_from_lid;
+    input [AMCTL_LID_W-1:0] lid;
+    begin
+      if (lid <= 4'd8)
+        seed_from_lid = SEED_MAP[lid*SCR_W +: SCR_W];
+      else
+        seed_from_lid = {{SCR_W{{1'b0}}}};
     end
   endfunction
 
@@ -93,22 +133,22 @@ module {name} #(
     xmask  = {{DATA_W{{1'b0}}}};
     t_mask = lfsr_q;
     for (i = 0; i < DATA_W; i = i + 1) begin
-      xmask[i] = t_mask[0];
+      xmask[i] = t_mask[SCR_W-1];
       t_mask   = lfsr_step(t_mask);
     end
     t_adv = lfsr_q;
-    for (i = 0; i < DATA_W; i = i + 1) begin
+    for (i = 0; i < DATA_W; i = i + 1)
       t_adv = lfsr_step(t_adv);
-    end
   end
 
-  wire        lfsr_en = seed_load | (valid_in & en);
-  wire [SCR_W-1:0] lfsr_d = (valid_in & en) ? t_adv : seed;
+  wire [SCR_W-1:0] seed_now = seed_from_lid(amctl_lid);
+  // SPEC §2.4 EDF reseed (seed_load) wins over a same-cycle step.
+  wire             lfsr_en  = seed_load | (valid_in & en);
+  wire [SCR_W-1:0] lfsr_d   = seed_load ? seed_now : t_adv;
 
-  // pyc_reg #(.WIDTH(SCR_W)) expansion
   always @(posedge core_clk) begin
     if (rst_pyc)
-      lfsr_q <= rst_seed;
+      lfsr_q <= LFSR_INIT;
     else if (lfsr_en)
       lfsr_q <= lfsr_d;
   end

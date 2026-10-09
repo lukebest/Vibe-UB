@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Repo-root wrapper: python3 scripts/emit_rtl.py → rtl/gen/."""
+"""Repo-root wrapper: python3 scripts/emit_rtl.py → rtl/<block>/<module>.v."""
 
 from __future__ import annotations
 

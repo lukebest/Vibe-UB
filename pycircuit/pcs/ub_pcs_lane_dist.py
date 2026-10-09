@@ -1,10 +1,14 @@
 """ub_pcs_lane_dist — 8-bit FEC symbol stripe across lanes (SPEC §2.4; UB-PHY §3.2.2.3 / §3.2.5).
 
-Combo. ``data_in`` is symbol-major (symbol 0 at LSB). ``data_out`` is
-lane-major (lane 0 at LSB, SPEC §3.2.4). ``NUM_LANES`` default 4, parameter
-to 8. ``PMA_W`` default 32 (SPEC §9). ``SYM_W`` default 8.
+Combo, 0-cycle (SPEC §5). Bit order closed in SPEC §3.3:
+  PMA word: symbol 0 in the lowest byte; bit0 of each symbol is LSB.
+  Multi-lane pack: lane0 at bus LSB (SPEC §3.2.4).
 
-No clock / reset (pure interconnect). No TEST_HOOKS.
+``data_in`` is symbol-major (symbol 0 at LSB). ``data_out`` is lane-major
+(lane 0 at LSB). ``NUM_LANES`` default 4 (bring-up; param to 8, SPEC §9).
+``PMA_W`` default 32 (SPEC §9). ``SYM_W`` default 8.
+
+No clock / reset. No TEST_HOOKS.
 """
 
 from __future__ import annotations
@@ -29,14 +33,14 @@ def _emit_lane(name: str, *, dist: bool, num_lanes: int, pma_w: int, sym_w: int)
     if dist:
         assign = """      assign data_out[LANE*PMA_W + POS*SYM_W +: SYM_W] =
              data_in[s*SYM_W +: SYM_W];"""
-        comment = "symbol-major in → lane-major out (lane0 LSB)"
+        comment = "symbol-major in → lane-major out; symbol0 / lane0 at LSB (SPEC §3.3)"
     else:
         assign = """      assign data_out[s*SYM_W +: SYM_W] =
              data_in[LANE*PMA_W + POS*SYM_W +: SYM_W];"""
-        comment = "lane-major in (lane0 LSB) → symbol-major out"
+        comment = "lane-major in → symbol-major out; symbol0 / lane0 at LSB (SPEC §3.3)"
     return f"""// GENERATED from pycircuit/pcs/{name}.py — do not edit.
 // Reproduce: make emit
-// SPEC §2.4 / UB-PHY §3.2.2.3 / §3.2.5. TEST_HOOKS=0.
+// SPEC §2.4 / §3.3 / UB-PHY §3.2.2.3 / §3.2.5. TEST_HOOKS=0.
 // 8-bit FEC symbols. {comment}. Combo, 0-cycle.
 
 module {name} #(

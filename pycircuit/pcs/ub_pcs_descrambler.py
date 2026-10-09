@@ -1,6 +1,7 @@
-"""ub_pcs_descrambler — additive inverse of ub_pcs_scrambler (SPEC §2.4; UB-PHY §3.2.3.2).
+"""ub_pcs_descrambler — same additive PRBS23 as ub_pcs_scrambler (SPEC §2.4; UB-PHY §3.2.3.2).
 
-Same LFSR / ports / latency as the scrambler (XOR is involutive).
+TX and RX rules are identical. OPEN taps / seed map / LFSR_INIT: see
+``ub_pcs_scrambler`` — parent / selfcheck must pass them.
 """
 
 from __future__ import annotations
@@ -15,9 +16,13 @@ def emit_verilog(
     *,
     data_w: int = P.DATA_W_SCR,
     scr_w: int = P.SCR_W,
-    scr_tap: int = P.SCR_TAP,
-    lane_id_w: int = P.LANE_ID_W,
+    amctl_lid_w: int = P.AMCTL_LID_W,
+    seed_slots: int = P.SEED_MAP_SLOTS,
 ) -> str:
     return _emit_scramble_module(
-        MODULE, data_w=data_w, scr_w=scr_w, scr_tap=scr_tap, lane_id_w=lane_id_w
+        MODULE,
+        data_w=data_w,
+        scr_w=scr_w,
+        amctl_lid_w=amctl_lid_w,
+        seed_slots=seed_slots,
     )

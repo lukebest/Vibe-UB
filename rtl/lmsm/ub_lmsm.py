@@ -11,10 +11,12 @@ Regenerate both netlists:
 
 SPEC §2.2 / CODING_STYLE §5 place generated RTL in ``rtl/lmsm/``
 (not PR #5 ``rtl/gen/``, which exists to avoid overwriting D10
-legacy under ``rtl/pcs`` / ``rtl/dll``). PRODUCT and HOOKS:
+legacy under ``rtl/pcs`` / ``rtl/dll``). Both netlists keep the
+filename ``ub_lmsm.v`` so it matches the module (Verilator
+DECLFILENAME / CODING_STYLE §5 one-module-one-file):
 
     PRODUCT (TEST_HOOKS=0) → ``rtl/lmsm/ub_lmsm.v``
-    HOOKS   (TEST_HOOKS=1) → ``rtl/lmsm/ub_lmsm_hooks.v``
+    HOOKS   (TEST_HOOKS=1) → ``rtl/lmsm/hooks/ub_lmsm.v``
 
 Module name ``ub_lmsm`` = ``ub_<层>_<功能>`` (CODING_STYLE §5 / SPEC §2.2).
 
@@ -98,7 +100,7 @@ LANE_ID_NULL = 2
 
 HERE = Path(__file__).resolve().parent
 PRODUCT_V = HERE / "ub_lmsm.v"
-HOOKS_V = HERE / "ub_lmsm_hooks.v"
+HOOKS_V = HERE / "hooks" / "ub_lmsm.v"
 
 
 def _header(test_hooks: int) -> str:

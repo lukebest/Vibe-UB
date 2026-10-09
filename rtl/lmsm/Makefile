@@ -1,7 +1,7 @@
 # Regenerate and lint ub_lmsm (PRODUCT + HOOKS).
 # Generated location follows SPEC §2.2 / CODING_STYLE §5: rtl/lmsm/
 #   PRODUCT → rtl/lmsm/ub_lmsm.v
-#   HOOKS   → rtl/lmsm/ub_lmsm_hooks.v
+#   HOOKS   → rtl/lmsm/hooks/ub_lmsm.v
 #   make -C rtl/lmsm
 #   make -C rtl/lmsm lint
 #   make -C rtl/lmsm yosys
@@ -11,7 +11,7 @@ VERILATOR ?= verilator
 YOSYS ?= yosys
 
 PRODUCT = ub_lmsm.v
-HOOKS   = ub_lmsm_hooks.v
+HOOKS   = hooks/ub_lmsm.v
 
 .PHONY: all gen lint yosys clean
 

@@ -48,7 +48,8 @@ module tb_passthru (
     function automatic [3:0] cnt_index;
         input [15:0] addr;
         begin
-            cnt_index = addr[7:2] - CSR_CNT_BASE[7:2];
+            // 0x0200,0x0204,...,0x0220 → 0..8
+            cnt_index = addr[5:2];
         end
     endfunction
 

@@ -383,11 +383,17 @@ FEC / BCRC 错由 D3 PMA 模型改符号，无对应钩子。
 | TP-UNIT-PCS-027 | SPEC §10.5；D12 | LMSM 非法态 / default 臂 | 不注入、不停指定态 | 具名 waiver | cp_lmsm_default | M1 | 计划（waiver） |
 | TP-UNIT-PCS-028 | SPEC §5、§13.2 | FEC 编解码拍数与并行度 | 实现后回填激励 | 拍数记入 scoreboard | cp_fec_lat | M1 | **待定**（§13） |
 | TP-UNIT-PCS-029 | SPEC §6.1、§13.2 | Data Rate 0 下 EQ/RXEQ 空转策略 | 进入 EQ / RXEQ_Optimize | 空转超时退出或跳过（等 SPEC） | cp_eq_idle | M1 | **待定**（§13） |
-| TP-UNIT-PCS-030 | SPEC §3.3.4 | LMB 拼装：LMSM 给各 lane 相同公共字段；PCS 按 lane 填 Lane_ID、算 CRC（12–13）和 padding、插入码流 | 训练期出 LTB | 无 TX `lmsm2pcs_lane_id` | cp_lmb_src | M1 | 计划 |
-| TP-UNIT-PCS-031 | SPEC §3.3.4 | TX：PCS 在每帧 LMB **起始**锁存全部 `lmsm2pcs_*` 字段/`pattern`/Lane_ID 控制；LMSM 任意拍可改，下一帧起始生效；`lmsm2pcs_ltb_valid` **无**多拍保持要求 | 插入间隙改字段 | 当帧仍用旧锁存；下一 LMB 用新值 | cp_ltb_latch | M1 | 计划 |
-| TP-UNIT-PCS-032 | SPEC §3.3.4 | `lmsm2pcs_pattern`：0 电气空闲 / 1 EEIB / 2 LTB / 3 DLL 业务 | 扫四值 | PCS 出对应图案；EEIB 不走 LTB 字段口 | cp_ltb_pat | M1 | 计划 |
-| TP-UNIT-PCS-033 | SPEC §3.3.4 | TX Lane_ID：`PHYS`/`ASCEND`/`NULL` + `lane_id_base`/`lane_id_map`；PCS 逐物理 TX lane 填写后再算 CRC | 扫三模式、x4 | 各 lane Lane_ID 与 CRC 按该 lane | cp_lane_id | M1 | 计划 |
-| TP-UNIT-PCS-034 | SPEC §3.3.4 | RX：仅 CRC 通过给 `pcs2lmsm_ltb_valid` 单拍；`pcs2lmsm_*` 字段与 `pcs2lmsm_lane_id` 当拍有效 | 对端出 DLTB/CLTB | CRC 失败无 valid | cp_ltb_rx | M1 | 计划 |
+| TP-UNIT-PCS-030 | SPEC §3.3.4；UB-PHY §3.4.1 | LMB 拼装：LMSM 给公共字段；PCS **按物理 lane** 填 Lane_ID，**每条 lane 单独**算 CRC（符号 12–13）和填充（14–15） | 训练期出 LTB，x4 | 各 lane CRC/填充不同；无独立 `pcs_fec_mode` | cp_lmb_src | M1 | 计划 |
+| TP-UNIT-PCS-031 | SPEC §3.3.4 | **LMB 中途改字段**：PCS 在每个 LMB **起始边界**锁存；当前 LMB 不变，下一个 LMB 生效。`lmsm2pcs_ltb_valid` **没有**保持拍数要求 | 一帧 LMB 进行中改 `lmsm2pcs_*` | 当帧符号/CRC 仍为旧锁存；下一 LMB 用新值 | cp_ltb_latch | M1 | 计划 |
+| TP-UNIT-PCS-032 | SPEC §3.3.4 | `lmsm2pcs_pattern=0` 电气空闲 | 置 0 | 各 lane 电气空闲，无 LTB 字段口 | cp_pat_idle | M1 | 计划 |
+| TP-UNIT-PCS-033 | SPEC §3.3.4；UB-PHY §3.4.1.2 | `lmsm2pcs_pattern=1` EEIB | 置 1 | PCS 按当前 Data Rate 出 EEIB；不用 LTB 字段 | cp_pat_eeib | M1 | 计划 |
+| TP-UNIT-PCS-034 | SPEC §3.3.4 | `lmsm2pcs_pattern=2` LTB | 置 2 | 走字段口插入 LTB | cp_pat_ltb | M1 | 计划 |
+| TP-UNIT-PCS-035 | SPEC §3.3.4 | `lmsm2pcs_pattern=3` DLL payload | 置 3 | 出 DLL 业务码流 | cp_pat_dll | M1 | 计划 |
+| TP-UNIT-PCS-036 | SPEC §3.3.4 | Lane_ID 模式 **物理 ID**（`lmsm2pcs_lane_id_mode`；名以下一 commit 为准） | 模式=物理；x4 | 每物理 lane 的 Lane_ID=该 lane 号；每 lane 自算 CRC | cp_lid_phys | M1 | 计划 |
+| TP-UNIT-PCS-037 | SPEC §3.3.4 | Lane_ID 模式 **按 Tx_0..Tx_M-1 升序分配** | 模式=升序 + map/base | 各激活 lane 编号唯一递增；每 lane 自算 CRC | cp_lid_asc | M1 | 计划 |
+| TP-UNIT-PCS-038 | SPEC §3.3.4 | Lane_ID 模式 **NULL** | 模式=NULL | 各激活 lane Lane_ID 为空值（§3.4.1.1）；每 lane 自算 CRC | cp_lid_null | M1 | 计划 |
+| TP-UNIT-PCS-039 | SPEC §3.3.4 | `fec_mode_ctrl[2:0]` **取代** `pcs_fec_mode`；覆盖合法取值（对照 UB-PHY §3.4.1.1，含 T=4 / T=2 / bypass） | 扫合法编码 | PCS 数据通路 FEC 只跟此字段；无 `pcs_fec_mode` 口 | cp_fec_ctrl | M1 | 计划 |
+| TP-UNIT-PCS-040 | SPEC §3.3.4 | RX：仅 CRC 通过给 `pcs2lmsm_ltb_valid` 单拍；`pcs2lmsm_*` 与 `pcs2lmsm_lane_id` 当拍有效 | 对端出 DLTB/CLTB | CRC 失败无 valid | cp_ltb_rx | M1 | 计划 |
 
 ### 8.2 单元级 — DLL
 
@@ -438,15 +444,16 @@ FEC / BCRC 错由 D3 PMA 模型改符号，无对应钩子。
 | TP-UNIT-CSR-013 | REGMAP `CTRL.PORT_RST`；SPEC §3.2.3、§4.2、§6.2 | `PORT_RST` 写 1 自清；内部 **16 拍**同步复位。**范围内清零**：PCS / LMSM / DLL（含 retry）/ 信用计数 | 业务通路有状态后写 PORT_RST | `tb_obs_lmsm_st==0`、`tb_obs_dll_sm_st==0`；信用回初值；retry 空 | cp_port_rst | M1 | 计划 |
 | TP-UNIT-CSR-014 | SPEC §6.1 vs REGMAP `CTRL.LMSM_START` | 软件启动离开 Link_Idle | 写启动位 | 离开 Idle。寄存器名 **等 SPEC 澄清** | cp_lmsm_start | M1 | **待定**（等 SPEC 澄清） |
 | TP-UNIT-CSR-015 | SPEC §9；REGMAP PARAM | PARAM_* 读回等于确认默认 | 上电读 | Mode-2 / Rate0 / VL=2 / 640 / 256 等 | cp_param_rb | M1 | 计划 |
-| TP-UNIT-CSR-016 | REGMAP §2.3 | ERR 计数递增 | 注入对应错误 | 计数饱和到全 1 | cp_err_inc | M1 | 计划 |
-| TP-UNIT-CSR-017 | SPEC §3.2.3；REGMAP §2.3 | 清零已统一：sticky=W1C；计数 RO 饱和；往 `CNT_CLR` 对应位写 1 清零、该位自清；**`CNT_CRD_UF` 同理**。无读清、无写即清 | 注错后读计数不清；写任意值到 COUNT 无效；写 `CNT_CLR` 对应位 | 只 CLR 那位回 0；`CNT_CLR` 再读为 0 | cp_err_clr | M1 | 计划 |
-| TP-UNIT-CSR-018 | REGMAP §1、§2.5 | APPD 窗内地址：`APPD_LMSM_ST=0x1E00`、`APPD_PORT_ERR=0x1F00`（落入 `0x1000–0x1FFF`）；另有 `0x1000`/`0x1100`/`0x1200` | 读各窗口基址 | 已映射、非 `csr_err`。不以旧址 `0x2400`/`0x2500` 为准 | cp_appd_win | M1 | 计划 |
-| TP-UNIT-CSR-019 | SPEC §3.2.3、§10.1、§11 (c)(d)；REGMAP §2.4 | TEST 窗已映射：`tb_test_mode=0` 或 **PRODUCT** 读回 0、写忽略、`csr_err=0` | HOOKS mode=0 与 PRODUCT 各写/读 TEST | 不是未映射。**列入产品网表冒烟子集**（与 TOP-015 同跑） | cp_test_map | M1 | 计划 |
+| TP-UNIT-CSR-016 | REGMAP §2.3 | 九个 ERR 计数（`0x0200`–`0x0220`，含 `CNT_CRD_UF`）递增并**饱和到全 1** | 各源注错过量 | 停在全 1，不回绕 | cp_err_sat | M1 | 计划 |
+| TP-UNIT-CSR-017 | SPEC §3.2.3；REGMAP §2.3 | `CNT_CLR` **0x0224** bit0–8 覆盖全部计数（bit8=`CNT_CRD_UF`）：每一位写 1 只清对应计数，该位**自清** | 九个计数非 0 后逐位写 1 | 对应 COUNT=0；再读 `CNT_CLR==0`；其它计数不动 | cp_cnt_clr | M1 | 计划 |
+| TP-UNIT-CSR-018 | REGMAP §2.5 | `APPD_LMSM_ST`=**0x1E00**，`APPD_PORT_ERR`=**0x1F00**（窗内 `0x1000–0x1FFF`） | 读这两址及 `0x1000`/`0x1100`/`0x1200` | 已映射、`csr_err=0` | cp_appd_win | M1 | 计划 |
+| TP-UNIT-CSR-019 | SPEC §3.2.3、§10、§11；REGMAP §2.4 | TEST 窗：`tb_test_mode=0` 读 0、写忽略、`csr_err=0`；**PRODUCT 网表永远如此** | HOOKS mode=0 与 PRODUCT 读写 `0x0300–0x03FF` | 已映射。列入产品冒烟（TOP-015） | cp_test_map | M1 | 计划 |
 | TP-UNIT-CSR-020 | SPEC §3.2.3；REGMAP `CTRL.PORT_RST` | `PORT_RST` **范围外保留**：CSR 配置、错误计数、IRQ（status/mask）、TEST 不被脉冲复位 | 先写配置/注错/开 TEST，再 PORT_RST | 配置与计数/IRQ/TEST 保持。与 CSR-013 成对 | cp_port_rst_scope | M1 | 计划 |
 | TP-UNIT-CSR-021 | SPEC §3.2.6、§7；REGMAP `IRQ_STATUS` | 七个 irq 源置位；粘滞 **W1C**；`IRQ_EN` 合成 `irq` | 分别打 FEC/CRC/RETRY/CRD_PROTO/TRAIN/BAD_VL/CRD_UF | 写 1 清对应位；禁读清 | cp_irq_w1c | M1 | 计划 |
 | TP-UNIT-CSR-022 | REGMAP §2.1；SPEC §10.3、§13.2 | STATUS 镜像 `link_up`/`link_ready`/`LMSM_ST`/`DLL_SM_ST`；`RETRY_*_ST` 编码见 §13 | 训练 + DLL 全序 | 与 `tb_obs_*` 一致。RETRY 编码 **等 SPEC §13** | cp_status_mirr | M1 | **待定**（§13） |
 | TP-UNIT-CSR-023 | SPEC §3.2.3 | `csr_ready` M1 恒 1；写响应下一拍 `csr_rvalid=0` 且 `csr_err` 有效 | 连续写/读 | 无等待；以 SPEC §3.2.3 为准 | cp_csr_rdy | M1 | 计划 |
 | TP-UNIT-CSR-024 | SPEC §5 | CSR 写生效到控制电平 1 拍 | 写 `LMSM_START` / `IRQ_EN` | 下一拍可见 | cp_csr_wr1 | M1 | 计划 |
+| TP-UNIT-CSR-025 | SPEC §3.2.3；REGMAP §2.3 | 计数器 **只读**：写 COUNT 地址忽略且不清零；读计数不清零。无读清、无写即清 | 计数非 0 时写 COUNT、再读 | 值不变；只有 `CNT_CLR` 能清 | cp_cnt_ro | M1 | 计划 |
 | TP-UNIT-CLK-001 | SPEC §4.1、§9 | 单时钟 `core_clk`≈80.57 MHz，`USE_PMA_CLK=0` | 顶层无 `pma_clk`；TB 周期 12.41 ns | 端口清单与频率 | cp_core_clk | M1 | 计划 |
 | TP-UNIT-RST-001 | SPEC §4.2；CODING_STYLE §2 | `rst_n` 异步置位、同步释放，经 `ub_rst_sync` **2 级** | 异步拉低再同步释放 | 释放对齐 `core_clk`；级数=2 | cp_rst_sync | M1 | 计划 |
 | TP-UNIT-RST-002 | SPEC §4.2 | `ub_pyc_rst_adapt`：业务只见 `rst_pyc` | 复位释放后写 CSR | 业务沿同步复位工作 | cp_rst_adapt | M1 | 计划 |
@@ -481,7 +488,7 @@ FEC / BCRC 错由 D3 PMA 模型改符号，无对应钩子。
 | TP-SUB-PCS-003 | UB-PHY §3.2.3.5 | 子系统环回无错 | D3 环回 | 端到端一致 | cp_fec_lb_clean | M1 | 计划 |
 | TP-SUB-PCS-004 | UB-PHY §3.2.3.5 | 环回注入 ≤T 符号错，纠正后 DLL 无重传 | D3 PMA 模型改符号（无 FEC 钩子） | 数据对、无 Retry_Req | cx_fec_t | M1 | 计划 |
 | TP-SUB-PCS-005 | UB-PHY §3.2.3.5 | >T 失败上交 DLL 重传 | D3 PMA 模型改符号 | fec_fail 与 retry 联动 | cp_fec_to_dll | M1 | 计划 |
-| TP-SUB-PCS-006 | UB-PHY §3.2.2.1、§3.4.2.8 | 协商 T=2 / bypass | LMSM/LMB 场 | 编解码模式一致 | cp_fec_mode | M1 | RTL未就绪 |
+| TP-SUB-PCS-006 | SPEC §3.3.4；UB-PHY §3.2.2.1、§3.4.1.1、§3.4.2.8 | 协商 FEC：通路只跟 `fec_mode_ctrl[2:0]`（无 `pcs_fec_mode`） | CLTB/RLTB 改 ctrl | 编解码与字段一致（合法取值见 PCS-039） | cp_fec_mode | M1 | RTL未就绪 |
 | TP-SUB-PCS-007 | UB-PHY §3.2.4、§3.2.3.1 | AMCTL 周期插入、锁定、deskew | 环回加 lane 延迟 | 对齐后数据正确 | cx_amctl_skew | M1 | RTL未就绪 |
 | TP-SUB-PCS-008 | UB-PHY §3.2.4.3 | AMCTL 不进 FEC、不扰码 | 观察边界 AMCTL | 与明文规则一致 | cp_amctl_raw | M1 | RTL未就绪 |
 | TP-SUB-PCS-009 | UB-PHY §3.4.2.1–§3.4.2.2 | 端口类型与链路宽度协商 x1→x4 | LMB 交换 | 最终宽度 x4 | cp_width_neg | M1 | RTL未就绪 |
@@ -573,9 +580,15 @@ FEC / BCRC 错由 D3 PMA 模型改符号，无对应钩子。
 | 功能覆盖 | **计入具名豁免后 100%** | 分母 = 里程碑 M1 且状态 ∈ {计划, RTL未就绪, 待定, 计划（waiver）}；「推迟」「一期不做」「后续」不进分母 |
 | Toggle | **不算** | 不采集、不验收 |
 
-豁免必须**具名**：编号、层次/文件或 TP ID、理由、批准人、日期。无批准人的条目不算豁免、计为缺口。
+豁免必须**具名**：编号、层次/文件或 TP ID、理由、批准人、日期。无批准人的条目不算豁免、计为缺口。记入 `reports/regress/waiver.md`。
 
-FSM 非法态 / default 臂：**一律具名 waiver**（TP-UNIT-PCS-027、TP-UNIT-DLL-022），不把状态机停到指定态。`CRD_UF` 计数与 irq 分支：具名 waiver `WAIVER_CRD_UF_CNT` / `WAIVER_CRD_UF_IRQ`（SPEC §13.4）；正确设计到不了，禁止 force 下溢，下溢由 TB 断言（TP-UNIT-DLL-024）。PCS RX unpack drain（TP-UNIT-PCS-026）等新 RTL 评估可达性，未决前不算豁免达成。
+| 标识 | 对象 | 理由 | 对应 TP |
+| --- | --- | --- | --- |
+| `WAIVER_CRD_UF_CNT` | `CNT_CRD_UF` 递增分支 | SPEC §13.4：正确设计不会把信用减过 0，计数仍保留；行/功能覆盖不可达。禁止 force 下溢 | TP-UNIT-DLL-024 |
+| `WAIVER_CRD_UF_IRQ` | `IRQ_STATUS.CRD_UF` 置位与 `irq` 合成 | SPEC §13.4：同上 | TP-UNIT-DLL-024 |
+| （FSM default） | LMSM / DLL SM 非法态、default 臂 | 不停指定态；具名 waiver，批准后落文件 | TP-UNIT-PCS-027、TP-UNIT-DLL-022 |
+
+下溢由 **TB 断言**，不是 RTL assert。PCS RX unpack drain（TP-UNIT-PCS-026）等新 RTL 评估可达性，未决前不算豁免达成。
 
 参考（旧项目习惯，已被 D12 吸收，不是另一套门限）：行覆盖常先做到 ≥95% 再把剩余写成豁免；功能覆盖本身就要 100%（豁免计入）。本期直接按 D12 的 100%（含豁免）验收。
 
@@ -721,18 +734,18 @@ Xia 已写死：存在两份网表，不得混用验收口径。
 
 | 层 | 总行 | M1（D12 分母） | 后续 | 推迟 | 一期不做 |
 | --- | --- | --- | --- | --- | --- |
-| 单元 PCS/LMSM | 34 | 29 | 3 | 0 | 2（皆 D4） |
+| 单元 PCS/LMSM | 40 | 35 | 3 | 0 | 2（皆 D4） |
 | 单元 DLL | 25 | 23 | 0 | 0 | 2（皆 D4） |
-| 单元 CSR/CDC/IF/PMA/HOOK | 48 | 43 | 0 | 5 | 0 |
+| 单元 CSR/CDC/IF/PMA/HOOK | 49 | 44 | 0 | 5 | 0 |
 | 子系统 PCS | 20 | 15 | 0 | 0 | 5（皆 D4） |
 | 子系统 DLL | 21 | 20 | 1 | 0 | 0 |
 | 顶层 | 21 | 18 | 1 | 1 | 1（D11） |
 | 推迟占位 NW/TP/TA/钩子 | 7 | 0 | 0 | 7 | 0 |
-| **合计** | **176** | **148** | **5** | **13** | **10** |
+| **合计** | **183** | **155** | **5** | **13** | **10** |
 
-148 + 5 + 13 + 10 = 176。
+155 + 5 + 13 + 10 = 183。
 
-M1 分母拆分：计划 101 + 计划（waiver）2 + RTL未就绪 28 + 待定 17 = 148。未实现的 RTL未就绪 / 待定 记 SKIP，不算 PASS，也不算功能覆盖达成。
+M1 分母拆分：计划 108 + 计划（waiver）2 + RTL未就绪 28 + 待定 17 = 155。未实现的 RTL未就绪 / 待定 记 SKIP，不算 PASS，也不算功能覆盖达成。
 
 待定 17 条：等 SPEC 澄清 1（CSR-014 启动位命名）+ SPEC §13 映射 15 + unpack drain 1（PCS-026，等新 RTL）。
 
@@ -777,7 +790,9 @@ M1 分母拆分：计划 101 + 计划（waiver）2 + RTL未就绪 28 + 待定 17
 
 清零（sticky=W1C；计数 RO + `CNT_CLR`，含 `CNT_CRD_UF`）、APPD `0x1E00`/`0x1F00`、`PORT_RST` 16 拍范围、TEST 窗 PRODUCT 行为、`tb_inj_crd_cells` 每拍覆盖、`ub_rst_sync` 2 级、`CRD_UF` 具名 waiver、TX LTB 锁存与 Lane_ID 控制口、去掉 `pma_rx_ready`/`pcs2dll_ready`。对应 TP 已改 **计划**。
 
-群结论「LTB/CLTB 内容接口（PCS→LMSM）列 §13、待定期间 `ub_lmsm` 不开工」与现稿 SPEC §3.3.4 已列 `pcs2lmsm_*` 字段口不一致，**以文件为准**。LMSM 相关 TP 标 RTL未就绪（等实现），不标「不开工」。未写入 §13 的该项不标「待 SPEC 落实」。
+群结论要求：PCS 按物理 lane 填 Lane_ID 并每 lane 自算 CRC/填充；`lmsm2pcs_pattern` 0–3 各一条 TP；Lane_ID 三模式；LMB 中途改字段从下一 LMB 生效；`lmsm2pcs_ltb_valid` 无保持拍数。对应 TP-UNIT-PCS-030–038 按此写。
+
+**与 PR #4 该版 §3.3.4 / §13.2 正文不一致**（见 §14.3 X4）：该版仍写 valid 为电平须保持、TX `lane_id`「见 §13」、拉低对齐拍数待定。计划按 Xia 本条结论落 TP；端口名（`lmsm2pcs_lane_id_mode` / `base` / `map`）以下一 commit 为准。
 
 ### 14.3 仍等 SPEC 澄清（验证不选边）
 
@@ -786,6 +801,7 @@ M1 分母拆分：计划 101 + 计划（waiver）2 + RTL未就绪 28 + 待定 17
 | X1 | SPEC §6.1 vs REGMAP `CTRL.LMSM_START` | SPEC 写「见 REGMAP `LMSM_CTRL.START`」，REGMAP 字段名是 `CTRL.LMSM_START` | TP-UNIT-CSR-014、TP-UNIT-PCS-021 |
 | X2 | REGMAP `STATUS.RETRY_REQ_ST` / `RETRY_ACK_ST` | 编码标待定 | TP-UNIT-CSR-022 |
 | X3 | REGMAP `PARAM_PHY.NUM_LANES_*` | 1/2/4/8 的编码待定 | TP-UNIT-CSR-015、TP-UNIT-PMA-005 |
+| X4 | SPEC §3.3.4 vs §13.2 vs Xia 本条 | 该版 §3.3.4 写 `lmsm2pcs_ltb_valid` 为电平、更新须拉低或插空稳定；§13.2 仍把 TX `lane_id` 改写与 valid 对齐拍数标待定。Xia 本条要求：无保持拍数、LMB 起始锁存、三模式 Lane_ID、每 lane CRC。验证按本条写 TP，等正文追上 | TP-UNIT-PCS-030–038 |
 
 ### 14.4 工程项（不阻规范对齐）
 
@@ -820,7 +836,7 @@ Xia 标准：每条 SPEC **功能需求**至少一条 TP。下表按 SPEC 章节
 | §3.3.1 | DLL→PCS TX valid/ready；sop/eop 待定 | SUB-PCS-001、SUB-PCS-017 |
 | §3.3.2 | PCS→DLL RX valid-only；**无** `pcs2dll_ready`；`fec_ok`/`uncorr` 对齐 | SUB-PCS-002/005/018/020、IF-005 |
 | §3.3.3 | LMSM↔DLL `link_*` 与重训电平握手 | SUB-PCS-011/019、SUB-DLL-012 |
-| §3.3.4 | LTB 字段口、拼装、pattern、LMB 起始锁存、Lane_ID 三模式、RX `pcs2lmsm_*` | PCS-030–034、SUB-PCS-006/009/010 |
+| §3.3.4 | LTB 字段口、`fec_mode_ctrl`、pattern 0–3 各一条、Lane_ID 三模式、LMB 中途改字段、RX `pcs2lmsm_*` | PCS-030–040、SUB-PCS-006/009/010 |
 | §3.3.5 | CSR→各块电平、无跨时钟脉冲 | CSR-024、CLK-001 |
 | §4.1 | 单时钟 80.57 MHz，`USE_PMA_CLK=0` | CLK-001、TOP-019、TOP-009 |
 | §4.2 | `rst_n` 异步置位同步释放；`ub_rst_sync` 2 级 + `ub_pyc_rst_adapt` | RST-001/002、CDC-001、TOP-008 |
@@ -840,7 +856,7 @@ Xia 标准：每条 SPEC **功能需求**至少一条 TP。下表按 SPEC 章节
 | §13 | 开放问题 | 见 §14.1，0 条无映射 |
 | REGMAP §2.1 | CTRL/STATUS/IRQ/`PORT_CNA` | CSR-008/012–014/020–022 |
 | REGMAP §2.2 | PARAM_* | CSR-015 |
-| REGMAP §2.3 | ERR + `CNT_CLR` | CSR-016/017 |
+| REGMAP §2.3 | ERR 饱和 + `CNT_CLR` 0x0224 bit0–8 + COUNT 只读 | CSR-016/017/025 |
 | REGMAP §2.4 | TEST | CSR-005–007/019 |
 | REGMAP §2.5 | APPD 窗口 | CSR-003/018 |
 | CODING_STYLE §1/§7 | 生成两套网表；lint 0 error；钩子不另开行覆盖 waiver | TOP-015–018/021 |

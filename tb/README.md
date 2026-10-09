@@ -79,9 +79,9 @@ Icarus does not produce line coverage.
 
 | Model | Spec | SPEC | Status |
 | --- | --- | --- | --- |
-| `UbPcsScrambler` | UB-PHY §3.2.2.4, §3.2.3.2, §3.2.6 | §2.4, §13 | **Interface only.** Core step raises `NotImplementedError("pending SPEC")`. Known: seed = `AMCTL.LID` (not phys / LTB.Lane_ID); LSB first; `DATA_W=32`; `SCR_W=23`; 1-cycle; valid-only. Taps and LID→seed map stay 待定 — do not copy PR #5 / Switch. |
+| `UbPcsScrambler` | UB-PHY §3.2.2.4, §3.2.3.2 | §2.4 | **Interface only.** Core step raises `NotImplementedError("pending SPEC")`. Known: seed = `AMCTL.LID` (not phys / LTB.Lane_ID); LSB first. No poly / init / invert / `DATA_W` default. 1-cycle valid-only leaf (PR #5 ports, wiring only). |
 | `UbPcsLaneDist` | UB-PHY §3.2.2.3, §3.2.5, §3.4.1 | §2.4, §3.3, §9 | **Implemented.** 8-bit symbols; x1/x4/x8; CodecNum 1/2 formula; symbol 0 first; PMA word symbol 0 at LSB; 0-cycle. |
-| `UbDllBcrc` | UB-DL §4.3.2.2.4, §4.7.2 | §2.6, §7 | **Interface only.** Compute raises `NotImplementedError("pending SPEC")`. Known packing: `{rsvd, ERROR_FLAG, CRC30[29:0]}`. Poly/init are documented from SPEC §2.6 but the step is not filled (no PR #5 copy). 1-cycle leaf. |
+| `UbDllBcrc` | UB-DL §4.3.2.2.4, §4.7.2 | §2.6 | **Interface only.** Compute raises `NotImplementedError("pending SPEC")`. Known packing: `{rsvd, ERROR_FLAG, CRC30[29:0]}`. No poly / init / invert default. 1-cycle valid-only leaf (PR #5 ports, wiring only). |
 
 No LMB/LTB golden in this PR. LTB/CLTB field ports are SPEC §3.3.4 / UB-PHY §3.4.1 (`fec_mode_ctrl[2:0]`, `lmsm2pcs_pattern`, per-lane Lane_ID + CRC, latch at next LMB). Names wait for the next PR #4 commit.
 
@@ -91,9 +91,9 @@ Leaf agents use the generic valid-only / valid-ready agents. Port lists on the m
 
 See `models/config.py` and SPEC §13.
 
-1. Scrambler LFSR taps — UB-PHY §3.2.6 names PRBS23 but does not write g(x).
-2. `AMCTL.LID` → 23-bit seed, NULL seed, power-on LFSR init.
-3. BCRC compute body (poly/init/bit-order are in SPEC §2.6; golden waits so this PR does not invent a step).
+1. Scrambler polynomial, init, invert, `DATA_W` — pending SPEC. Do not copy PR #5 / Switch.
+2. `AMCTL.LID` → seed map (seed *source* is known).
+3. BCRC polynomial, init, invert, bit-order of the step — pending SPEC. Packing is known.
 4. `FEC_CODEC_NUM` (SPEC §9 / §13.2, suggest 1).
 5. All other SPEC §13 items — not modelled here.
 

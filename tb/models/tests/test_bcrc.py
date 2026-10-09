@@ -1,22 +1,15 @@
-"""BCRC interface. Compute skipped until the golden is filled from SPEC, not PR #5."""
+"""BCRC interface. Compute skipped until SPEC; packing is the known constraint."""
 
 from __future__ import annotations
 
 import pytest
 
 from tb.models.config import PENDING_SPEC
-from tb.models.ub_dll_bcrc import (
-    LATENCY_CYCLES,
-    SPEC_BCRC_INIT,
-    SPEC_BCRC_POLY,
-    UbDllBcrc,
-    pack_bcrc_word,
-    unpack_bcrc_word,
-)
+from tb.models.ub_dll_bcrc import LATENCY_CYCLES, UbDllBcrc, UbDllBcrcConfig, pack_bcrc_word, unpack_bcrc_word
 
 SKIP_REASON = (
-    "pending SPEC: BCRC step not filled in this PR "
-    "(do not copy PR #5 / Switch); packing is tested"
+    "pending SPEC: BCRC poly / init / invert / bit-order; "
+    "do not copy PR #5 / Switch"
 )
 
 
@@ -29,10 +22,12 @@ def test_pack_is_rsvd_error_flag_crc30():
     assert (crc30, flag, reserved) == (0x15555555, 1, 0)
 
 
-def test_spec_documents_poly_and_init_without_using_them():
-    assert SPEC_BCRC_POLY == 0x15A94AD5
-    assert SPEC_BCRC_INIT == 0x3FFFFFFF
-    assert LATENCY_CYCLES == 1
+def test_config_has_no_poly_or_init_default():
+    cfg = UbDllBcrcConfig()
+    assert cfg.word_w == 32
+    assert cfg.latency_cycles == LATENCY_CYCLES == 1
+    assert not hasattr(cfg, "poly")
+    assert not hasattr(cfg, "init")
 
 
 def test_compute_raises_pending_spec():

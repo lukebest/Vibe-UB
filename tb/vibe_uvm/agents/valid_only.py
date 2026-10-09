@@ -2,6 +2,7 @@
 
 PR #5 leaves (scramble / BCRC / lane dist) are valid-only; wire those
 ports through this agent. Do not import PR #5 sources.
+"""
 
 from __future__ import annotations
 

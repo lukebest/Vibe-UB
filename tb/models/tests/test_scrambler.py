@@ -1,4 +1,4 @@
-"""Scrambler interface. Algorithm skipped until SPEC §13 closes taps / LID seed."""
+"""Scrambler interface. Algorithm skipped until SPEC closes poly / DATA_W / seed."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from tb.models.ub_pcs_scrambler import (
 )
 
 SKIP_REASON = (
-    "pending SPEC: PRBS23 taps and AMCTL.LID seed map (SPEC §13); "
+    "pending SPEC: scrambler poly / init / invert / DATA_W / AMCTL.LID seed map; "
     "do not invent PR #5 / Switch defaults"
 )
 
@@ -25,12 +25,12 @@ def test_seed_source_is_amctl_lid_not_phys_or_ltb():
     assert scr.amctl_lid != AMCTL_LID_NULL
 
 
-def test_closed_widths_and_latency():
+def test_known_interface_lsb_first_and_latency():
     cfg = UbPcsScramblerConfig()
-    assert cfg.data_w == 32
-    assert cfg.scr_w == 23
     assert cfg.lsb_first is True
     assert cfg.latency_cycles == 1
+    assert not hasattr(cfg, "poly")
+    assert not hasattr(cfg, "data_w")
 
 
 def test_exempt_kinds_are_not_scrambled():

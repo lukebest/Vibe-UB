@@ -21,7 +21,7 @@
 ## 2. 复位与 CDC
 
 - 业务寄存器只用 `pyc_reg`（**同步复位**，D6）。敏感表只有时钟。
-- 顶层 `rst_n`：低有效，**异步置位、同步释放**，只经白名单 `ub_rst_sync` → `rst_n_sync`。
+- 顶层 `rst_n`：低有效，**异步置位、同步释放**，只经白名单 `ub_rst_sync`（**2 级**触发器）→ `rst_n_sync`。
 - 封装 `ub_pyc_rst_adapt` 把 `rst_n_sync` 转到 `pyc_reg` **原生极性**（`rst_pyc`）。业务模块只接 `rst_pyc`。若库原生已是低有效，封装为连线。见 SPEC §4.2。
 - M1 **单时钟** `core_clk` ≈ 80.57 MHz，无 `pma_clk`（`USE_PMA_CLK=0` 已定）。产品通路无 CDC。
 - 跨时钟原语（后续阶段才用）：
@@ -37,7 +37,7 @@
 
 | 单元 | 用途 |
 | --- | --- |
-| `ub_rst_sync` | 异步置位 / 同步释放：`rst_n` → `rst_n_sync` |
+| `ub_rst_sync` | 2 级；异步置位 / 同步释放：`rst_n` → `rst_n_sync` |
 | CDC 原语封装 | 若需把 `pyc_cdc_sync` / `pyc_async_fifo`  generater 接到库单元；不得发明 pulse 同步器 |
 
 白名单之外的手写 SV（含「只改一拍」的修补）禁止进入产品路径。现有 `rtl/*.v` 手写实现按 D10 迁 `legacy/`，不作为风格样板。
@@ -92,6 +92,7 @@
 - warning 不得默默留下：每条 warning 要么改代码消除，要么写 **具名 waiver**（文件+行或规则 ID+理由+批准人）。
 - FSM 默认分支、不可达臂：用命名 waiver 覆盖，**不要**靠 force 非法态来「测到」。
 - 钩子 mux 代码（HOOKS 网表）**不**单独开覆盖率 waiver（SPEC §11 (b)）。
+- 信用下溢 `CRD_UF` 计数与 irq 分支：具名 waiver `WAIVER_CRD_UF_CNT`、`WAIVER_CRD_UF_IRQ`（SPEC §13.4）。禁止 force 下溢来打覆盖率。
 - toggle 覆盖不计入接收（D12）。行覆盖 + 功能覆盖（测试点矩阵）= 100%（计具名 waiver）。
 
 ---

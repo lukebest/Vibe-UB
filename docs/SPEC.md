@@ -94,11 +94,13 @@ flowchart LR
   CSR --> DLL
   CSR --> PCS
   CSR --> LMSM
-  DLL <-->|码流 + FEC 成败| PCS
+  DLL -->|TX flit valid/ready| PCS
+  PCS -->|RX flit valid-only| DLL
   LMSM -->|LinkUp / LinkReady / 训练控制| DLL
-  LMSM --> PCS
+  LMSM -->|LTB 字段 + valid| PCS
   LMSM --> PMA
-  PCS <-->|每 lane 并行字| PMA
+  PCS -->|每 lane 并行字| PMA
+  PMA -->|每拍一字 无反压| PCS
 ```
 
 PMA 模型在仿真里实例化，与 PCS 的边界是 M1 的 **PHY 数字/模型切分点**（D3）。综合网表不含 `ub_pma_model`。
@@ -108,7 +110,7 @@ PMA 模型在仿真里实例化，与 PCS 的边界是 M1 的 **PHY 数字/模�
 | 模块 | 目录（生成后） | 职责 |
 | --- | --- | --- |
 | `ub_controller` | `rtl/ub_controller.py` → `.v` | 顶层：例化 CSR / DLL / PCS / LMSM；PMA 模型仅 sim |
-| `ub_csr` | `rtl/csr/` | 寄存器堆、译码、W1C；把控制打到各块，回收状态/计数 |
+| `ub_csr` | `rtl/csr/` | 寄存器堆、译码；粘滞位 W1C；计数 RO + `CNT_CLR`；把控制打到各块 |
 | `ub_dll` | `rtl/dll/` | DLL 状态机、组包/拆包、VL、信用、重传、CRC |
 | `ub_pcs` | `rtl/pcs/` | FEC、扰码、8-bit 符号分发、AMCTL、deskew |
 | `ub_lmsm` | `rtl/lmsm/` | LMSM 及与 PMA 模型的训练握手 |
@@ -190,17 +192,19 @@ Init Block 字段名只作标识符使用，位定义见 UB-DL §4.3.3.9，本�
 
 ## 3. 顶层与模块间接口
 
-### 3.1 握手通则（valid/ready）
+### 3.1 握手通则
 
-凡下表标「valid/ready」的流：
+**valid/ready 流**（下表标「valid/ready」）：
 
 1. **同一拍** `valid==1 && ready==1` 才完成一次传送。
 2. `valid==1` 时数据与边带必须保持，直到 `ready==1`。
 3. `ready` 不得组合依赖于本拍的 `valid`（避免组合环）。允许 `valid` 组合看 `ready`。
 4. 复位撤销后，`valid` 与 `ready` 的首拍值：**待定**（建议 `valid=0`，`ready` 在下游能收时为 1）。
-5. 无 valid/ready 的旁路（纯状态线）是电平，不是脉冲；跨时钟不得传脉冲（pyc 无 pulse/req-ack 同步原语）。
+5. 无握手的旁路线是电平，不是脉冲。
 
-CSR 用独立的 req/ready，不用 valid/ready 数据流语义，见 §3.3。
+**valid-only 流**（下表标「valid-only」）：无 `ready`。源每拍可给 `valid`；宿 **必须收下** 该拍。M1 用于 PMA→PCS 与 PCS→DLL RX。DLL 内部 RX 缓冲深度 **待定**（§13）。
+
+CSR 用独立的 req/ready，见 §3.2.3。
 
 ### 3.2 顶层端口 `ub_controller`
 
@@ -251,6 +255,12 @@ Flit 宽度 160 bit 来自项目既有设计说明与 Xia 重传公式（160b）
 
 无 `csr_wstrb`。未对齐地址按未映射处理。写响应：下一拍 `csr_rvalid=0`，`csr_err` 有效。
 
+**TEST 窗（`0x0300`–`0x03FF`）：** 地址 **已映射**。`tb_test_mode=0` 时（以及 PRODUCT 网表 `TEST_HOOKS=0` 时）读回 0、写忽略、**`csr_err=0`**。这样 PRODUCT 与 HOOKS（`tb_test_mode=0`）对 eqy 行为相同，见 §11 (d)。
+
+**清除语义（已定，与 [REGMAP.md](REGMAP.md) 一致）：** 禁止读清，禁止「RW 写任意值清零」。粘滞状态为 **W1C**。计数器为 **RO**、饱和到全 1，写 `CNT_CLR` 对应位为 1 清零（`CNT_CLR` 为 WO、写后自清）。
+
+**`PORT_RST`（已定）：** WO、写 1 自清。产生内部 **16 拍** `core_clk` 复位脉冲，复位 PCS、LMSM、DLL（含重传状态）和信用计数。**不**复位 CSR 配置寄存器、错误计数、IRQ（status/mask）、TEST 寄存器（保留便于事后分析）。
+
 #### 3.2.4 PCS–PMA 数据（模型边界）
 
 `PMA_W = 32`（已确认）。`NUM_LANES_TX` / `NUM_LANES_RX` 见 §9。
@@ -262,9 +272,8 @@ Flit 宽度 160 bit 来自项目既有设计说明与 Xia 重传公式（160b）
 | `pma_tx_ready` | in | 1 | `core_clk` | 模型常就绪时恒 1 |
 | `pma_tx_elec_idle` | out | `NUM_LANES_TX` | `core_clk` | 每 lane 电气空闲请求 |
 | `pma_rx_data` | in | `NUM_LANES_RX*PMA_W` | `core_clk` | 每 lane 并行字（模型已完成串并；PAM4 时已 Gray 反变换） |
-| `pma_rx_valid` | in | 1 | `core_clk` | RX 字有效 |
-| `pma_rx_ready` | out | 1 | `core_clk` | PCS 可收 |
-| `pma_rx_data_valid_lane` | in | `NUM_LANES_RX` | 同上 | **待定**。是否需要 per-lane valid（deskew 前） |
+| `pma_rx_valid` | in | 1 | `core_clk` | RX 字有效。单时钟下 PMA **每拍一字**；无 `pma_rx_ready`，PCS 不得反压 PMA |
+| `pma_rx_data_valid_lane` | in | `NUM_LANES_RX` | `core_clk` | **待定**。是否需要 per-lane valid（deskew 前） |
 
 位序、AMCTL 与数据字是否共用 `pma_tx_data`：**待定**（建议共用，由 PCS 在数据流里插 AMCTL，见 §3.2.4）。
 
@@ -309,13 +318,14 @@ Flit 宽度 160 bit 来自项目既有设计说明与 Xia 重传公式（160b）
 | `dll2pcs_is_cb` | out | 1 | 1=DLLCB，0=DLLDP。PCS 不解析内容，只当数据 |
 | `dll2pcs_sop` / `dll2pcs_eop` | out | 1 | 块/包边界。PCS 是否需要：**待定**（FEC 组帧可能只按字节流） |
 
-#### 3.3.2 PCS ↔ DLL（RX）
+#### 3.3.2 PCS ↔ DLL（RX，valid-only）
+
+无 `pcs2dll_ready`。DLL **必须收下每一拍** `pcs2dll_valid`。DLL 内部 RX 缓冲深度 **待定**（§13）。
 
 | 信号 | 方向（相对 PCS） | 宽度 | 含义 |
 | --- | --- | --- | --- |
 | `pcs2dll_data` | out | 160 | 解扰后的 flit |
-| `pcs2dll_valid` | out | 1 | valid |
-| `pcs2dll_ready` | in | 1 | DLL 可收 |
+| `pcs2dll_valid` | out | 1 | 本拍 flit 有效（valid-only） |
 | `pcs2dll_fec_ok` | out | 1 | 本 flit 所属 FEC 码字可纠正或无错 |
 | `pcs2dll_fec_uncorr` | out | 1 | 本码字不可纠正。与 `fec_ok` 互斥 |
 | `pcs2dll_bypass` | out | 1 | 当前为 FEC bypass。此时 `fec_ok` 含义 **待定** |
@@ -331,17 +341,69 @@ Flit 宽度 160 bit 来自项目既有设计说明与 Xia 重传公式（160b）
 | `dll_retrain_req` | in | 1 | DLL 请求物理层重训（RETRY_REQ_SM 进 RETRAIN，见 UB-DL §4.7.3.3） |
 | `lmsm_retrain_ack` | out | 1 | 电平：LMSM 已进入 Retrain。禁止用脉冲 |
 
-#### 3.3.4 LMSM ↔ PCS
+#### 3.3.4 LMSM ↔ PCS（含 LTB/CLTB 字段口）
+
+LMB 为 16 个 8-bit 符号（见 UB-PHY §3.4.1）。种类：LTB、EEIB（§3.4.1.2）。LTB 再分为 DLTB / CLTB / RLTB / ELTB（§3.4.1.1）。
+
+**拼装分工（已定）：** LMSM 给出字段；PCS 计算 LTB CRC（符号 12–13）、填 padding（符号 14–15）、按 §3.2.4 / §3.4.1 插入码流。CRC 多项式与符号级位图见规范该节，本仓库不抄。
+
+**valid 时序：**
+
+- TX：`lmsm2pcs_ltb_valid` 为 **电平**。为 1 时下表 TX 字段保持稳定；PCS 在插入边界采样。更新字段须先把 valid 拉低至少 1 拍，或保证变化发生在两次插入之间且采样沿稳定。
+- RX：PCS 仅在 LTB CRC 通过时给出 `pcs2lmsm_ltb_valid` **单拍**；无 ready，LMSM 当拍采样。CRC 失败不产生 valid。
+- `lmsm2pcs_pattern==EEIB` 时 PCS 按当前 Data Rate 生成 EEIB（§3.4.1.2），不用 LTB 字段。
+
+**图案与锁定：**
 
 | 信号 | 方向（相对 LMSM） | 宽度 | 含义 |
 | --- | --- | --- | --- |
-| `lmsm_tx_pattern_sel` | out | 4 | 训练图案选择。枚举 **待定**（Idle / LTB / AMCTL-only / Null / 业务） |
-| `pcs_am_locked` | in | `NLANE`（=`NUM_LANES_RX`） | 每 lane AM/AMCTL 锁定。进 `ub_lmsm` 前可被 `tb_inj_am_lock` 旁路（§10），**不回灌** PCS 输出 |
-| `pcs_lid_bad` | in | 1 | 训练所见 link ID 非法/不一致。进 `ub_lmsm` 前可被 `tb_inj_lid_bad` 旁路（§10），**不回灌** PCS |
+| `lmsm2pcs_pattern` | out | 2 | 0=电气空闲，1=EEIB，2=LTB（用字段口），3=DLL 业务码流 |
+| `lmsm2pcs_ltb_valid` | out | 1 | TX LTB 字段有效（电平） |
+| `pcs2lmsm_ltb_valid` | in | 1 | RX 收到一帧 CRC 通过的 LTB（单拍） |
+| `pcs_am_locked` | in | `NLANE` | 每 lane AM/AMCTL 锁定。可被 `tb_inj_am_lock` 旁路，不回灌 PCS |
+| `pcs_lid_bad` | in | 1 | 训练所见 Link_ID 非法/不一致。可被 `tb_inj_lid_bad` 旁路，不回灌 PCS |
 | `pcs_deskew_ok` | in | 1 | deskew 完成 |
-| `pcs_fec_mode` | out | 2 | 0=T4，1=T2，2=bypass。编码 **待定** |
 
-LTB/CLTB/RLTB 比特级布局见 UB-PHY §3.4.1，本仓库不抄。谁拼 LMB（LMSM 还是 PCS）：**待定**（建议 LMSM 出字段，PCS 负责装进码流/AMCTL 规则）。
+**LTB 字段口**（TX 前缀 `lmsm2pcs_`，RX 前缀 `pcs2lmsm_`；同名同宽。标识符取自 §3.4.1.1，宽度为字段位宽，不含保留位。Type / 宽度编码等枚举值实现时对照该节，不在此抄表。）
+
+| 字段端口（去前缀） | 宽度 | 用于 | 节号 |
+| --- | --- | --- | --- |
+| `ltb_type` | 8 | 全部 LTB。DLTB/CLTB/RLTB/ELTB 的 Type | §3.4.1.1 |
+| `link_id` | 8 | DLTB、CLTB 的 Link_ID | §3.4.1.1 |
+| `lane_id` | 8 | DLTB、CLTB 的 Lane_ID。TX 是否由 PCS 按物理 lane 改写：见 §13 | §3.4.1.1 |
+| `tlw` | 6 | DLTB、CLTB 的 TX Link Width | §3.4.1.1 |
+| `rlw` | 6 | DLTB、CLTB 的 RX Link Width | §3.4.1.1 |
+| `data_rate_support_1` | 8 | DLTB、RLTB 的 Data_Rate_Support_1 | §3.4.1.1 |
+| `data_rate_support_2` | 8 | DLTB、RLTB 的 Data_Rate_Support_2（含 Change_Speed 位，RLTB） | §3.4.1.1 |
+| `fec_mode_support` | 8 | DLTB 的 FEC_Mode_Support | §3.4.1.1 |
+| `port_type` | 1 | DLTB 的 Port_Type | §3.4.1.1 |
+| `portnego_random_value` | 7 | DLTB 的 PortNego_Random_Value | §3.4.1.1 |
+| `fec_interleave_support` | 4 | DLTB 的 FEC_Interleave_Support | §3.4.1.1 |
+| `rx_lane0_id` | 3 | DLTB 的 RX_Lane0_ID | §3.4.1.1 |
+| `max_link_width` | 3 | DLTB 的 MAX_LINK_WIDTH | §3.4.1.1 |
+| `eq_mode` | 2 | CLTB 的 EQ_Mode | §3.4.1.1 |
+| `fec_mode_ctrl` | 3 | CLTB、RLTB 的 FEC_Mode_Ctrl。PCS 数据通路 FEC 模式跟此字段，不再另设 2-bit `pcs_fec_mode` | §3.4.1.1 |
+| `fec_interleave_ctrl` | 1 | CLTB 的 FEC_Interleave_Ctrl | §3.4.1.1 |
+| `eq_ctrl1` | 6 | RLTB / ELTB 的 EQ_Ctrl1 有效位 | §3.4.1.1 |
+| `eq_ctrl2` | 8 | RLTB / ELTB 的 EQ_Ctrl2 | §3.4.1.1 |
+| `eq_ctrl3` | 8 | RLTB / ELTB 的 EQ_Ctrl3 | §3.4.1.1 |
+| `eq_ctrl4` | 8 | ELTB 的 EQ_Ctrl4 | §3.4.1.1 |
+| `fec_crc_mode_reject` | 1 | RLTB | §3.4.1.1 |
+| `pre_fec_ber_meas_st` | 2 | RLTB 的 Pre-FEC_BER_Measurement_Status | §3.4.1.1 |
+| `fec_interleave_enable` | 1 | RLTB | §3.4.1.1 |
+| `fec_interleave_ctrl_reject` | 1 | RLTB | §3.4.1.1 |
+| `request_equalization` | 1 | RLTB 的 Link_Ctrl.Request_Equalization | §3.4.1.1 |
+| `crc_mode_ctrl` | 3 | RLTB 的 CRC_Mode_Ctrl | §3.4.1.1 |
+| `local_tx_preset` | 4 | RLTB 的 Local_TX_Preset | §3.4.1.1 |
+| `first_pre_cursor` | 6 | RLTB / ELTB（PAM4 时有意义） | §3.4.1.1 |
+| `eq_reject` | 1 | ELTB 的 EQ_Reject | §3.4.1.1 |
+| `current_eq_phase` | 2 | ELTB 的 Current_EQ_Phase | §3.4.1.1 |
+| `preset_mode_en` | 1 | ELTB 的 Preset_Mode_En | §3.4.1.1 |
+| `tx_preset` | 4 | ELTB 的 TX_Preset | §3.4.1.1 |
+
+未作为独立端口的：CRCL/CRCH、padding、各符号保留位（PCS 发 0、收忽略，§3.4.1.1）。EEIB 符号图案由 PCS 按速率生成，无字段口。
+
+本拍未使用的字段（例如发 CLTB 时的 RLTB 专用位）TX 填 0，RX 忽略。
 
 #### 3.3.5 CSR → 各块
 
@@ -372,11 +434,11 @@ pyc4.0 的 CDC 原语仍只允许按 §4.3 使用；M1 生成网表中不应出�
 | 置位 / 释放 | **异步置位、同步释放**，只允许经白名单复位同步器（见 [CODING_STYLE.md](CODING_STYLE.md)） |
 | 业务逻辑 | **同步复位**（D6）。`always` 只对 `posedge core_clk` 敏感 |
 | 极性对接 | 同步器之后用封装把复位接到 `pyc_reg` 的 **原生极性**（见下） |
-| Entity vs 端口复位 | 规范区分二者（UB-DL §4.2）。M1 无 Entity：`rst_n` 与 CSR 端口复位都回到 LMSM Link_Idle + DLL Disabled |
+| Entity vs 端口复位 | 规范区分二者（UB-DL §4.2）。M1 无 Entity：顶层 `rst_n` 复位全部（含 CSR）。CSR `PORT_RST` 只脉冲复位数据通路，见 §3.2.3 |
 
 **封装（唯一对接点）：**
 
-1. 白名单单元 `ub_rst_sync`：输入异步 `rst_n` + `core_clk`，输出 `rst_n_sync`（仍低有效；异步置位、同步释放）。
+1. 白名单单元 `ub_rst_sync`：**2 级**触发器。输入异步 `rst_n` + `core_clk`，输出 `rst_n_sync`（仍低有效；异步置位、同步释放）。
 2. 生成逻辑封装 `ub_pyc_rst_adapt`：把 `rst_n_sync` 转成 `rst_pyc`，极性等于 **pyc4.0 `pyc_reg` 原生极性**。若库原生已是低有效，本封装退化为连线。业务模块只看见 `rst_pyc`，不直接采样顶层 `rst_n`。
 
 现有 `rtl/` 使用 `posedge clk or negedge rst_n`，**不合**本规格，重写时删除。
@@ -385,7 +447,7 @@ pyc4.0 的 CDC 原语仍只允许按 §4.3 使用；M1 生成网表中不应出�
 
 | 原语 | 用途 | 限制 |
 | --- | --- | --- |
-| 手写 `ub_rst_sync` | 异步置位、同步释放 `rst_n` → `rst_n_sync` | 仅复位；M1 只对 `core_clk` |
+| 手写 `ub_rst_sync` | 2 级；异步置位、同步释放 `rst_n` → `rst_n_sync` | 仅复位；M1 只对 `core_clk` |
 | `pyc_cdc_sync` | 1-bit 电平 | 禁止多 bit、禁止脉冲 |
 | `pyc_async_fifo` | 多 bit 总线 | 数据通路跨时钟的唯一手段 |
 | 其它手写 CDC | 禁止 | 无 pulse/req-ack 原语可用，故接口不得依赖它们 |
@@ -405,11 +467,13 @@ pyc4.0 的 CDC 原语仍只允许按 §4.3 使用；M1 生成网表中不应出�
 | FEC 编码 | **待定** | RS(128,120) 组 120 符号；并行度 **待定** |
 | FEC 解码 | **待定** | 含伴随式/关键方程/Chien |
 | AMCTL 插入造成的周期气泡 | 按 §3.2.4 规则 | 间隔/长度不在此抄录 |
-| PCS 组帧反压 DLL | 允许持续 `ready==0` | 不得丢 flit |
+| PCS 组帧反压 DLL TX | 允许持续 `dll2pcs_ready==0` | 不得丢 flit |
+| PMA→PCS | 每拍一字，无 `pma_rx_ready` | PCS 必须收 |
+| PCS→DLL RX | valid-only，无 `pcs2dll_ready` | DLL 必须收；RX 缓冲深度待定 |
 | 重传从 REQ 到重发首 flit | **待定** | 受 retry buffer 读口约束 |
 | 信用归还从 RX 收齐到 TX 发出 | **待定** | 粒度 32（已确认） |
 
-Data Rate 0、x1、32 bit/lane：线速率与 160-bit flit 不对齐，PCS 必须用 valid/ready 做齿轮，而不是假定 1 flit/拍。拍数关系：**待定**（实现时按 PMA 字与 FEC 码字长度计算，不在文档里编造）。
+Data Rate 0、x1、32 bit/lane：线速率与 160-bit flit 不对齐。TX 用 valid/ready 在 DLL↔PCS 做齿轮；RX 用 valid-only，多余节拍存在 DLL RX 缓冲（深度待定）。拍数关系：**待定**（实现时按 PMA 字与 FEC 码字长度计算）。
 
 ---
 
@@ -622,7 +686,9 @@ Retry 深度下界公式见 UB-DL §4.7.3.2（含 FEC 120/128 与 RTT）。M1 25
 - `TEST_HOOKS=0`：钩子端口与 mux **综合掉**；产品网表无 `tb_*`。
 - `TEST_HOOKS=1` 且 `tb_test_mode=0`：端口存在，但注入 **不介入**（mux 选功能路径）；观察口输出保持 0。
 - `TEST_HOOKS=1` 且 `tb_test_mode=1`：注入/观察生效。
-- **复位值 = 不介入**：`tb_test_mode` 复位为 0；所有 `tb_inj_*` 视为 0 或不驱动功能路径；测试寄存器（`LMSM_TMR_SCALE`、`CRD_TO_DIS`、PCS TX AM 间隔缩放）复位为不缩放 / 检查使能。
+- **复位值 = 不介入**：`tb_test_mode` 复位为 0；所有 `tb_inj_*` 视为 0 或不驱动功能路径；测试寄存器复位为不缩放 / 检查使能。
+- **TEST 窗 CSR：** `tb_test_mode=0` 或 `TEST_HOOKS=0` 时该窗已映射：读 0、写忽略、`csr_err=0`（不是未映射错误）。见 §3.2.3、§11 (d)。
+- `tb_inj_crd_cells` 在 `tb_test_mode=1` 时每拍 mux 覆盖 VL0 cell，HOOKS **不**为此增加存储寄存器。
 - 注入只做 **mux 进目标模块输入**，**不回灌** 源模块输出（例如不改写 PCS 的 `pcs_am_locked` 端口）。
 
 `tb_test_mode` 与全部 `tb_*` 均在 `core_clk` 域，同步采样。`tb_inj_*` 为电平，不是脉冲。
@@ -636,7 +702,7 @@ Retry 深度下界公式见 UB-DL §4.7.3.2（含 FEC 120/128 与 RTT）。M1 25
 | `tb_test_mode` | in | 1 | `core_clk` | 顶层门控 | 为 1 且 `TEST_HOOKS=1` 时钩子生效 |
 | `tb_inj_am_lock` | in | `NLANE` | `core_clk` | `ub_lmsm` | 电平。mux 到 LMSM 的 `am_locked` 输入，不回灌 PCS。M1 **保留**。是否在 PMA 模型证明能出真实 AM 之后删除： **待定**（触发条件仅此） |
 | `tb_inj_lid_bad` | in | 1 | `core_clk` | `ub_lmsm` | 电平。mux 到 LMSM 的 `lid_bad` 输入，不回灌 PCS。M1 **保留**。删除条件同 `tb_inj_am_lock` |
-| `tb_inj_crd_cells` | in | 16 | `core_clk` | `ub_dll` 信用子块 | 电平。预置 **VL0** 远端信用库存（cell）。M1 信用钩子只对 VL0 |
+| `tb_inj_crd_cells` | in | 16 | `core_clk` | `ub_dll` 信用子块 | 电平。`tb_test_mode=1` 时 **每拍** 覆盖 VL0 信用 cell 计数（mux，HOOKS 网表 **不**另加存储寄存器） |
 | `tb_obs_link_ready` | out | 1 | `core_clk` | `ub_lmsm` | `LMSM==Link_Active`（ACTIVE） |
 | `tb_obs_link_up` | out | 1 | `core_clk` | `ub_lmsm` | `LMSM==Send_NullBlock`（NULL）或 `Link_Active`（ACTIVE） |
 | `tb_obs_lmsm_st` | out | 5 | `core_clk` | `ub_lmsm` | **仅** LMSM 顶层状态，不含子状态。编码见 §10.3（已定） |
@@ -719,7 +785,9 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 
 **(c) PRODUCT 烟测。** `TEST_HOOKS=0` 网表跑一套与钩子无关的 smoke 子集（证明无钩子端口时功能闭环）。
 
-**(d) 形式等价门禁。** 用 Yosys eqy 或同等开源工具：`TEST_HOOKS=0` 对比 `TEST_HOOKS=1`，且后者 `tb_test_mode=0`、全部 `tb_inj_*` 接到各自复位值（不介入）。两者必须等价；不等价则 **阻断交付**。
+**(d) 形式等价门禁。** 用 Yosys eqy 或同等开源工具：`TEST_HOOKS=0` 对比 `TEST_HOOKS=1`，且后者 `tb_test_mode=0`、全部 `tb_inj_*` 接到各自复位值（不介入）。两者必须等价；不等价则 **阻断交付**。TEST 窗在这两种条件下都是「已映射、读 0、写忽略、`csr_err=0`」，因此不破坏等价。
+
+**(e) 覆盖率 waiver。** 钩子 mux 不另开 waiver（见 (b)）。信用下溢（`CRD_UF` 计数与 irq 分支）在正确设计中不可达，须 **具名覆盖率 waiver**（§13.4）。
 
 ---
 
@@ -750,11 +818,10 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 
 ### 13.2 待定
 
-- RX 缓冲深度。
+- RX 缓冲深度（含 DLL 为吞下 PCS valid-only 所需的内部缓冲）。
 - per-lane RX valid；AMCTL 是否与数据口共用。
 - `pma_tx_width` 编码；均衡针脚。
-- LMB 由谁拼装；`lmsm_tx_pattern_sel` 枚举。
-- DLL↔PCS 是否需要 sop/eop；FEC bypass 时 `fec_ok` 含义。
+- DLL↔PCS TX 是否需要 sop/eop；FEC bypass 时 `fec_ok` 含义。
 - FEC 交织 CodecNum；并行度与编解码拍数。
 - RETRY_ACK_SM 实现细节；ERROR_FLAG 发送。
 - 规范写「实现相关」的超时（Probe 等待、部分计数）。
@@ -762,10 +829,11 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 - Data Rate 0 下 EQ/RXEQ 空转策略。
 - `MAX_DP_FLITS` 取值。
 - 齿轮箱拍数关系（flit 160b 与 PMA 字宽不对齐时的拍数，不是跨时钟）。
-- `pcs_fec_mode` 编码。
 - `LMSM_TMR_SCALE` / `AM_IVL_SCALE` 的具体缩放编码。
 - `tb_inj_am_lock` / `tb_inj_lid_bad`：M1 保留；**待定**是否在 PMA 模型证明能出真实 AM 之后删除。
 - PCS RX unpack `n==0 && have` drain 分支：验证确认端口可达性，否则删除分支或 waiver。
+- TX `lane_id`：§3.4.1 要求各激活 lane 同时发相同 LMB，但 Lane_ID 字段按 lane 编号。由 PCS 按物理 lane 改写，还是各 lane 真相同： **待定**（实现先按 per-lane 填 Lane_ID，其余字段各 lane 相同）。
+- `lmsm2pcs_ltb_valid` 拉低与 AMCTL/LMB 插入边界的对齐拍数。
 
 ### 13.3 未知
 
@@ -773,3 +841,12 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 - Probe 端接检测的电路级算法（规范交给实现）。
 - 真实 SerDes 的模拟参数（M1 不包含）。
 - 完整附录 D 字段复位值（本仓库不抄规范复位表；镜像窗口复位标「见对应节 / 待实现对照」）。
+
+### 13.4 具名覆盖率 waiver（已定需要，实现时落文件）
+
+| 标识 | 对象 | 理由 |
+| --- | --- | --- |
+| `WAIVER_CRD_UF_CNT` | `CNT_CRD_UF` 递增分支 | 正确设计不会把信用减过 0，RTL 仍保留计数；行/功能覆盖不可达 |
+| `WAIVER_CRD_UF_IRQ` | `IRQ_STATUS.CRD_UF` 置位与 `irq` 合成 | 同上 |
+
+禁止用 force 制造下溢来「打满」覆盖率。TB 可对下溢做 assertion（见 §7）。

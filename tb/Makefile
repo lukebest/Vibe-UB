@@ -23,6 +23,8 @@ else
 VERILOG_SOURCES := $(TB_ROOT)/harness/tb_passthru_hooks0.sv
 endif
 
+VERILOG_INCLUDE_DIRS += $(TB_ROOT)/harness
+
 export COCOTB_REDUCED_LOG_FMT ?= 1
 export COCOTB_HDL_TIMEUNIT ?= 1ns
 export COCOTB_HDL_TIMEPRECISION ?= 1ps

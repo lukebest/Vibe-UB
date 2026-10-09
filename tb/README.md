@@ -15,12 +15,13 @@ tb/
   Makefile                  dual-netlist entry (TEST_HOOKS=0 and 1)
   pytest.ini                golden-model unit tests
   models/                   Python golden (no RTL)
-    scrambler.py            UB-PHY §3.2.2.4 / §3.2.3.2 / §3.2.6
-    lane_dist.py            UB-PHY §3.2.2.3 / §3.2.5
-    bcrc.py                 UB-DL §4.3.2.2.4 / §4.7.2
-    config.py               pending knobs
-    tests/                  pytest
+    ub_pcs_scrambler.py     interface only — pending SPEC (UB-PHY §3.2.2.4)
+    ub_pcs_lane_dist.py     UB-PHY §3.2.2.3 / §3.2.5 / SPEC §3.3
+    ub_dll_bcrc.py          interface only — pending SPEC (UB-DL §4.3.2.2.4)
+    config.py               closed widths + pending knobs
+    tests/                  pytest (scrambler/BCRC compute skipped)
   vibe_uvm/                 uvm-python skeleton (named so it does not shadow the `uvm` package)
+    ub_csr_map.py           REGMAP offsets (CNT_CLR 0x0224, APPD 0x1E00/0x1F00)
     clk_rst.py              core_clk ≈ 80.57 MHz; rst_n async assert / sync deassert
     seed_log.py             prints `SEED <n>` (D8)
     items.py                randomize() via cocotb-coverage crv
@@ -76,33 +77,31 @@ Icarus does not produce line coverage.
 
 ## Golden models
 
-| Model | Spec | SPEC | What is closed vs pending |
+| Model | Spec | SPEC | Status |
 | --- | --- | --- | --- |
-| `LaneScrambler` | UB-PHY §3.2.2.4, §3.2.3.2, §3.2.6 | §2.4 | 8-bit symbols; LSB first; AMCTL/EEIB exempt; LTB/DLL scrambled; per-lane; EDF/SDF reset rules. Poly/seeds/LFSR drawing: pending (see below). |
-| `LaneDist` | UB-PHY §3.2.2.3, §3.2.5 | §2.4, §9 | 8-bit symbols; x1/x4/x8; CodecNum 1 formula + CodecNum 2. `FEC_CODEC_NUM` 待定 (default 1). |
-| `Bcrc` | UB-DL §4.3.2.2.4, §4.7.2 | §2.6, §7 | CRC30 poly, init all-1s, Bit7-first, no invert, 32-bit {Reserved, ERROR_FLAG, CRC30}. Info-bit coverage / byte packing: pending confirm. |
+| `UbPcsScrambler` | UB-PHY §3.2.2.4, §3.2.3.2, §3.2.6 | §2.4, §13 | **Interface only.** Core step raises `NotImplementedError("pending SPEC")`. Known: seed = `AMCTL.LID` (not phys / LTB.Lane_ID); LSB first; `DATA_W=32`; `SCR_W=23`; 1-cycle; valid-only. Taps and LID→seed map stay 待定 — do not copy PR #5 / Switch. |
+| `UbPcsLaneDist` | UB-PHY §3.2.2.3, §3.2.5, §3.4.1 | §2.4, §3.3, §9 | **Implemented.** 8-bit symbols; x1/x4/x8; CodecNum 1/2 formula; symbol 0 first; PMA word symbol 0 at LSB; 0-cycle. |
+| `UbDllBcrc` | UB-DL §4.3.2.2.4, §4.7.2 | §2.6, §7 | **Interface only.** Compute raises `NotImplementedError("pending SPEC")`. Known packing: `{rsvd, ERROR_FLAG, CRC30[29:0]}`. Poly/init are documented from SPEC §2.6 but the step is not filled (no PR #5 copy). 1-cycle leaf. |
 
-No official numeric vector tables appear in those sections. Tests are invertibility, the §3.2.2.3 index formula, and BCRC detect/attach properties.
+No LMB/LTB golden in this PR. LTB/CLTB field ports are SPEC §3.3.4 / UB-PHY §3.4.1 (`fec_mode_ctrl[2:0]`, `lmsm2pcs_pattern`, per-lane Lane_ID + CRC, latch at next LMB). Names wait for the next PR #4 commit.
+
+Leaf agents use the generic valid-only / valid-ready agents. Port lists on the model modules match SPEC §2.4 / §2.6 (and the PR #5 description for wiring only).
 
 ## Pending parameters (do not treat as closed)
 
 See `models/config.py` and SPEC §13.
 
-1. Scrambler LFSR taps — §3.2.2.4 silent; default PRBS23 `x^23+x^18+1` from §3.2.6.
-2. Per-lane seed table — §3.2.2.4 says seeds follow AMCTL.LID; no table written.
-3. Fibonacci vs Galois, which bit is XOR'd with data.
-4. Whether exempt symbols advance the LFSR (default: no; §3.2.3.2 "not input").
-5. `FEC_CODEC_NUM` (SPEC §9 / §13.2, suggest 1).
-6. Whether Reserved/ERROR_FLAG enter CRC30 (default yes: "before the CRC30 field", §4.7.2).
-7. BCRC byte packing in the 160-bit flit (default: byte 16 is the high byte of the 32-bit word).
-8. All other SPEC §13 items (RX buffer, AMCTL/data pin share, `MAX_DP_FLITS`, scale encodings, …) — not modelled here.
+1. Scrambler LFSR taps — UB-PHY §3.2.6 names PRBS23 but does not write g(x).
+2. `AMCTL.LID` → 23-bit seed, NULL seed, power-on LFSR init.
+3. BCRC compute body (poly/init/bit-order are in SPEC §2.6; golden waits so this PR does not invent a step).
+4. `FEC_CODEC_NUM` (SPEC §9 / §13.2, suggest 1).
+5. All other SPEC §13 items — not modelled here.
 
 ## SPEC gaps / tensions seen while writing models
 
-- UB-PHY §3.2.2.4 states additive per-lane scrambling and seed reset rules but does not write the polynomial or seed table. §3.2.6 is the only place that names PRBS23 as "the same as scrambling's".
-- UB-PHY §3.2.2.3 gives a complete index formula (used as the known vector). Figures 3-5 / 3-6 are not copied.
-- UB-DL §4.7.2 writes the CRC30 polynomial and bit-order rule but has no numeric example. Figure 4-39 is not in the public tree.
-- SPEC §3.1 RX is valid-only (no `pma_rx_ready` / `pcs2dll_ready`); NW RX stays valid/ready. The valid-only agent is for the PMA/PCS-DLL RX path.
+- UB-PHY §3.2.2.4 states additive per-lane scrambling and seed reset rules but does not write the polynomial or seed table.
+- UB-PHY §3.2.2.3 gives a complete index formula (used as the known vector for lane dist).
+- SPEC §3.1 RX is valid-only (no `pma_rx_ready` / `pcs2dll_ready`); NW RX stays valid/ready.
 - SPEC §12: existing `rtl/` lane dist is 2-bit and the scrambler is 58-bit. Models follow the spec, not that RTL.
 - VERIF_PLAN (PR #3) still says hook/register section numbers were "待 SPEC"; they are now SPEC §10 / REGMAP §2.4.
 

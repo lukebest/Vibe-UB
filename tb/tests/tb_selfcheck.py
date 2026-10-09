@@ -20,6 +20,16 @@ from tb.vibe_uvm.coverage import export_functional, sample_selfcheck
 from tb.vibe_uvm.env import UbEnv
 from tb.vibe_uvm.items import CsrItem, VoItem, VrItem
 from tb.vibe_uvm.seed_log import log_seed, resolve_seed
+from tb.vibe_uvm.ub_csr_map import (
+    APPD_LMSM_ST,
+    APPD_PORT_ERR,
+    CNT_CLR,
+    CNT_CLR_ALL,
+    CNT_CRD_UF,
+    PORT_CNA,
+    STATUS,
+    TEST_BASE,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 REPORTS = REPO / "tb" / "reports"
@@ -96,24 +106,57 @@ class TbSelfcheckTest(UVMTest):
         wr = CsrItem("wr")
         wr.randomize()
         wr.write = 1
-        wr.addr = 0x0000
+        wr.addr = PORT_CNA
         wr.wdata = 0x11223344
         await env.csr.driver.access(wr)
-        env.scoreboard.compare(0, wr.err, "csr mapped write err")
+        env.scoreboard.compare(0, wr.err, "csr PORT_CNA write err")
 
         rd = CsrItem("rd")
         rd.write = 0
-        rd.addr = 0x0000
+        rd.addr = PORT_CNA
         await env.csr.driver.access(rd)
-        env.scoreboard.compare(0, rd.err, "csr mapped read err")
-        env.scoreboard.compare(0x11223344, rd.rdata, "csr scratch readback")
+        env.scoreboard.compare(0, rd.err, "csr PORT_CNA read err")
+        env.scoreboard.compare(0x11223344, rd.rdata, "csr PORT_CNA readback")
 
         ro = CsrItem("ro")
         ro.write = 0
-        ro.addr = 0x0004
+        ro.addr = STATUS
         await env.csr.driver.access(ro)
-        env.scoreboard.compare(0, ro.err, "csr ro err")
-        env.scoreboard.compare(0xA5A50001, ro.rdata, "csr ro id")
+        env.scoreboard.compare(0, ro.err, "csr STATUS err")
+        env.scoreboard.compare(0, ro.rdata, "csr STATUS reset")
+
+        clr = CsrItem("clr")
+        clr.write = 1
+        clr.addr = CNT_CLR
+        clr.wdata = CNT_CLR_ALL
+        await env.csr.driver.access(clr)
+        env.scoreboard.compare(0, clr.err, "CNT_CLR mapped write")
+
+        clr_rd = CsrItem("clr_rd")
+        clr_rd.write = 0
+        clr_rd.addr = CNT_CLR
+        await env.csr.driver.access(clr_rd)
+        env.scoreboard.compare(0, clr_rd.err, "CNT_CLR read err")
+        env.scoreboard.compare(0, clr_rd.rdata, "CNT_CLR WO self-clear reads 0")
+
+        uf = CsrItem("uf")
+        uf.write = 0
+        uf.addr = CNT_CRD_UF
+        await env.csr.driver.access(uf)
+        env.scoreboard.compare(0, uf.err, "CNT_CRD_UF mapped")
+        env.scoreboard.compare(0, uf.rdata, "CNT_CRD_UF RO")
+
+        lmsm = CsrItem("lmsm")
+        lmsm.write = 0
+        lmsm.addr = APPD_LMSM_ST
+        await env.csr.driver.access(lmsm)
+        env.scoreboard.compare(0, lmsm.err, "APPD_LMSM_ST 0x1E00 mapped")
+
+        perr = CsrItem("perr")
+        perr.write = 0
+        perr.addr = APPD_PORT_ERR
+        await env.csr.driver.access(perr)
+        env.scoreboard.compare(0, perr.err, "APPD_PORT_ERR 0x1F00 mapped")
 
         bad = CsrItem("bad")
         bad.write = 0
@@ -131,10 +174,10 @@ class TbSelfcheckTest(UVMTest):
 
         test = CsrItem("test")
         test.write = 0
-        test.addr = 0x0300
+        test.addr = TEST_BASE
         await env.csr.driver.access(test)
         env.scoreboard.compare(0, test.err, "TEST window is mapped (err=0)")
-        # hooks0, or hooks1 with test_mode=0: read 0
+        # PRODUCT, or HOOKS with test_mode=0: read 0 (SPEC §3.2.3 / §11 / REGMAP §2.4)
         if not env.hook.present or env.hook.sample_obs().test_mode == 0:
             env.scoreboard.compare(0, test.rdata, "TEST window quiet when not live")
 

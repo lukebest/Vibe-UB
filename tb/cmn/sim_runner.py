@@ -67,6 +67,7 @@ def _build_and_test(
         "CMN_ASSERT_NO_UNINIT_READ": str(int(bool(assert_no_uninit_read))),
         "CMN_VARIANT": variant.module,
         "CMN_NETLIST": variant.netlist,
+        "COCOTB_RESULTS_FILE": str(build_dir / "results.xml"),
         "PYTHONPATH": (
             str(REPO_ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
         ).rstrip(os.pathsep),
@@ -121,10 +122,25 @@ def _require_formal_bind_ports() -> None:
     check_leaf_ports(ports, module="ub_cmn_mem_1r1w_if_props")
 
 
+def _find_cocotb_results(build_dir: Path) -> Path:
+    named = build_dir / "results.xml"
+    if named.is_file():
+        return named
+    # cocotb 1.9.2 under pytest may write <nodeid>.None; [] must not go through glob.
+    extras = [
+        p
+        for p in build_dir.iterdir()
+        if p.is_file() and p.stat().st_size > 0 and (
+            p.suffix == ".xml" or p.name.endswith(".None")
+        )
+    ]
+    if extras:
+        return sorted(extras)[-1]
+    raise AssertionError(f"cocotb results.xml missing under {build_dir}")
+
+
 def _assert_cocotb_passed(build_dir: Path) -> None:
-    xml = build_dir / "results.xml"
-    if not xml.is_file():
-        raise AssertionError(f"cocotb results.xml missing under {build_dir}")
+    xml = _find_cocotb_results(build_dir)
     root = ET.parse(xml).getroot()
     fails = list(root.iter("failure")) + list(root.iter("error"))
     if fails:

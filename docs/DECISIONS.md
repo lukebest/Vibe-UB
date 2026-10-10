@@ -33,8 +33,19 @@ D12 Coverage acceptance = line + functional, 100% counting named waivers; toggle
 
 D13 TB never forces internal signals; stimulus/error injection via ports or explicit test hooks only.
 
-D14 PHY / SerDes / DLL / process parameters: Xia proposes defaults, pending Luke's approval.
+D14 PHY / SerDes / DLL / process parameters: confirmed by Luke on 2026-10-09. RTT = 2 µs. ASIC scope = digital PCS + DLL only; PMA is a behavioral model (not in ASIC). ASIC process node unspecified (open item).
 
 D15 Spec full text removed from the public repo (this PR); git history rewrite NOT done — pending Luke.
 
 D16 Toolchain pins in D7 are recorded here; a TOOLCHAIN.lock will be added with the infrastructure PR.
+
+# 2026-10-10 decisions — Luke Liu via Firstmate, 16:48 (Asia/Shanghai)
+
+D17 Team roles and process adopted (see docs/TEAM.md, docs/PROCESS.md):
+
+1. Architect Xia owns SPEC, REGMAP, plus Python golden reference models and interface assertions — RTL-independent shared answers. Verification wires those models into the scoreboard and adds end-to-end test points.
+2. Design and verification work in isolated AI sessions and share SPEC, interface contracts, and assertions. Spec questions go to Xia; answers are written back to SPEC.
+3. Tool gatekeeper (temporarily the verification lead) runs lint, CDC, formal, and quick synthesis on every commit. Waivers need written gatekeeper approval and a waiver-list entry (ID / 检查项 / 模块 / 理由 / 批准人 / 日期). docs/WAIVERS.md is future.
+4. REGMAP is the single source that auto-generates (a) pyCircuit register R/W logic, (b) cocotb/uvm-python register models, and (c) firmware drivers; firmware and verification share the generated code. Backend runs quick synthesis before each module merge and feeds area/timing trends to design.
+5. Rule libraries are split (Xia: protocol/interface; design: coding/reset/pyCircuit; verification: test specs; backend: constraints/synthesis). PM versions weekly from v0.1. Each late-bug retro yields at least one rule. Human review focuses on spec changes, interface contracts, test-point lists, CDC, reset, clock gating, timing constraints, and waivers.
+6. Weekly metrics: first-pass rate and iteration count by module type; spec Q&A count by module; late bugs as 规格缺陷 / 设计错误 / 验证漏测 (back to architect/design/verification rule libraries); AI-written vs human-written escape bugs. Roll out on PHY/PCS/LMSM first, then DLL.

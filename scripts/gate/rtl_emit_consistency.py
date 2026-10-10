@@ -14,7 +14,6 @@ Skip the whole job when emit_rtl.py is missing.
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from pathlib import Path
 
@@ -43,13 +42,11 @@ from gatelib import (
     is_eqy_tie_low_port,
     read_cmn_mem_threshold_bits,
     looks_generated,
-    parse_port_decls,
+    parse_ports,
     print_tool_versions,
     rel,
-    rtl_pyc_lib,
     run_cmd,
     shutil_which,
-    yosys_inc_prefix,
 )
 
 # --- architecture-owned knobs (confirm with Xia / design before editing) ---
@@ -58,59 +55,44 @@ EMIT_CMD = [sys.executable, EMIT_SCRIPT]
 # --------------------------------------------------------------------------
 
 def write_hooks_wrapper(hooks_path: Path, module: str, dest: Path) -> list[str]:
-    """HOOKS with tb_test_mode / extra inputs tied low (SPEC §11).
+    """Wrap HOOKS: tb_test_mode=0 and extra inputs tied low (SPEC §11).
 
-    Tie-low ports are deleted and their uses become 1'b0 so the gate top
-    matches PRODUCT (no wrapper hierarchy). Observe (tb_obs_*) stay open
-    via a thin wrapper only when present.
+    Tie-low: tb_test_mode, tb_inj_*, tb_<inst>_bd_*, tb_<inst>_bd_vld_*.
+    Observe (tb_obs_*) left open. Other ports exposed 1:1 with PRODUCT.
     """
-    ports = parse_port_decls(hooks_path)
+    ports = parse_ports(hooks_path)
     tied: list[str] = []
-    observe: list[str] = []
-    for _kind, name, _packed in ports:
+    exposed: list[tuple[str, str]] = []
+    for kind, name in ports:
         if is_eqy_tie_low_port(name):
             tied.append(name)
         elif name.startswith("tb_obs_"):
-            observe.append(name)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    text = hooks_path.read_text(encoding="utf-8")
-    for name in tied:
-        text = re.sub(
-            rf"^[ \t]*input(?:[ \t]+\[[^\]]+\])?[ \t]+{re.escape(name)},?[ \t]*\n",
-            "",
-            text,
-            flags=re.M,
-        )
-        text = re.sub(rf"\b{re.escape(name)}\b", "1'b0", text)
-    if not observe:
-        dest.write_text(text, encoding="utf-8")
-        return tied
-    tmp = dest.with_name(dest.stem + "_tied.v")
-    tmp.write_text(text, encoding="utf-8")
-    exposed = [
-        (kind, name, packed)
-        for kind, name, packed in ports
-        if name not in tied and name not in observe
-    ]
+            tied.append(name)  # observe-only; leave unconnected on the wrapper
+        else:
+            exposed.append((kind, name))
     lines = [
-        f"// Auto-generated eqy wrapper: {module} hooks with extras tied low.",
+        f"// Auto-generated eqy wrapper: {module} hooks with tb_test_mode=0,",
+        "// tb_inj_* / tb_<inst>_bd_* / tb_<inst>_bd_vld_* tied low. Do not commit.",
         f"module {module}_eqy_hooks (",
     ]
     if exposed:
-        lines.append("  " + ",\n  ".join(n for _k, n, _p in exposed))
+        lines.append("  " + ",\n  ".join(n for _k, n in exposed))
     lines.append(");")
-    for kind, name, packed in exposed:
-        width = f" {packed}" if packed else ""
-        lines.append(f"  {kind}{width} {name};")
-    conns = [f".{n}({n})" for _k, n, _p in exposed]
-    for name in observe:
-        conns.append(f".{name}()")
+    for kind, name in exposed:
+        lines.append(f"  {kind} {name};")
+    conns = [f".{n}({n})" for _k, n in exposed]
+    for name in tied:
+        if name.startswith("tb_obs_"):
+            conns.append(f".{name}()")
+        else:
+            conns.append(f".{name}(1'b0)")
     lines.append(f"  {module} u_hooks (")
     lines.append("    " + ",\n    ".join(conns))
     lines.append("  );")
     lines.append("endmodule")
+    dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return tied + observe
+    return tied
 
 
 def _lib_reads(lib_files: list[Path] | None) -> list[str]:
@@ -127,12 +109,6 @@ def _lib_reads(lib_files: list[Path] | None) -> list[str]:
     return out
 
 
-def _yosys_inc() -> str:
-    """-I rtl/pyc_lib when present (SPEC §2.2 `include pyc_reg.v)."""
-    lib = rtl_pyc_lib()
-    return yosys_inc_prefix([lib]) if lib else ""
-
-
 def _yosys_equiv_script(
     product: Path,
     gold_top: str,
@@ -142,15 +118,12 @@ def _yosys_equiv_script(
 ) -> str:
     """Yosys equiv_make / equiv_simple / equiv_induct / equiv_status -assert."""
     libs = _lib_reads(lib_files)
-    inc = _yosys_inc()
-    gold_read = f"read_verilog -sv {inc} {product}".replace("  ", " ")
     return "\n".join(
         [
-            gold_read,
+            f"read_verilog -sv {product}",
             *libs,
             f"hierarchy -check -top {gold_top}",
             "proc",
-            "flatten",
             "opt",
             "design -save gold",
             "design -reset",
@@ -158,7 +131,6 @@ def _yosys_equiv_script(
             *libs,
             f"hierarchy -check -top {gate_top}",
             "proc",
-            "flatten",
             "opt",
             "design -save gate",
             f"design -copy-from gold -as gold {gold_top}",
@@ -183,25 +155,15 @@ def run_equiv(
     work = OUT_DIR / "eqy" / module
     work.mkdir(parents=True, exist_ok=True)
     gold_top = module
-    inc = _yosys_inc()
     if extra_ports is None:
         gate_top = module
-        gate_reads = [f"read_verilog -sv {inc} {hooks}".replace("  ", " ")]
+        gate_reads = [f"read_verilog -sv {hooks}"]
         kind = "no-hook leaf, ports 1:1"
     else:
         wrap = work / f"{module}_eqy_hooks.v"
         tied = write_hooks_wrapper(hooks, module, wrap)
-        observe = [n for n in tied if n.startswith("tb_obs_")]
-        if observe:
-            gate_top = f"{module}_eqy_hooks"
-            tied_src = wrap.with_name(wrap.stem + "_tied.v")
-            gate_reads = [
-                f"read_verilog -sv {inc} {tied_src}".replace("  ", " "),
-                f"read_verilog -sv {inc} {wrap}".replace("  ", " "),
-            ]
-        else:
-            gate_top = module
-            gate_reads = [f"read_verilog -sv {inc} {wrap}".replace("  ", " ")]
+        gate_top = f"{module}_eqy_hooks"
+        gate_reads = [f"read_verilog -sv {hooks}", f"read_verilog -sv {wrap}"]
         kind = f"hooked; extra inputs tied low ({tied or 'none'})"
 
     eqy_bin = shutil_which("eqy")

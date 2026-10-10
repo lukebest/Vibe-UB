@@ -1,0 +1,8 @@
+equiv: not run (timeout)
+equiv: not run (timeout) [ub_pcs_fec_enc_self]
+equiv: not run (timeout) [ub_pcs_fec_enc_false_ub_pcs_fec_enc_ref_bad_coeff]
+equiv: not run (timeout) [ub_pcs_fec_enc_false_ub_pcs_fec_enc_ref_poly11b]
+equiv: not run (timeout) [ub_pcs_fec_enc_false_ub_pcs_fec_enc_ref_rev_order]
+equiv: not run (timeout) [ub_pcs_fec_syndrome_self]
+equiv: not run (timeout) [ub_pcs_fec_syndrome_false_ub_pcs_fec_syndrome_ref_bad_root]
+equiv: not run (timeout) [ub_pcs_fec_syndrome_false_ub_pcs_fec_syndrome_ref_poly11b]

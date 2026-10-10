@@ -1,0 +1,18 @@
+{
+  "enc_variant": "enc:enc_ref",
+  "syn_variant": "syn:syn_ref",
+  "enc_n_compare": 17536,
+  "enc_n_mismatch": 0,
+  "enc_expected": 17536,
+  "syn_n_compare": 1104,
+  "syn_n_mismatch": 0,
+  "syn_expected": 1104,
+  "first_mismatch": null,
+  "fake_fail_lines": [
+    "enc_bad_coeff: n_compare=17536 n_mismatch=1049 first={'ctx': 'enc_bad_coeff json:all_0x55 sym120', 'expected': 220, 'actual': 140}",
+    "enc_rev_order: n_compare=17536 n_mismatch=1078 first={'ctx': 'enc_rev_order json:incrementing sym120', 'expected': 40, 'actual': 7}",
+    "enc_poly11b: n_compare=17536 n_mismatch=1078 first={'ctx': 'enc_poly11b json:all_0x55 sym120', 'expected': 220, 'actual': 229}",
+    "syn_poly11b: n_compare=1104 n_mismatch=954 first={'ctx': 'syn_poly11b json:all_0x55 S1', 'expected': 0, 'actual': 246}",
+    "syn_bad_root: n_compare=1104 n_mismatch=144 first={'ctx': 'syn_bad_root json:all_0x55 S7', 'expected': 0, 'actual': 97}"
+  ]
+}

@@ -1,0 +1,2 @@
+legacy ub_pcs_fec_enc: TIMEOUT loading rtl (legacy; not blocking)
+legacy ub_pcs_fec_syndrome: TIMEOUT loading rtl (legacy; not blocking)

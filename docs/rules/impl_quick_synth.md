@@ -4,7 +4,7 @@
 | --- | --- |
 | 分册 | `docs/rules/impl_quick_synth.md` |
 | 所有者 | 后端实现 |
-| 版本 | v0.3 (2026-10-10) |
+| 版本 | v0.4 (2026-10-10) |
 | 类别 | 合入前快速综合的面积 / 时序反馈（proxy，非签核） |
 | 配套 | [backend.md](backend.md)、[TEAM.md](../TEAM.md)、[PROCESS.md](../PROCESS.md)、[SPEC.md](../SPEC.md) |
 | 脚本 | `scripts/impl/quick_synth.sh` |
@@ -47,7 +47,8 @@
    - 大 SRAM 用 `read_verilog -lib` 作黑盒。
    - `synth -top <m> -flatten`。
    - `dfflibmap` + `abc -liberty` 映到 Sky130 hd tt。
-   - `stat -liberty`：mapped **cell 数**、**面积 um²**、**flop 数**（`df*` / `edf*` / `sdf*`）。黑盒 SRAM 实例从 cell 数里扣掉。
+   - **高扇出缓冲（默认开）**：abc 映射之后、STA 之前，对非时钟 / 非复位网插 `sky130_fd_sc_hd__buf_4` / `buf_8` 树，使每个驱动点扇出 ≤ **16**（`--max-fanout`）。OpenROAD 若在 PATH 里可用 `repair_design`，本脚本仍走确定性 Yosys 树（proxy 无 floorplan；OpenROAD 未装）。`--no-buffer` 关掉，便于对照。每叶子报告 **max fanout**（缓冲后；notes 里带 before→after 与插入 buf 数）。
+   - `stat -liberty`：mapped **cell 数**、**面积 um²**、**flop 数**（`df*` / `edf*` / `sdf*`）。黑盒 SRAM 实例从 cell 数里扣掉。缓冲后的 buf 计入 cell / 面积。
    - 另记 `hierarchy; proc; opt; stat` 的 generic cell 数，便于和设计侧 Yosys `proc; opt; stat` 对拍。
    - `ltp`：与工艺无关的最长拓扑路径长度（sanity）。
 3. **OpenSTA**（或 OpenROAD 的 `sta`）
@@ -117,6 +118,7 @@ OPEN §13 参数已按 §2.2 做成 `_placeholder` 固定网表时：综合进 p
 | IMP-QS-008 | `ub_cmn_mem_1r1w`（及 `scripts/gate/blackbox.yml` 中的模块）depth×width 超过可配阈值（默认 4096 bit）作黑盒，SRAM est 列用标明的 bit 面积公式；小实例按 flop 综合；STA 按 1 拍 registered read。阈值与公式在工艺确定后重看 | 本分册；PR #9 §13 | 2026-10-10 |
 | IMP-QS-009 | Yosys 默认 `-I rtl/pyc_lib`（TOOLCHAIN.lock 钉住的 pyCircuit 原语）。目录未到时回退 `rtl/common` 并 WARN。`--incdir` / `QS_INCDIRS` 为额外路径。`pyc_*` 不作报告 top | 本分册；#21 / #5 | 2026-10-10 |
 | IMP-QS-010 | `ub_dll_crc32` / `ub_dll_crc_check` / `ub_controller_tx` / `ub_controller_rx` 只报「待删除 / to be deleted」，不进合计、不对 baseline | 本分册 | 2026-10-10 |
+| IMP-QS-011 | abc 映射后默认对高扇出数据网插确定性 `buf_4`/`buf_8` 树（max fanout 16）。`--no-buffer` 可关。每叶子报告缓冲后 max fanout。时钟 / 复位网不插。这是 proxy，用来避免无 wire-load 时单 cell 灌数千 load 的悲观 WNS | 本分册 | 2026-10-10 |
 
 ---
 
@@ -138,6 +140,9 @@ scripts/impl/quick_synth.sh --work-tree . --tops ub_foo --chparam NUM_LANES=4 --
 
 # 额外 include（默认已有 -I rtl/pyc_lib）
 scripts/impl/quick_synth.sh --work-tree . --incdir /tmp/extra --out /tmp/qs
+
+# 对照：关掉扇出缓冲（默认 ON）
+scripts/impl/quick_synth.sh --work-tree . --tops ub_foo --no-buffer --out /tmp/qs-nobuf
 
 scripts/impl/quick_synth.sh --self-check
 ```

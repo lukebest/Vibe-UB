@@ -21,6 +21,14 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from buffer_fanout import (
+    DEFAULT_MAX_FANOUT,
+    analyze_design,
+    buffer_design,
+    buffer_module,
+    choose_buf,
+)
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_DEFAULT = SCRIPT_DIR.parents[1]
 
@@ -520,12 +528,8 @@ def parse_sta(text: str) -> dict[str, Any]:
 def tool_versions(liberty: Path, liberty_meta: dict[str, str]) -> dict[str, str]:
     y = run(["yosys", "-V"])
     yver = (y.stdout or "").strip().splitlines()[0] if y.stdout else "unknown"
-    sta = run(["sta", "-no_init", "-exit"])
-    sta_ver = "unknown"
-    for line in (sta.stdout or "").splitlines():
-        if "OpenSTA" in line:
-            sta_ver = line.strip()
-            break
+    sta = run(["sta", "-version"], timeout=15)
+    sta_ver = (sta.stdout or "").strip().splitlines()[0] if sta.stdout else "unknown"
     return {
         "yosys": yver,
         "opensta": sta_ver,
@@ -1095,6 +1099,26 @@ def classify_mem_in_src(
     }
 
 
+def emit_buffered_mapped(
+    *,
+    json_in: Path,
+    json_out: Path,
+    verilog_out: Path,
+    stat_out: Path,
+    liberty: Path,
+    top: str,
+) -> subprocess.CompletedProcess[str]:
+    """read_json the buffered netlist and write mapped.v + liberty stat."""
+    cmd = (
+        f"read_liberty -lib {liberty}; "
+        f"read_json {json_in}; "
+        f"hierarchy -top {top}; "
+        f"tee -o {stat_out} stat -liberty {liberty}; "
+        f"write_verilog -noattr -noexpr {verilog_out}"
+    )
+    return run(["yosys", "-p", cmd], timeout=300)
+
+
 def synthesize_one(
     *,
     top: str,
@@ -1108,6 +1132,8 @@ def synthesize_one(
     mem_catalog: dict[str, dict[str, Any]],
     sram_bit_threshold: int,
     extra_incdirs: list[Path] | None = None,
+    buffer: bool = True,
+    max_fanout_limit: int = DEFAULT_MAX_FANOUT,
 ) -> dict[str, Any]:
     outdir.mkdir(parents=True, exist_ok=True)
     files = [src]
@@ -1221,6 +1247,78 @@ def synthesize_one(
         result["log_excerpt"] = _excerpt(y.stdout or "")
         result["anomalies"] = ["yosys_failed"]
         return result
+
+    fanout_rep: dict[str, Any] = {
+        "enabled": bool(buffer),
+        "method": "none",
+        "max_fanout_limit": max_fanout_limit,
+        "max_fanout_before": None,
+        "max_fanout_after": None,
+        "n_bufs": 0,
+        "n_nets_buffered": 0,
+    }
+    prebuf_json = outdir / "mapped_prebuf.json"
+    if prebuf_json.is_file():
+        pre_data = json.loads(prebuf_json.read_text(encoding="utf-8"))
+        if buffer:
+            buf_data, fanout_rep = buffer_design(pre_data, max_fanout_limit)
+            fanout_rep["enabled"] = True
+            buf_json = outdir / "mapped_buf.json"
+            buf_json.write_text(
+                json.dumps(buf_data, indent=2) + "\n", encoding="utf-8"
+            )
+            if int(fanout_rep.get("n_bufs") or 0) > 0:
+                y2 = emit_buffered_mapped(
+                    json_in=buf_json,
+                    json_out=buf_json,
+                    verilog_out=outdir / "mapped.v",
+                    stat_out=outdir / "mapped_stat.txt",
+                    liberty=liberty,
+                    top=top,
+                )
+                (outdir / "yosys_buffer.log").write_text(
+                    y2.stdout or "", encoding="utf-8"
+                )
+                if y2.returncode != 0:
+                    result["error"] = "fanout buffer yosys emit failed"
+                    result["log_excerpt"] = _excerpt(y2.stdout or "")
+                    result["anomalies"] = ["yosys_failed"]
+                    result["ok"] = False
+                    result["fanout"] = fanout_rep
+                    return result
+                notes.append(
+                    f"fanout buffer {fanout_rep['method']}: "
+                    f"max {fanout_rep['max_fanout_before']}→"
+                    f"{fanout_rep['max_fanout_after']} "
+                    f"(+{fanout_rep['n_bufs']} buf, "
+                    f"{fanout_rep['n_nets_buffered']} nets, "
+                    f"limit {max_fanout_limit})"
+                )
+            else:
+                notes.append(
+                    f"fanout buffer {fanout_rep['method']}: "
+                    f"no net above {max_fanout_limit} "
+                    f"(max {fanout_rep['max_fanout_before']})"
+                )
+        else:
+            fanout_rep = analyze_design(pre_data)
+            fanout_rep["enabled"] = False
+            fanout_rep["max_fanout_limit"] = max_fanout_limit
+            notes.append(
+                f"fanout buffer off (--no-buffer); "
+                f"max fanout {fanout_rep['max_fanout_before']}"
+            )
+        (outdir / "fanout_report.json").write_text(
+            json.dumps(fanout_rep, indent=2) + "\n", encoding="utf-8"
+        )
+    else:
+        notes.append("mapped_prebuf.json missing; fanout not measured")
+
+    result["fanout"] = fanout_rep
+    result["max_fanout"] = fanout_rep.get("max_fanout_after")
+    result["max_fanout_before"] = fanout_rep.get("max_fanout_before")
+    result["buffer_method"] = fanout_rep.get("method")
+    result["n_bufs"] = fanout_rep.get("n_bufs")
 
     designer = parse_stat((outdir / "designer_stat.txt").read_text(errors="replace"))
     generic = parse_stat(
@@ -1355,11 +1453,11 @@ def fmt_num(v: Any, digits: int = 3) -> str:
 def write_markdown_table(rows: list[dict[str, Any]]) -> str:
     hdr = (
         "| module | variant | cells (mapped) | area um^2 | SRAM est um^2 | flops | "
-        "max comb logic depth | arrival ns | slack @ period | vs baseline | "
-        "QoR >10% | notes |"
+        "max fanout | max comb logic depth | arrival ns | slack @ period | "
+        "vs baseline | QoR >10% | notes |"
     )
     sep = (
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |"
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |"
     )
     lines = [hdr, sep]
     for r in rows:
@@ -1373,14 +1471,15 @@ def write_markdown_table(rows: list[dict[str, Any]]) -> str:
         flag_s = ",".join(flags) if flags else "—"
         delta = r.get("delta_vs_baseline") or r.get("delta_vs_main") or "new"
         lines.append(
-            "| {mod} | {var} | {cells} | {area} | {sram} | {flops} | {depth} | "
-            "{arr} | {sl} | {delta} | {flag} | {notes} |".format(
+            "| {mod} | {var} | {cells} | {area} | {sram} | {flops} | {fo} | "
+            "{depth} | {arr} | {sl} | {delta} | {flag} | {notes} |".format(
                 mod=r.get("top", ""),
                 var=r.get("variant", ""),
                 cells=fmt_num(r.get("cells_mapped"), 0),
                 area=fmt_num(r.get("area_um2"), 1),
                 sram=fmt_num(r.get("sram_est_um2"), 1),
                 flops=fmt_num(r.get("flops"), 0),
+                fo=fmt_num(r.get("max_fanout"), 0),
                 depth=fmt_num(r.get("logic_depth"), 0),
                 arr=fmt_num(r.get("arrival_ns"), 3),
                 sl=fmt_num(r.get("slack_ns"), 3),
@@ -1635,6 +1734,95 @@ def self_check() -> int:
                 cp.returncode == 0,
                 f"yosys include read failed:\n{(cp.stdout or '')[-400:]}",
             )
+
+    expect(choose_buf(1) == "sky130_fd_sc_hd__buf_4", "buf_4 for small group")
+    expect(choose_buf(4) == "sky130_fd_sc_hd__buf_4", "buf_4 at 4")
+    expect(choose_buf(5) == "sky130_fd_sc_hd__buf_8", "buf_8 above 4")
+
+    def _toy(n_sinks: int, *, clk: bool = False) -> dict[str, Any]:
+        cells: dict[str, Any] = {
+            "drv": {
+                "hide_name": 0,
+                "type": "sky130_fd_sc_hd__inv_2",
+                "connections": {"A": [2], "Y": [3]},
+            }
+        }
+        ports = {
+            "a": {"direction": "input", "bits": [2]},
+            "y": {"direction": "output", "bits": list(range(4, 4 + n_sinks))},
+        }
+        if clk:
+            ports["core_clk"] = {"direction": "input", "bits": [3]}
+            cells["drv"]["connections"]["Y"] = [99]
+        for i in range(n_sinks):
+            src = 3 if not clk else 3  # clock port bit when clk
+            if clk:
+                src = 3
+            cells[f"s{i}"] = {
+                "hide_name": 0,
+                "type": "sky130_fd_sc_hd__inv_2",
+                "connections": {"A": [src], "Y": [4 + i]},
+            }
+        nets = {p: {"hide_name": 0, "bits": ports[p]["bits"]} for p in ports}
+        if not clk:
+            nets["n_hot"] = {"hide_name": 1, "bits": [3]}
+        return {
+            "ports": ports,
+            "cells": cells,
+            "netnames": nets,
+        }
+
+    toy = _toy(20)
+    before = analyze_design({"modules": {"t": json.loads(json.dumps(toy))}})
+    expect(before["max_fanout_before"] >= 20, f"toy fanout {before}")
+    t1 = json.loads(json.dumps(toy))
+    t2 = json.loads(json.dumps(toy))
+    r1 = buffer_module(t1, 16)
+    r2 = buffer_module(t2, 16)
+    expect(r1["n_bufs"] > 0, f"inserted bufs {r1}")
+    expect(r1["max_fanout_after"] <= 16, f"after {r1}")
+    expect(t1 == t2 and r1 == r2, "buffer_module is deterministic")
+    clk_mod = _toy(20, clk=True)
+    rclk = buffer_module(clk_mod, 16)
+    expect(
+        rclk["n_bufs"] == 0 and rclk["max_fanout_after"] >= 20,
+        f"clock net not buffered {rclk}",
+    )
+    if shutil.which("yosys"):
+        with tempfile.TemporaryDirectory() as td:
+            jp = Path(td) / "t.json"
+            outp = Path(td) / "t2.json"
+            jp.write_text(
+                json.dumps({"creator": "qs-self-check", "modules": {"t": t1}}),
+                encoding="utf-8",
+            )
+            outp.write_text(
+                json.dumps({"creator": "qs-self-check", "modules": {"t": t1}}),
+                encoding="utf-8",
+            )
+            cp = run(
+                [
+                    "yosys",
+                    "-p",
+                    f"read_json {outp}; hierarchy -top t; "
+                    f"write_verilog -noattr -noexpr {Path(td) / 't.v'}",
+                ]
+            )
+            expect(
+                cp.returncode == 0,
+                f"buffered json not readable by yosys:\n"
+                f"{(cp.stdout or '')[-300:]}",
+            )
+            tv = Path(td) / "t.v"
+            if tv.is_file():
+                body = tv.read_text(encoding="utf-8")
+                expect(
+                    "sky130_fd_sc_hd__buf_" in body,
+                    "emitted verilog has buf cells",
+                )
+            else:
+                expect(False, "yosys did not write buffered verilog")
+
     with tempfile.TemporaryDirectory() as td:
         tree = Path(td)
         (tree / "rtl" / "common").mkdir(parents=True)
@@ -1699,6 +1887,18 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         default=[],
         help="extra Yosys -I directory (repeatable; default is rtl/pyc_lib)",
+    )
+    ap.add_argument(
+        "--no-buffer",
+        action="store_true",
+        default=os.environ.get("QS_NO_BUFFER") == "1",
+        help="skip post-map fanout buffering (default: buffer ON)",
+    )
+    ap.add_argument(
+        "--max-fanout",
+        type=int,
+        default=int(os.environ.get("QS_MAX_FANOUT", DEFAULT_MAX_FANOUT)),
+        help=f"max sinks per driver after buffering (default {DEFAULT_MAX_FANOUT})",
     )
     ap.add_argument(
         "--json",
@@ -1868,6 +2068,8 @@ def main(argv: list[str] | None = None) -> int:
                 mem_catalog=mem_catalog,
                 sram_bit_threshold=args.sram_bit_threshold,
                 extra_incdirs=extra_incdirs,
+                buffer=not args.no_buffer,
+                max_fanout_limit=args.max_fanout,
             )
             results.append(r)
 
@@ -1913,6 +2115,11 @@ def main(argv: list[str] | None = None) -> int:
             "tools": versions,
             "incdirs": [str(p) for p in incdirs],
             "incdir_warn": inc_warn,
+            "buffer": not args.no_buffer,
+            "max_fanout_limit": args.max_fanout,
+            "buffer_method": (
+                "yosys_buf_tree" if not args.no_buffer else "none"
+            ),
             "product_totals": product_area_totals(results),
             "results": results,
         }

@@ -4,6 +4,7 @@
 
 ### Added
 
+- `scripts/impl/buffer_fanout.py`：Yosys JSON 上确定性 `buf_4`/`buf_8` 扇出树（quick-synth 默认在 abc 之后调用）。
 - `docs/VERIF_PLAN.md` §8.8：轨道 C 内存管理（UMMU + 译码器）测试点（docs-only；公共 §8.7 / §13 / §14 / §15 另 PR 并入）。
 - `scripts/impl/quick_synth.sh`：合入前叶子快速综合（Yosys flatten + Sky130 hd tt proxy + OpenSTA 最差建立路径）。Informational；不进验证门禁。规则见 `docs/rules/impl_quick_synth.md`。
 - `TOOLCHAIN.lock` + `tb/` uvm-python 骨架、golden-model 接口、双网表自检入口（叠在 M1 SPEC 上；不改 `rtl/` / SPEC 类文档）。
@@ -22,6 +23,7 @@
 
 ### Changed
 
+- `scripts/impl/quick_synth.*` + `docs/rules/impl_quick_synth.md` v0.4：abc 映射后默认插确定性 Sky130 `buf_4`/`buf_8` 扇出树（max fanout 16；`--no-buffer` / `--max-fanout`；每叶子报 max fanout）。OpenROAD `repair_design` 未作为本 proxy 路径（VM 无 OpenROAD、且无 floorplan）。`sta -version` 探测版本，避免 `sta -no_init -exit` 无脚本挂起。
 - `scripts/impl/quick_synth.*` + `docs/rules/impl_quick_synth.md` v0.3：Yosys 默认 `-I rtl/pyc_lib`（pycc `pyc_reg.v` 等；未落地时回退 `rtl/common` 并 WARN）；`--incdir` / `QS_INCDIRS` 为额外路径；`pyc_*` 不作报告 top；`ub_dll_crc32` / `ub_dll_crc_check` / `ub_controller_tx` / `ub_controller_rx` 只报「待删除 / to be deleted」，不进合计、不对 baseline。
 - SPEC §2.2 + CODING_STYLE §1 / §5：pycc 运行库原语（`pyc_reg.v` 等运行时发出的 `pyc_*`）只放 `rtl/pyc_lib/`，从 `TOOLCHAIN.lock` 钉死版本原样拷贝、不得改；其它 `rtl/<layer>/` 与 `hooks/` 不得含 `pyc_*`；filelist 引用该目录；`` `include `` 用 `-I rtl/pyc_lib`。门禁细则见 `docs/rules/verif_gate.md`。
 - `docs/VERIF_PLAN.md`：公共 §8.7 / §13 / §14 / §15 并入轨道 C 内存管理计数与追溯（§8.8 正文不动）。

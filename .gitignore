@@ -19,3 +19,9 @@ tb/reports/regress/**
 tb/reports/cov_func/**
 tb/reports/cov_line/**
 !tb/reports/**/.gitkeep
+
+# Impl quick-synth: never commit PDK / liberty / local work dirs
+.cache/sky130/
+scripts/impl/.cache/
+reports/impl/quick_synth/_work/
+.history_sta

@@ -106,16 +106,18 @@ Xia：统一存储原语 `ub_cmn_mem_1r1w` 走 pycc 生成，源码 `pycircuit/c
 
 | 类 | 模式 |
 | --- | --- |
-| 字符串 | `vibe-ub-spec-private`、`/workspace/vibe-ub-c/`、`/workspace/vibe-ub-b/`、`ch9_fields`、`spec-answers`、`ch9-answers` |
+| 字符串 | `vibe-ub-spec-private`、`/workspace/vibe-ub-c/`、`/workspace/vibe-ub-b/`、`/workspace/ubpdf/`、`ch9_fields`、`spec-answers`、`ch9-answers`、`ch9-figure-resolution`、`decision-table`、`.pre-pdf.yaml`、`confidence: pdf` |
 | 标记 | `GENERATED FROM ch9_fields` |
-| 文件名 | `fmt.py` |
+| 文件名 | `fmt.py`、`.pre-pdf.yaml` |
 | 文件 | `*.pdf` |
+| 图片 | 提交的 PNG/JPG：位于 `docs/` 之外，或文件名含 `page` / `ubpdf`（allowlist 可放行） |
 
 Allowlist：`scripts/gate/leak_allow.yml`（守门人批准，与 `waivers/` 同一套）。**本检查脚本**（`scripts/gate/spec_leak.py`）和 **本分册里的模式列表**必须登记在 allowlist，否则自检失败。
 
 | ID | 规则 | 来源 | 日期 |
 | --- | --- | --- | --- |
 | GATE-LEAK-001 | 上表模式出现在未放行文件即失败 | 私有规范隔离 | 2026-10-10 |
+| GATE-LEAK-002 | 提交的 PNG/JPG 若在 `docs/` 外或文件名含 `page`/`ubpdf` 即失败 | 私有规范隔离 | 2026-10-10 |
 
 spec-leak finding 一律按新叶子拦截，不用 `legacy.txt` 放行。
 
@@ -318,7 +320,7 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 | VER-GATE-007 | `ub_cmn_mem_1r1w` 是 `cmn` 普通叶子；大实例上层当黑盒；`blackbox.yml` 无 `primitive` | Xia | 2026-10-10 |
 | VER-GATE-008 | 成对模块 TB 两侧独立 vs `model/` + 定向用例；审查项，不自动拦截 | A 线 lane dist | 2026-10-10 |
 | VER-GATE-009 | SPEC §2.2 变体逐个跑；`_placeholder` 只 lint/TB；PRODUCT 不得例化；源码须有 `PLACEHOLDER_SOURCE` | SPEC §2.2 | 2026-10-10 |
-| VER-GATE-010 | spec-leak：私有规范标记 / `fmt.py` / PDF 不得进公开仓库 | 隔离 | 2026-10-10 |
+| VER-GATE-010 | spec-leak：私有规范标记 / `fmt.py` / PDF / 违规 PNG/JPG 不得进公开仓库 | 隔离 | 2026-10-10 |
 
 ---
 

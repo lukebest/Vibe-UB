@@ -3,10 +3,13 @@
 
 Forbidden (any file, including the PR diff vs origin/main):
   strings: vibe-ub-spec-private, /workspace/vibe-ub-c/, /workspace/vibe-ub-b/,
-           ch9_fields, spec-answers, ch9-answers
+           /workspace/ubpdf/, ch9_fields, spec-answers, ch9-answers,
+           ch9-figure-resolution, decision-table, .pre-pdf.yaml,
+           confidence: pdf
   marker:  GENERATED FROM ch9_fields
-  name:    fmt.py
+  name:    fmt.py, .pre-pdf.yaml
   files:   *.pdf
+  images:  committed PNG/JPG outside docs/, or name contains page / ubpdf
 
 Allowlist: scripts/gate/leak_allow.yml (gatekeeper approver required).
 This script and docs/rules/verif_gate.md must be on that list.
@@ -35,13 +38,20 @@ LEAK_STRINGS = (
     "vibe-ub-spec-private",
     "/workspace/vibe-ub-c/",
     "/workspace/vibe-ub-b/",
+    "/workspace/ubpdf/",
     "ch9_fields",
     "spec-answers",
     "ch9-answers",
+    "ch9-figure-resolution",
+    "decision-table",
+    ".pre-pdf.yaml",
+    "confidence: pdf",
     "GENERATED FROM ch9_fields",
 )
 PDF_GLOB = "*.pdf"
-FORBIDDEN_NAME = "fmt.py"
+FORBIDDEN_NAMES = {"fmt.py", ".pre-pdf.yaml"}
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
+IMAGE_NAME_NEEDLES = ("page", "ubpdf")
 SKIP_DIR_NAMES = {
     ".git",
     ".venv",
@@ -97,6 +107,32 @@ def scan_text(text: str) -> list[str]:
     return hits
 
 
+def image_findings(path: Path, rel_path: str) -> list[Finding]:
+    """Committed PNG/JPG outside docs/, or name contains page/ubpdf."""
+    if path.suffix.lower() not in IMAGE_SUFFIXES:
+        return []
+    name_l = path.name.lower()
+    parts = Path(rel_path).parts
+    outside_docs = not parts or parts[0] != "docs"
+    name_hit = any(n in name_l for n in IMAGE_NAME_NEEDLES)
+    if not (outside_docs or name_hit):
+        return []
+    why = []
+    if outside_docs:
+        why.append("outside docs/")
+    if name_hit:
+        why.append("filename contains page/ubpdf")
+    return [
+        Finding(
+            check="spec_leak",
+            module="*",
+            file=rel_path,
+            rule="LEAK_IMAGE",
+            message="committed PNG/JPG is not allowed (" + "; ".join(why) + ")",
+        )
+    ]
+
+
 def scan_file(path: Path) -> list[Finding]:
     findings: list[Finding] = []
     name = path.name
@@ -113,16 +149,17 @@ def scan_file(path: Path) -> list[Finding]:
                 message="PDF must not be committed to the public repo",
             )
         )
-    if name == FORBIDDEN_NAME:
+    if name in FORBIDDEN_NAMES:
         findings.append(
             Finding(
                 check="spec_leak",
                 module="*",
                 file=rel_path,
                 rule="LEAK_FILENAME",
-                message=f"forbidden filename {FORBIDDEN_NAME}",
+                message=f"forbidden filename {name}",
             )
         )
+    findings.extend(image_findings(path, rel_path))
     try:
         data = path.read_bytes()[:MAX_READ]
     except OSError:
@@ -160,6 +197,8 @@ def scan_pr_diff() -> list[Finding]:
     for line in text.splitlines():
         if line.startswith("+++ b/"):
             current = line[6:]
+            if not is_leak_allowed(REPO_ROOT / current):
+                findings.extend(image_findings(Path(current), current))
             continue
         if not line.startswith("+") or line.startswith("+++"):
             continue

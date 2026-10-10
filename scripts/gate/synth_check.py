@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from gatelib import (
     run_cmd,
     shutil_which,
     yosys_inc_prefix,
+    module_closure,
 )
 
 # HOOKS netlists are lint/CDC only (CODING_STYLE §1). Synth-check is PRODUCT.
@@ -102,19 +104,37 @@ def synth_module(module: str, file: Path, sources: list[Path], incdirs: list[Pat
             "select -list t:$dlatch t:$adlatch t:$dlatchsr",
             "check",
             "scc",
-            f"synth -top {module}",
+            # -noabc: structural pass/fail only. QoR ABC mapping is not a gate
+            # (implementation owns scripts/impl/quick_synth.sh).
+            f"synth -top {module} -noabc",
             "stat",
         ]
     )
-    proc = run_cmd(["yosys", "-q", "-p", script], timeout=180)
-    text = proc.stdout or ""
+    try:
+        proc = run_cmd(["yosys", "-p", script], timeout=120)
+        text = proc.stdout or ""
+        rc = proc.returncode
+    except subprocess.TimeoutExpired as exc:
+        text = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
+        text += f"\nTIMEOUT after 120s on {module}"
+        rc = 124
     print(f"--- yosys synth {module} ({rel(file)}) ---")
     # Keep the log readable: last 40 lines always include stat / errors.
     lines = text.strip().splitlines()
     shown = lines if len(lines) <= 60 else (["..."] + lines[-59:])
     print("\n".join(shown))
     findings = parse_yosys(text, module, rel(file))
-    if proc.returncode != 0 and not findings:
+    if rc == 124:
+        findings.append(
+            Finding(
+                check="synth",
+                module=module,
+                file=rel(file),
+                rule="SYNTH_TIMEOUT",
+                message="yosys exceeded 120s (structural synth -noabc)",
+            )
+        )
+    elif rc != 0 and not findings:
         findings.append(
             Finding(
                 check="synth",
@@ -141,7 +161,8 @@ def main() -> int:
         print("synth-check: no PRODUCT modules; PASS")
         return emit_report("synth", [])
     for unit in modules:
-        f, _ = synth_module(unit.module, unit.file, sources, disc["incdirs"])
+        needed = module_closure(unit.module, disc) or [unit.file]
+        f, _ = synth_module(unit.module, unit.file, needed, disc["incdirs"])
         findings.extend(f)
     return emit_report("synth", findings)
 

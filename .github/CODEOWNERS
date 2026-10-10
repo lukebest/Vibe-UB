@@ -3,7 +3,7 @@
 # Owner = repository owner / verification lead (lukebest).
 
 /waivers/ @lukebest
+/gate/ @lukebest
 /.github/workflows/gate.yml @lukebest
 /.github/CODEOWNERS @lukebest
-/scripts/gate/legacy.txt @lukebest
 /scripts/gate/cdc_rules.yml @lukebest

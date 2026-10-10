@@ -25,6 +25,11 @@ icarus_lock = "12.0"
 # D7: Verilator 5.032 for compare + line coverage.
 # cocotb 1.9.2 documents Verilator >=5.022; do not move to >=5.036 without re-qual.
 verilator_lock = "5.032"
+# Formal / equivalence (SPEC §11). Yosys 0.33 is what ubuntu-24.04 apt ships.
+yosys_lock = "0.33"
+# eqy is the primary PRODUCT≡HOOKS tool. Pin is the YosysHQ eqy release.
+# ubuntu-24.04 may not package it; CI installs `eqy` best-effort.
+eqy_lock = "0.36"
 
 [simulators-actual]
 # Recorded when this lock was first exercised in the Cloud Agent VM.

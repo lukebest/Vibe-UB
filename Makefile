@@ -1,8 +1,14 @@
 # One-button tool gate. CI jobs call the same scripts/gate/*.sh files.
-.PHONY: gate lint synth-check cdc-rdc formal regmap-consistency tb-selfcheck versions
+.PHONY: gate lint synth-check cdc-rdc formal regmap-consistency tb-selfcheck rtl-emit-consistency hooks-port-consistency versions
 
 gate:
 	scripts/gate/run_all.sh
+
+rtl-emit-consistency:
+	scripts/gate/rtl_emit_consistency.sh
+
+hooks-port-consistency:
+	scripts/gate/hooks_port_consistency.sh
 
 lint:
 	scripts/gate/lint.sh

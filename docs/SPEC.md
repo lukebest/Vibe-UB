@@ -836,6 +836,8 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 
 **(e) 覆盖率 waiver。** 钩子 mux 不另开 waiver（见 (b)）。信用下溢（`CRD_UF` 计数与 irq 分支）在正确设计中不可达，须 **具名覆盖率 waiver**（§13.4）。
 
+**(f) 端口一致性（Xia 裁定）。** §10 未列钩子的叶子：HOOKS 网表端口必须与 PRODUCT 完全一致，不加 `tb_test_mode`。§10 列了钩子的模块（如 `ub_lmsm`）：HOOKS 端口 = PRODUCT 端口 + §10 所列 `tb_*` + `tb_test_mode`。门禁按模块表核对，失败即拦。eqy：无钩子叶子按端口一一对应；有钩子模块把额外输入拉低、`tb_test_mode=0` 后再比对（与 (d) 一致）。
+
 ---
 
 ## 12. 与现有 `rtl/` 的冲突（重写时必须对齐本规格）

@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gatelib import (
     REPO_ROOT,
     Finding,
+    collect_stub_findings,
     discover_rtl,
     emit_report,
     print_tool_versions,
@@ -19,6 +20,7 @@ from gatelib import (
     run_cmd,
     shutil_which,
     verilator_inc_args,
+    module_closure,
 )
 
 WARN_RE = re.compile(
@@ -36,15 +38,20 @@ def parse_verilator(text: str, module: str, default_file: str) -> list[Finding]:
         m = WARN_RE2.match(raw.strip())
         if not m:
             continue
+        if "Exiting due to" in (m.group("msg") or ""):
+            continue
         sev = "error" if m.group("sev") == "Error" else "warning"
         rule = m.group("rule") or ("ERROR" if sev == "error" else "WARNING")
         fpath = m.group("file") or default_file
+        line = m.group("line")
         msg = (m.group("msg") or raw).strip()
+        if line:
+            msg = f"line {line}: {msg}"
         if fpath and not fpath.startswith("%"):
             try:
-                fpath = rel(Path(fpath))
+                fpath = rel(Path(fpath.split(":")[0]))
             except Exception:
-                pass
+                fpath = fpath.split(":")[0]
         findings.append(
             Finding(
                 check="lint",
@@ -67,7 +74,7 @@ def lint_module(module: str, file: Path, sources: list[Path], incdirs: list[Path
         module,
         *verilator_inc_args(incdirs),
     ]
-    # Prefer the unit file first, then the rest (unique).
+    # Unit + discovered children only (do not feed the whole tree as sources).
     seen: set[Path] = set()
     ordered: list[Path] = []
     for p in [file, *sources]:
@@ -85,14 +92,14 @@ def lint_module(module: str, file: Path, sources: list[Path], incdirs: list[Path
     if text.strip():
         print(text.rstrip())
     findings = parse_verilator(text, module, rel(file))
-    if proc.returncode != 0 and not any(f.severity == "error" for f in findings):
+    if proc.returncode != 0 and not findings:
         findings.append(
             Finding(
                 check="lint",
                 module=module,
                 file=rel(file),
                 rule="ERROR",
-                message=f"verilator exited {proc.returncode}",
+                message=f"verilator exited {proc.returncode} with no parsed diagnostics",
                 severity="error",
             )
         )
@@ -114,14 +121,16 @@ def main() -> int:
     )
     for u in modules:
         print(f"  {u.kind:4} {u.module:24} {rel(u.file)}")
+    findings: list[Finding] = collect_stub_findings("lint")
     if not modules:
-        print("lint: no RTL modules discovered; PASS")
-        return emit_report("lint", [])
-    findings: list[Finding] = []
+        print("lint: no RTL modules discovered")
+        return emit_report("lint", findings)
     # Tops and leaves both — CODING_STYLE §7 covers PRODUCT and HOOKS trees
-    # when they appear under rtl/.
+    # when they appear under rtl/. Handwritten whitelist and registered stubs
+    # still lint.
     for unit in modules:
-        findings.extend(lint_module(unit.module, unit.file, sources, incdirs))
+        needed = module_closure(unit.module, disc) or [unit.file]
+        findings.extend(lint_module(unit.module, unit.file, needed, incdirs))
     return emit_report("lint", findings)
 
 

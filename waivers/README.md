@@ -15,8 +15,11 @@ gatekeeper (verification lead, [TEAM.md](../docs/TEAM.md) §4).
 | `pending/` | Drafts marked 待守门人批准 — **not** loaded |
 
 D10 leftover RTL is **not** waived here. It is listed in
-`scripts/gate/legacy.txt` and is report-only until a legacy-migration PR
+`gate/legacy.txt` and is report-only until a legacy-migration PR
 removes the path and the gatekeeper approves that list change.
+
+Handwritten SV, stubs/blackboxes, and HOOKS extra ports are listed under
+`gate/` with the same approver rules as this directory.
 
 ## Required fields
 

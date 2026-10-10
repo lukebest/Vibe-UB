@@ -5,5 +5,5 @@ set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 python3 - <<'PY'
 from gatelib import print_tool_versions
-print_tool_versions(["python", "icarus", "verilator", "yosys", "sby"])
+print_tool_versions(["python", "icarus", "verilator", "yosys", "eqy", "sby"])
 PY

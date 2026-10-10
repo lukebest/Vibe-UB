@@ -6,6 +6,8 @@ set -u
 source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
 jobs=(
+  rtl-emit-consistency
+  hooks-port-consistency
   lint
   synth-check
   cdc-rdc

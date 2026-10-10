@@ -18,6 +18,7 @@ from gatelib import (
     Finding,
     discover_rtl,
     emit_report,
+    handwritten_modules,
     load_yaml,
     print_tool_versions,
     rel,
@@ -33,10 +34,12 @@ MODULE_RE = re.compile(
     re.S,
 )
 PORT_RE = re.compile(
-    r"\b(input|output|inout)\b(?:\s+wire|\s+reg)?(?:\s+signed)?(?:\s+\[[^\]]+\])?\s*"
-    r"([A-Za-z_][A-Za-z0-9_]*)",
+    r"\b(input|output|inout)\b((?:\s+(?:wire|reg|logic|signed))*"
+    r"(?:\s+\[[^\]]+\])?\s*"
+    r"[A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)",
     re.I,
 )
+IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 INST_RE = re.compile(
     r"\b([A-Za-z_][A-Za-z0-9_]*)\s+(?:#\s*\([^;]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(",
 )
@@ -46,12 +49,18 @@ def load_rules() -> dict:
     return load_yaml(CDC_RULES)
 
 
+def _decl_idents(blob: str) -> list[str]:
+    skip = {"input", "output", "inout", "wire", "reg", "logic", "signed"}
+    return [t for t in IDENT_RE.findall(blob) if t.lower() not in skip]
+
+
 def port_names(mod_text: str, regex: str) -> list[str]:
     cre = re.compile(regex)
     names: list[str] = []
-    for _kind, name in PORT_RE.findall(mod_text):
-        if cre.search(name):
-            names.append(name)
+    for _kind, blob in PORT_RE.findall(mod_text):
+        for name in _decl_idents(blob):
+            if cre.search(name):
+                names.append(name)
     return names
 
 
@@ -88,8 +97,10 @@ def analyze_module(name: str, path: Path, text: str, rules: dict) -> list[Findin
     allowed = set(rules.get("allowed_clocks") or ["core_clk"])
     forbidden = set(rules.get("forbidden_clocks") or [])
     whitelist = set(rules.get("async_reset_whitelist_cells") or [])
+    whitelist |= handwritten_modules()
     rst_sync = (rules.get("rst_sync") or {}).get("cell") or "ub_rst_sync"
     sync_cells = {row["name"] for row in (rules.get("sync_cells") or []) if row.get("name")}
+    sync_cells |= handwritten_modules()
     async_in_res = [re.compile(p) for p in (rules.get("async_input_regex") or [])]
     insts = instances(text)
     inst_cells = {c for c, _ in insts}
@@ -149,7 +160,7 @@ def analyze_module(name: str, path: Path, text: str, rules: dict) -> list[Findin
     # Chip-level rst_n must enter through ub_rst_sync when this module
     # exposes rst_n and is not the sync cell itself.
     has_rst_n = bool(port_names(text, r"^rst_n$"))
-    if has_rst_n and name != rst_sync:
+    if has_rst_n and name != rst_sync and name not in whitelist:
         if rst_sync not in inst_cells:
             # Leaf that takes rst_n as a port is an unsynchronized entry
             # unless it is purely combo (no clock) and does not reset.
@@ -169,29 +180,30 @@ def analyze_module(name: str, path: Path, text: str, rules: dict) -> list[Findin
                 )
 
     # Async / non-core_clk inputs need a 2-stage sync cell.
-    for _kind, pname in PORT_RE.findall(text):
-        if not any(r.search(pname) for r in async_in_res):
-            continue
-        if name in whitelist or name in sync_cells:
-            continue
-        if pname == "rst_n" and rst_sync in inst_cells:
-            continue
-        if not (inst_cells & sync_cells) and pname == "rst_n":
-            # Already covered by RST_SYNC_MISSING; skip duplicate.
-            continue
-        if pname != "rst_n" and not (inst_cells & sync_cells):
-            findings.append(
-                Finding(
-                    check="cdc",
-                    module=name,
-                    file=file,
-                    rule="ASYNC_INPUT_UNSYNC",
-                    message=(
-                        f"async input {pname} is not captured by a 2-stage "
-                        f"synchronizer ({sorted(sync_cells)})"
-                    ),
+    for _kind, blob in PORT_RE.findall(text):
+        for pname in _decl_idents(blob):
+            if not any(r.search(pname) for r in async_in_res):
+                continue
+            if name in whitelist or name in sync_cells:
+                continue
+            if pname == "rst_n" and rst_sync in inst_cells:
+                continue
+            if not (inst_cells & sync_cells) and pname == "rst_n":
+                # Already covered by RST_SYNC_MISSING; skip duplicate.
+                continue
+            if pname != "rst_n" and not (inst_cells & sync_cells):
+                findings.append(
+                    Finding(
+                        check="cdc",
+                        module=name,
+                        file=file,
+                        rule="ASYNC_INPUT_UNSYNC",
+                        message=(
+                            f"async input {pname} is not captured by a 2-stage "
+                            f"synchronizer ({sorted(sync_cells)})"
+                        ),
+                    )
                 )
-            )
     return findings
 
 

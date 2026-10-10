@@ -1,0 +1,17 @@
+# Behavioral stubs / blackboxes (C-line SRAM macros not yet selected).
+# Same approval rules as waivers/ and gate/handwritten.yml:
+# scripts only accept entries whose approver is a verification gatekeeper
+# (waivers/approvers.yml). Empty / TODO / non-gatekeeper → ignored.
+#
+# Listed files:
+#   - lint and synth-check still run
+#   - unregistered stub/blackbox under rtl/ is a blocking finding
+#
+# Optional timing (compared to MODULE_INVENTORY storage rows, report-only):
+#   timing.read_latency  — clock cycles from addr to data
+#   timing.ports         — 1RW or 1R1W
+#   timing.conflict      — read_old or read_new on same-address clash
+#
+# CODEOWNERS: /gate/ is gatekeeper-owned. Do not self-approve drafts.
+
+entries: []

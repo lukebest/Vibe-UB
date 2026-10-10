@@ -1,0 +1,24 @@
+# Approved handwritten SV under rtl/. Same approval rules as waivers/:
+# scripts only accept entries whose approver is a verification gatekeeper
+# (waivers/approvers.yml). Empty / TODO / non-gatekeeper → ignored.
+#
+# Listed files:
+#   - skip emit consistency and the "must have hooks" check
+#   - skip eqy (TEST_HOOKS=0/1 share this file)
+#   - still run lint, synth-check, CDC/RDC
+#   - CDC treats the module as a legal reset-sync cell
+#
+# Any other handwritten .v/.sv under rtl/ is a finding (new leaves fail;
+# D10 leftover is report-only via gate/legacy.txt).
+#
+# CODEOWNERS: this file is gatekeeper-owned. Do not self-approve drafts.
+
+entries:
+  - id: HW-UB-RST-SYNC
+    file: rtl/common/ub_rst_sync.sv
+    reason: >-
+      Only whitelist async-assert / sync-deassert 2-flop (CODING_STYLE §3,
+      SPEC §4.2, D6). PRODUCT and HOOKS share this file.
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: stages != 2 or the cell interface changes

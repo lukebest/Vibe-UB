@@ -16,21 +16,30 @@ usage() {
   cat <<'EOF'
 Usage: scripts/impl/quick_synth.sh [--ref GIT_REF | --work-tree DIR] [options]
 
-  --ref REF           synthesize this git ref (git archive; does not checkout)
-  --work-tree DIR     synthesize this tree instead
-  --base REF          diff base for default tops (default: origin/main)
-  --tops m1,m2        top modules (default: rtl/ leaves touched vs --base)
-  --out DIR           output directory (required)
-  --extra-num-lanes N also chparam NUM_LANES for lane dist/dedist (default: 8)
-  --help              this text
+  --ref REF                 synthesize this git ref (git archive; does not checkout)
+  --work-tree DIR           synthesize this tree instead
+  --base REF                diff base for default tops (default: origin/main)
+  --tops m1,m2              top modules (default: rtl/<block>/*.v leaves touched vs --base)
+  --out DIR                 output directory (required unless --self-check)
+  --chparam KEY=VAL         optional Yosys chparam override (repeatable; TOP:KEY=VAL)
+  --baseline-json FILE      prior results.json for QoR compare
+  --baseline-report FILE    prior markdown report for QoR compare
+  --baseline-map NEW=OLD    map a §2.2 tagged leaf to a legacy module[:VARIANT]
+  --sram-bit-threshold N    blackbox mem instances with depth×width > N bits (default 4096)
+  --self-check              parser / mapping checks only (no synth)
+  --help                    this text
 
 Env:
-  SKY130_HD_LIB         path to sky130_fd_sc_hd__tt_025C_1v80.lib
-  SKY130_HD_LIB_COMMIT  OpenROAD-flow-scripts commit used to fetch liberty
-  YOSYS / STA           tool binaries (default: yosys, sta)
+  SKY130_HD_LIB           path to sky130_fd_sc_hd__tt_025C_1v80.lib
+  SKY130_HD_LIB_COMMIT    OpenROAD-flow-scripts commit used to fetch liberty
+  QS_SRAM_BIT_THRESHOLD   default for --sram-bit-threshold
+  YOSYS / STA             tool binaries (default: yosys, sta)
 
 Default clock: core_clk at F_CORE from docs/SPEC.md (§4.1 / §9, ≈80.57 MHz).
 If SPEC states no frequency, period is 2.0 ns (500 MHz) labelled placeholder.
+
+SPEC §2.2: each rtl/<block>/<leaf>_<tag>.v is a fixed netlist (no required chparam).
+HOOKS are rtl/<block>/hooks/ with the same name. `_placeholder` is lint/TB only.
 EOF
 }
 
@@ -39,7 +48,12 @@ REF=""
 WORK_TREE=""
 BASE="origin/main"
 TOPS=""
-EXTRA_LANES="8"
+CHPARAMS=()
+BASELINE_JSON=""
+BASELINE_REPORT=""
+BASELINE_MAPS=()
+SRAM_THRESH=""
+SELF_CHECK=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -48,11 +62,20 @@ while [[ $# -gt 0 ]]; do
     --base) BASE="${2:-}"; shift 2 ;;
     --tops) TOPS="${2:-}"; shift 2 ;;
     --out) OUT="${2:-}"; shift 2 ;;
-    --extra-num-lanes) EXTRA_LANES="${2:-}"; shift 2 ;;
+    --chparam) CHPARAMS+=("${2:-}"); shift 2 ;;
+    --baseline-json) BASELINE_JSON="${2:-}"; shift 2 ;;
+    --baseline-report) BASELINE_REPORT="${2:-}"; shift 2 ;;
+    --baseline-map) BASELINE_MAPS+=("${2:-}"); shift 2 ;;
+    --sram-bit-threshold) SRAM_THRESH="${2:-}"; shift 2 ;;
+    --self-check) SELF_CHECK=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown arg: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+if [[ "$SELF_CHECK" -eq 1 ]]; then
+  exec python3 "${SCRIPT_DIR}/quick_synth.py" --self-check
+fi
 
 if [[ -z "$OUT" ]]; then
   echo "quick_synth.sh: --out is required" >&2
@@ -116,7 +139,21 @@ fi
 if [[ -n "$TOPS" ]]; then
   py+=(--tops "$TOPS")
 fi
-py+=(--extra-num-lanes "$EXTRA_LANES")
+for c in "${CHPARAMS[@]+"${CHPARAMS[@]}"}"; do
+  py+=(--chparam "$c")
+done
+if [[ -n "$BASELINE_JSON" ]]; then
+  py+=(--baseline-json "$BASELINE_JSON")
+fi
+if [[ -n "$BASELINE_REPORT" ]]; then
+  py+=(--baseline-report "$BASELINE_REPORT")
+fi
+for m in "${BASELINE_MAPS[@]+"${BASELINE_MAPS[@]}"}"; do
+  py+=(--baseline-map "$m")
+done
+if [[ -n "$SRAM_THRESH" ]]; then
+  py+=(--sram-bit-threshold "$SRAM_THRESH")
+fi
 py+=(--liberty "$SKY130_HD_LIB")
 
 exec "${py[@]}"

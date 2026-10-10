@@ -2,6 +2,10 @@
 """Impl quick-synth driver: Yosys flatten + Sky130 hd map + OpenSTA setup path.
 
 Informational only. Never a merge gate. See docs/rules/impl_quick_synth.md.
+
+SPEC §2.2: each file under rtl/<block>/*.v is one top (no required chparam).
+HOOKS live in rtl/<block>/hooks/ with the same name. `_placeholder` variants
+are lint/TB only. Large ub_cmn_mem_1r1w instances are blackboxed.
 """
 
 from __future__ import annotations
@@ -27,63 +31,31 @@ SPEC_F_CORE_HZ = SPEC_LINE_RATE_GBPS * 1e9 / SPEC_PMA_W
 SPEC_PERIOD_NS = 1e9 / SPEC_F_CORE_HZ  # 12.412121... ns
 PLACEHOLDER_PERIOD_NS = 2.0  # 500 MHz, only if SPEC states no frequency
 
-# OPEN §13 elab tokens from pycircuit/lib/elab_open.py (not product defaults).
-# taps=23'h2, init=23'h5, seed slot k = k+3. Forbidden: tap 17 / seed 2'b01.
-_SCR_W = 23
-_SEED_SLOTS = 9
-
-
-def _elab_seed_map(scr_w: int = _SCR_W, slots: int = _SEED_SLOTS) -> int:
-    acc = 0
-    for lid in range(slots):
-        acc |= (lid + 3) << (scr_w * lid)
-    return acc
-
-
-ELAB_SEED_MAP = _elab_seed_map()
-ELAB_SEED_MAP_W = _SCR_W * _SEED_SLOTS
-
-# Known OPEN / draft parameters. Applied only via Yosys chparam (command line).
-PLACEHOLDER_PARAMS: dict[str, dict[str, Any]] = {
-    "ub_pcs_scrambler": {
-        "chparam": {
-            "SCR_TAPS": f"{_SCR_W}'h2",
-            "LFSR_INIT": f"{_SCR_W}'h5",
-            "SEED_MAP": f"{ELAB_SEED_MAP_W}'h{ELAB_SEED_MAP:x}",
-        },
-        "label": (
-            "placeholder chparam OPEN §13 elab tokens "
-            "(SCR_TAPS=23'h2, LFSR_INIT=23'h5, SEED_MAP slot k=k+3); "
-            "not product defaults; PRBS23 taps/seed pending §13"
-        ),
-    },
-    "ub_pcs_descrambler": {
-        "chparam": {
-            "SCR_TAPS": f"{_SCR_W}'h2",
-            "LFSR_INIT": f"{_SCR_W}'h5",
-            "SEED_MAP": f"{ELAB_SEED_MAP_W}'h{ELAB_SEED_MAP:x}",
-        },
-        "label": (
-            "placeholder chparam OPEN §13 elab tokens "
-            "(SCR_TAPS=23'h2, LFSR_INIT=23'h5, SEED_MAP slot k=k+3); "
-            "not product defaults; PRBS23 taps/seed pending §13"
-        ),
-    },
-    "ub_dll_retry_req_sm": {
-        "chparam": {
-            "NUM_RETRY_THRESHOLD": "15",
-            "NUM_PHY_REINIT_THRESHOLD": "4",
-            "RETRY_WAIT_CYC": "323",
-        },
-        "label": (
-            "placeholder chparam draft §13 / SPEC §9 "
-            "(NUM_RETRY_THRESHOLD=15, NUM_PHY_REINIT_THRESHOLD=4, "
-            "RETRY_WAIT_CYC=323); not closed product defaults"
-        ),
-    },
+# SPEC §2.2: pycc emits no Verilog parameter; each parameter set is a
+# fixed netlist named <leaf>_<tag>. Placeholder tags are lint/TB only.
+PLACEHOLDER_TAG = "_placeholder"
+QOR_DELTA_THRESHOLD = 0.10  # flag |Δ| / |baseline| > 10%
+QOR_COMPARE_FIELDS = ("cells_mapped", "area_um2", "logic_depth", "slack_ns")
+QOR_FIELD_SHORT = {
+    "cells_mapped": "cells",
+    "area_um2": "area",
+    "logic_depth": "depth",
+    "slack_ns": "slack",
 }
 
-LANE_LEAF_TOPS = ("ub_pcs_lane_dist", "ub_pcs_lane_dedist")
+MEM_PRIMITIVE_PREFIX = "ub_cmn_mem_1r1w"
+DEFAULT_SRAM_BIT_THRESHOLD = 4096
+# Estimate only — not a foundry macro. Revisit when PR #9 §13 sets the node.
+SRAM_UM2_PER_BIT = 0.5
+SRAM_PERIPH_FACTOR = 1.35
+SRAM_FORMULA_LABEL = (
+    "SRAM estimate (NOT a real macro): "
+    "N_inst × depth × width × 0.5 µm²/bit × 1.35 periphery. "
+    "0.5 µm²/bit is an order-of-magnitude SkyWater 130nm 6T bit "
+    "(published HD bits ~0.3–0.5 µm²); 1.35 covers decoder / sense-amp / I/O "
+    "(textbook 25–50%). Process node pending PR #9 §13 — revisit then. "
+    "Liberty stdcell area is a separate column; this one is estimate-only."
+)
 
 DFF_CELL_RE = re.compile(
     r"sky130_fd_sc_hd__(?:edf|sdf|df)[a-z0-9_]*", re.IGNORECASE
@@ -96,6 +68,13 @@ LTP_LEN_RE = re.compile(
     r"Longest topological path:\s+(\d+)|ltp\s*=\s*(\d+)|path length\s+(\d+)",
     re.IGNORECASE,
 )
+
+# Legacy tagged-netlist → pre-§2.2 report variant (NUM_LANES=4 was PRODUCT).
+_TAG_VARIANT_HINTS = {
+    "x4": "PRODUCT",
+    "x8": "PRODUCT_NUM_LANES=8",
+    "vl2": "PRODUCT",
+}
 
 
 def die(msg: str, code: int = 2) -> None:
@@ -160,12 +139,12 @@ def detect_period(spec_text: str | None) -> tuple[float, str, bool]:
 
 
 _PORT_RE = re.compile(
-    r"(?P<dir>input|output|inout)\s+(?:wire|reg|logic)?\s*(?:\[[^\]]+\])?\s*(?P<name>\w+)",
+    r"(?P<dir>input|output|inout)\s+(?:wire|reg|logic)?\s*"
+    r"(?:\[(?P<msb>\d+)\s*:\s*(?P<lsb>\d+)\])?\s*(?P<name>\w+)",
 )
 
 
-def list_ports(verilog: str) -> list[tuple[str, str]]:
-    # Only the module header — do not pick up function/task ports.
+def _module_port_blob(verilog: str) -> str:
     m = re.search(
         r"module\s+\w+\s*(?:#\s*\([^;]*?\))?\s*\((.*?)\);",
         verilog,
@@ -176,7 +155,32 @@ def list_ports(verilog: str) -> list[tuple[str, str]]:
         rest = verilog[m.end() :]
         cut = re.search(r"\b(always|assign|function|task|generate)\b", rest)
         blob = rest[: cut.start()] if cut else rest
-    return [(p.group("dir"), p.group("name")) for p in _PORT_RE.finditer(blob)]
+    return blob
+
+
+def list_ports(verilog: str) -> list[tuple[str, str]]:
+    # Only the module header — do not pick up function/task ports.
+    return [
+        (p.group("dir"), p.group("name"))
+        for p in _PORT_RE.finditer(_module_port_blob(verilog))
+    ]
+
+
+def list_port_info(verilog: str) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for p in _PORT_RE.finditer(_module_port_blob(verilog)):
+        msb, lsb = p.group("msb"), p.group("lsb")
+        width = abs(int(msb) - int(lsb)) + 1 if msb is not None else 1
+        out.append(
+            {
+                "dir": p.group("dir"),
+                "name": p.group("name"),
+                "width": width,
+                "msb": int(msb) if msb is not None else 0,
+                "lsb": int(lsb) if lsb is not None else 0,
+            }
+        )
+    return out
 
 
 def find_clock_port(verilog: str) -> str | None:
@@ -194,7 +198,12 @@ def find_includes(src: Path, tree: Path) -> list[Path]:
     text = src.read_text(encoding="utf-8", errors="replace")
     out: list[Path] = []
     for inc in re.findall(r'`include\s+"([^"]+)"', text):
-        for base in (src.parent, tree / "rtl" / "common", tree / "rtl"):
+        for base in (
+            src.parent,
+            tree / "rtl" / "common",
+            tree / "rtl" / "cmn",
+            tree / "rtl",
+        ):
             cand = (base / inc).resolve()
             if cand.is_file() and cand not in out:
                 out.append(cand)
@@ -202,30 +211,59 @@ def find_includes(src: Path, tree: Path) -> list[Path]:
     return out
 
 
+def is_placeholder_name(name: str) -> bool:
+    return name.endswith(PLACEHOLDER_TAG)
+
+
+def is_library_cell(stem: str) -> bool:
+    if stem == "pyc_reg":
+        return True
+    if stem == MEM_PRIMITIVE_PREFIX or stem.startswith(MEM_PRIMITIVE_PREFIX + "_"):
+        return True
+    return False
+
+
+def is_mem_candidate(name: str, extra_prefixes: set[str] | None = None) -> bool:
+    if name == MEM_PRIMITIVE_PREFIX or name.startswith(MEM_PRIMITIVE_PREFIX + "_"):
+        return True
+    for pref in extra_prefixes or ():
+        if name == pref or name.startswith(pref + "_"):
+            return True
+    return False
+
+
 def list_rtl_leaves(tree: Path) -> dict[str, dict[str, Path]]:
-    """Map module name -> {product, hooks?} for rtl/**/*.v,*.sv (not hooks as product)."""
+    """Map filename stem -> {product, hooks?} for rtl/<block>/*.{v,sv}.
+
+    SPEC §2.2: one file per parameter set; module name == filename.
+    PRODUCT lives in rtl/<block>/; HOOKS in rtl/<block>/hooks/ with the
+    same name. Library cells (pyc_reg, ub_cmn_mem_1r1w*) are skipped.
+    """
     found: dict[str, dict[str, Path]] = {}
     rtl = tree / "rtl"
     if not rtl.is_dir():
         return found
-    for path in sorted(rtl.rglob("*")):
-        if path.suffix not in {".v", ".sv"}:
-            continue
-        if path.name.endswith(".vh"):
-            continue
-        name = path.stem
-        rec = found.setdefault(name, {})
-        parts = path.relative_to(rtl).parts
-        if "hooks" in parts:
-            rec["hooks"] = path
-        else:
-            rec["product"] = path
+    for block in sorted(p for p in rtl.iterdir() if p.is_dir()):
+        for path in sorted(block.iterdir()):
+            if path.suffix not in {".v", ".sv"} or path.name.endswith(".vh"):
+                continue
+            if is_library_cell(path.stem):
+                continue
+            found.setdefault(path.stem, {})["product"] = path
+        hooks = block / "hooks"
+        if hooks.is_dir():
+            for path in sorted(hooks.iterdir()):
+                if path.suffix not in {".v", ".sv"}:
+                    continue
+                if is_library_cell(path.stem):
+                    continue
+                found.setdefault(path.stem, {})["hooks"] = path
     return found
 
 
 def default_tops(repo: Path, tree: Path, base: str, head: str | None) -> list[str]:
+    """Tops = one module per rtl/<block>/*.v (or hooks/) touched vs base."""
     if head is None:
-        # Working tree vs base.
         cp = run(
             [
                 "git",
@@ -259,15 +297,14 @@ def default_tops(repo: Path, tree: Path, base: str, head: str | None) -> list[st
         p = Path(rel)
         if p.suffix not in {".v", ".sv"}:
             continue
-        if "hooks" in p.parts:
-            continue
         if not str(p).startswith("rtl/"):
             continue
-        # Design leaves are ub_*; skip library cells such as pyc_reg.
-        if not p.stem.startswith("ub_"):
+        # rtl/<block>/<leaf>.v or rtl/<block>/hooks/<leaf>.v — not rtl/*.v
+        if len(p.parts) < 3:
+            continue
+        if is_library_cell(p.stem):
             continue
         tops.append(p.stem)
-    # unique, stable
     seen: set[str] = set()
     out: list[str] = []
     for t in tops:
@@ -289,8 +326,6 @@ def parse_stat(text: str) -> dict[str, Any]:
     flops = 0
     for line in text.splitlines():
         if DFF_CELL_RE.search(line):
-            nm = re.search(r"\s(\d+)\s*$", line)
-            # yosys stat: "    sky130_fd_sc_hd__dfxtp_1     12"
             parts = line.strip().split()
             if parts and parts[-1].isdigit() and "sky130" in parts[0]:
                 if DFF_CELL_RE.search(parts[0]):
@@ -320,7 +355,6 @@ def parse_ltp(text: str) -> int | None:
         m = rx.search(text)
         if m:
             return int(m.group(1))
-    # Fallback: count " -> " hops on the last path-looking line.
     for line in reversed(text.splitlines()):
         if "->" in line:
             return line.count("->")
@@ -449,6 +483,548 @@ def extract_tree(repo: Path, ref: str, dest: Path) -> None:
         die(f"tar extract of {ref} failed")
 
 
+def split_leaf_tag(name: str) -> tuple[str, str | None]:
+    """ub_pcs_lane_dist_x4 -> (ub_pcs_lane_dist, 'x4')."""
+    if name.endswith(PLACEHOLDER_TAG):
+        return name[: -len(PLACEHOLDER_TAG)], "placeholder"
+    m = re.search(r"_(x\d+|vl\d+|d\d+w\d+|\d+x\d+)$", name)
+    if m:
+        return name[: m.start()], m.group(1)
+    return name, None
+
+
+def parse_chparam_arg(s: str) -> tuple[str | None, str, str]:
+    """KEY=VAL or TOP:KEY=VAL."""
+    if ":" in s and "=" in s and s.index(":") < s.index("="):
+        top, rest = s.split(":", 1)
+        if "=" not in rest:
+            die(f"bad --chparam {s!r} (want KEY=VAL or TOP:KEY=VAL)")
+        key, val = rest.split("=", 1)
+        return top.strip(), key.strip(), val.strip()
+    if "=" not in s:
+        die(f"bad --chparam {s!r} (want KEY=VAL or TOP:KEY=VAL)")
+    key, val = s.split("=", 1)
+    return None, key.strip(), val.strip()
+
+
+def parse_baseline_map_arg(s: str) -> tuple[str, str, str | None]:
+    """NEW=OLD or NEW=OLD:VARIANT (VARIANT may contain '=')."""
+    if "=" not in s:
+        die(f"bad --baseline-map {s!r} (want NEW=OLD or NEW=OLD:VARIANT)")
+    new, rest = s.split("=", 1)
+    if ":" in rest:
+        old, var = rest.split(":", 1)
+        return new.strip(), old.strip(), var.strip() or None
+    return new.strip(), rest.strip(), None
+
+
+def _parse_num(s: str) -> float | int | None:
+    s = (s or "").strip().replace(",", "")
+    if s in {"", "—", "-", "n/a", "NA", "new"}:
+        return None
+    try:
+        if re.fullmatch(r"-?\d+", s):
+            return int(s)
+        return float(s)
+    except ValueError:
+        return None
+
+
+def parse_baseline_markdown(text: str) -> list[dict[str, Any]]:
+    """Parse a prior quick-synth markdown table into result-like dicts."""
+    rows: list[dict[str, Any]] = []
+    in_table = False
+    header: list[str] = []
+    for line in text.splitlines():
+        if not line.startswith("|"):
+            if in_table and rows:
+                break
+            in_table = False
+            header = []
+            continue
+        cols = [c.strip() for c in line.strip().strip("|").split("|")]
+        if not cols:
+            continue
+        if cols[0].lower() == "module" and any(
+            "variant" in c.lower() for c in cols
+        ):
+            in_table = True
+            header = [c.lower() for c in cols]
+            continue
+        if not in_table:
+            continue
+        if cols[0].startswith("---") or set(cols[0]) <= {"-", ":"}:
+            continue
+        if len(cols) < 6:
+            continue
+
+        def col(*names: str) -> str:
+            for n in names:
+                if n in header:
+                    return cols[header.index(n)] if header.index(n) < len(cols) else ""
+            return ""
+
+        rows.append(
+            {
+                "top": cols[0],
+                "variant": cols[1] if len(cols) > 1 else "PRODUCT",
+                "cells_mapped": _parse_num(
+                    col("cells (mapped)", "cells") or (cols[2] if len(cols) > 2 else "")
+                ),
+                "area_um2": _parse_num(
+                    col("area um^2", "area") or (cols[3] if len(cols) > 3 else "")
+                ),
+                "flops": _parse_num(col("flops") or (cols[4] if len(cols) > 4 else "")),
+                "logic_depth": _parse_num(
+                    col("max comb logic depth", "logic depth")
+                    or (cols[5] if len(cols) > 5 else "")
+                ),
+                "arrival_ns": _parse_num(
+                    col("arrival ns") or (cols[6] if len(cols) > 6 else "")
+                ),
+                "slack_ns": _parse_num(
+                    col("slack @ period", "slack")
+                    or (cols[7] if len(cols) > 7 else "")
+                ),
+                "ok": True,
+            }
+        )
+    return rows
+
+
+def load_baseline_rows(
+    json_path: Path | None, report_path: Path | None
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    if report_path is not None:
+        rows.extend(
+            parse_baseline_markdown(
+                report_path.read_text(encoding="utf-8", errors="replace")
+            )
+        )
+    if json_path is not None:
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        payload = data.get("results", data if isinstance(data, list) else [])
+        by_key = {(r.get("top"), r.get("variant")): r for r in rows}
+        for r in payload:
+            by_key[(r.get("top"), r.get("variant"))] = r
+        rows = list(by_key.values())
+    return rows
+
+
+def find_baseline_row(
+    rows: list[dict[str, Any]], top: str, variant: str | None
+) -> dict[str, Any] | None:
+    if variant is not None:
+        for r in rows:
+            if r.get("top") == top and r.get("variant") == variant:
+                return r
+    for r in rows:
+        if r.get("top") == top and r.get("variant") == "PRODUCT":
+            return r
+    for r in rows:
+        if r.get("top") == top:
+            return r
+    return None
+
+
+def resolve_baseline(
+    top: str,
+    variant: str,
+    rows: list[dict[str, Any]],
+    maps: dict[str, tuple[str, str | None]],
+) -> tuple[dict[str, Any] | None, str]:
+    """Return (baseline row, how it was chosen)."""
+    if top in maps:
+        old, old_var = maps[top]
+        want = old_var or variant
+        hit = find_baseline_row(rows, old, want)
+        if hit is None and old_var is None and variant == "HOOKS":
+            hit = find_baseline_row(rows, old, "PRODUCT")
+        label = f"{old} {hit.get('variant') if hit else want}"
+        return hit, f"map {top} → {label}"
+    if variant == "HOOKS":
+        hit = find_baseline_row(rows, top, "HOOKS") or find_baseline_row(
+            rows, top, "PRODUCT"
+        )
+        if hit:
+            return hit, f"same name {top} {hit.get('variant')}"
+    hit = find_baseline_row(rows, top, variant)
+    if hit:
+        return hit, f"same name {top} {variant}"
+    stem, tag = split_leaf_tag(top)
+    if tag and tag != "placeholder":
+        want = _TAG_VARIANT_HINTS.get(tag)
+        m = re.fullmatch(r"x(\d+)", tag or "")
+        if want:
+            hit = find_baseline_row(rows, stem, want)
+            if hit:
+                return hit, f"tag _{tag} → {stem} {want}"
+        if m:
+            n = m.group(1)
+            want_n = "PRODUCT" if n == "4" else f"PRODUCT_NUM_LANES={n}"
+            hit = find_baseline_row(rows, stem, want_n)
+            if hit:
+                return hit, f"tag _{tag} → {stem} {want_n} (legacy NUM_LANES={n})"
+        hit = find_baseline_row(rows, stem, "PRODUCT")
+        if hit:
+            return hit, f"tag _{tag} → {stem} PRODUCT"
+    return None, "new"
+
+
+def qor_compare(new: dict[str, Any], old: dict[str, Any]) -> dict[str, Any]:
+    flags: list[str] = []
+    parts: list[str] = []
+    for field in QOR_COMPARE_FIELDS:
+        nv, ov = new.get(field), old.get(field)
+        short = QOR_FIELD_SHORT[field]
+        if nv is None or ov is None:
+            continue
+        nv_f, ov_f = float(nv), float(ov)
+        if ov_f == 0 and nv_f == 0:
+            parts.append(f"{short} 0 vs 0")
+            continue
+        if ov_f == 0:
+            flags.append(short)
+            parts.append(f"{short} {fmt_num(nv)} vs 0")
+            continue
+        rel = abs(nv_f - ov_f) / abs(ov_f)
+        signed = (nv_f - ov_f) / abs(ov_f)
+        parts.append(
+            f"{short} {fmt_num(nv)} vs {fmt_num(ov)} ({signed:+.1%})"
+        )
+        if rel > QOR_DELTA_THRESHOLD:
+            flags.append(short)
+    return {
+        "delta_vs_baseline": "; ".join(parts) if parts else "new",
+        "qor_over_10pct": flags,
+    }
+
+
+def load_blackbox_yml(path: Path) -> list[dict[str, Any]]:
+    """Parse scripts/gate/blackbox.yml if present (no PyYAML required)."""
+    if not path.is_file():
+        return []
+    text = path.read_text(encoding="utf-8", errors="replace")
+    stripped = text.lstrip()
+    if stripped.startswith("{") or stripped.startswith("["):
+        data = json.loads(text)
+        if isinstance(data, list):
+            return [_bb_entry(x) for x in data if _bb_entry(x)]
+        mods = data.get("modules", [])
+        return [_bb_entry(x) for x in mods if _bb_entry(x)]
+    entries: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    in_modules = False
+    for raw in text.splitlines():
+        if raw.strip().startswith("#") or not raw.strip():
+            continue
+        if re.match(r"^modules\s*:", raw):
+            in_modules = True
+            continue
+        if not in_modules:
+            # bare list at top level
+            in_modules = True
+        m = re.match(r"^(\s*)-\s+(?:name\s*:\s*)?(.+?)\s*$", raw)
+        if m:
+            if current:
+                entries.append(current)
+            val = m.group(2).strip().strip("'\"")
+            if re.match(r"^\w", val) and ":" not in val:
+                current = {"name": val}
+            elif val.startswith("name"):
+                current = {"name": val.split(":", 1)[-1].strip().strip("'\"")}
+            else:
+                current = {}
+                km = re.match(r"(\w+)\s*:\s*(.+)$", val)
+                if km:
+                    current[km.group(1)] = _yaml_scalar(km.group(2))
+            continue
+        km = re.match(r"^\s+(\w+)\s*:\s*(.+)$", raw)
+        if km and current is not None:
+            current[km.group(1)] = _yaml_scalar(km.group(2))
+    if current:
+        entries.append(current)
+    return [e for e in entries if e.get("name")]
+
+
+def _yaml_scalar(s: str) -> Any:
+    s = s.strip().strip("'\"")
+    if re.fullmatch(r"-?\d+", s):
+        return int(s)
+    if re.fullmatch(r"-?\d+\.\d+", s):
+        return float(s)
+    return s
+
+
+def _bb_entry(x: Any) -> dict[str, Any] | None:
+    if isinstance(x, str) and x.strip():
+        return {"name": x.strip()}
+    if isinstance(x, dict) and x.get("name"):
+        return dict(x)
+    return None
+
+
+def find_module_file(tree: Path, name: str) -> Path | None:
+    rtl = tree / "rtl"
+    if not rtl.is_dir():
+        return None
+    for ext in (".v", ".sv"):
+        for path in rtl.rglob(name + ext):
+            if "hooks" in path.parts:
+                continue
+            return path
+    return None
+
+
+def list_mem_files(tree: Path) -> dict[str, Path]:
+    found: dict[str, Path] = {}
+    rtl = tree / "rtl"
+    if not rtl.is_dir():
+        return found
+    for path in rtl.rglob("*"):
+        if path.suffix not in {".v", ".sv"}:
+            continue
+        if is_mem_candidate(path.stem):
+            if "hooks" in path.parts and path.stem in found:
+                continue
+            found[path.stem] = path
+    return found
+
+
+def parse_mem_dims(
+    name: str,
+    verilog: str | None,
+    yml_hint: dict[str, Any] | None = None,
+) -> tuple[int | None, int | None, str]:
+    if yml_hint and yml_hint.get("depth") and yml_hint.get("width"):
+        return int(yml_hint["depth"]), int(yml_hint["width"]), "blackbox.yml"
+    m = re.search(r"_d(\d+)w(\d+)", name)
+    if m:
+        return int(m.group(1)), int(m.group(2)), "module tag _d<D>w<W>"
+    m = re.search(r"_(\d+)x(\d+)", name)
+    if m:
+        return int(m.group(1)), int(m.group(2)), "module tag _<D>x<W>"
+    if verilog:
+        ma = re.search(
+            r"(?:reg|logic)\s+\[(\d+)\s*:\s*(\d+)\]\s+\w+\s*"
+            r"\[\s*(\d+)\s*:\s*(\d+)\s*\]",
+            verilog,
+        )
+        if ma:
+            width = abs(int(ma.group(1)) - int(ma.group(2))) + 1
+            depth = abs(int(ma.group(3)) - int(ma.group(4))) + 1
+            return depth, width, "storage array declaration"
+        ports = list_port_info(verilog)
+        rdata = pick_rdata_port(ports)
+        addr = pick_raddr_port(ports)
+        if rdata and addr:
+            depth = 1 << addr["width"]
+            return depth, rdata["width"], "port widths (depth=2^raddr)"
+        if rdata:
+            return None, rdata["width"], "rdata port width only"
+    return None, None, "unknown"
+
+
+def pick_rdata_port(ports: list[dict[str, Any]]) -> dict[str, Any] | None:
+    outs = [p for p in ports if p["dir"] in ("output", "inout")]
+    prefer = (
+        "rdata",
+        "rd_data",
+        "rd_dout",
+        "dout",
+        "q",
+        "rd_q",
+        "data_out",
+    )
+    by_name = {p["name"]: p for p in outs}
+    for n in prefer:
+        if n in by_name:
+            return by_name[n]
+    if not outs:
+        return None
+    return max(outs, key=lambda p: p["width"])
+
+
+def pick_raddr_port(ports: list[dict[str, Any]]) -> dict[str, Any] | None:
+    ins = [p for p in ports if p["dir"] in ("input", "inout")]
+    prefer = ("raddr", "rd_addr", "ra", "addr_r", "rd_adr")
+    by_name = {p["name"]: p for p in ins}
+    for n in prefer:
+        if n in by_name:
+            return by_name[n]
+    return None
+
+
+def count_instances(verilog: str, mod: str) -> int:
+    return len(
+        re.findall(
+            rf"\b{re.escape(mod)}\s+(?:#\s*\([^;]*?\))?\s+\w+\s*\(",
+            verilog,
+        )
+    )
+
+
+def find_instantiated(verilog: str, known: set[str]) -> list[str]:
+    found: list[str] = []
+    for name in sorted(known, key=len, reverse=True):
+        if count_instances(verilog, name):
+            found.append(name)
+    return found
+
+
+def sram_estimate_um2(n_inst: int, depth: int, width: int) -> float:
+    return n_inst * depth * width * SRAM_UM2_PER_BIT * SRAM_PERIPH_FACTOR
+
+
+def write_mem_sta_stub(
+    module: str,
+    verilog: str,
+    dest: Path,
+) -> dict[str, Any]:
+    """Emit a structural 1-cycle registered-read stub for OpenSTA.
+
+    Storage is not modeled. Each rdata bit is a sky130_fd_sc_hd__dfxtp_1
+    with D tied 0 so the output is a register launch into downstream logic.
+    """
+    ports = list_port_info(verilog)
+    clk = find_clock_port(verilog)
+    rdata = pick_rdata_port(ports)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    lines = [f"// STA stub: 1-cycle registered read for {module}", f"module {module} ("]
+    names = [p["name"] for p in ports] or ["clk", "rdata"]
+    lines.append("  " + ",\n  ".join(names))
+    lines.append(");")
+    if not ports:
+        lines.append("  input clk;")
+        lines.append("  output rdata;")
+    for p in ports:
+        if p["width"] > 1:
+            rng = f" [{p['msb']}:{p['lsb']}]"
+        else:
+            rng = ""
+        lines.append(f"  {p['dir']}{rng} {p['name']};")
+    info: dict[str, Any] = {
+        "module": module,
+        "clk": clk,
+        "rdata": rdata["name"] if rdata else None,
+        "rdata_width": rdata["width"] if rdata else None,
+        "registered": bool(clk and rdata),
+    }
+    if clk and rdata:
+        w = rdata["width"]
+        rn = rdata["name"]
+        if w == 1:
+            lines.append(
+                f"  sky130_fd_sc_hd__dfxtp_1 {rn}_q ("
+                f" .CLK({clk}), .D(1'b0), .Q({rn}) );"
+            )
+        else:
+            lsb = rdata["lsb"]
+            step = 1 if rdata["msb"] >= rdata["lsb"] else -1
+            for i in range(w):
+                idx = lsb + i * step
+                lines.append(
+                    f"  sky130_fd_sc_hd__dfxtp_1 {rn}_q_{i} ("
+                    f" .CLK({clk}), .D(1'b0), .Q({rn}[{idx}]) );"
+                )
+    elif rdata and rdata["width"] > 1:
+        lines.append(f"  assign {rdata['name']} = {rdata['width']}'b0;")
+    elif rdata:
+        lines.append(f"  assign {rdata['name']} = 1'b0;")
+    lines.append("endmodule")
+    dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return info
+
+
+def build_mem_catalog(
+    tree: Path,
+    sram_bit_threshold: int,
+    bb_entries: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    extra = {e["name"] for e in bb_entries}
+    hints = {e["name"]: e for e in bb_entries}
+    catalog: dict[str, dict[str, Any]] = {}
+    files = list_mem_files(tree)
+    names = set(files) | extra
+    # Also pick up §2.2 tagged variants of yml prefixes.
+    for path_name, path in list(files.items()):
+        names.add(path_name)
+        catalog.setdefault(path_name, {})
+    for name in extra:
+        if name not in files:
+            found = find_module_file(tree, name)
+            if found:
+                files[name] = found
+            for path_name, path in list_mem_files(tree).items():
+                if is_mem_candidate(path_name, extra):
+                    files[path_name] = path
+                    names.add(path_name)
+    for name in sorted(set(files) | extra):
+        path = files.get(name) or find_module_file(tree, name)
+        text = (
+            path.read_text(encoding="utf-8", errors="replace") if path else None
+        )
+        hint = hints.get(name)
+        if hint is None:
+            for pref, h in hints.items():
+                if name == pref or name.startswith(pref + "_"):
+                    hint = h
+                    break
+        depth, width, src = parse_mem_dims(name, text, hint)
+        bits = (
+            depth * width if depth is not None and width is not None else None
+        )
+        catalog[name] = {
+            "name": name,
+            "path": path,
+            "depth": depth,
+            "width": width,
+            "bits": bits,
+            "dim_source": src,
+            "blackbox": bool(bits is not None and bits > sram_bit_threshold),
+        }
+    return catalog
+
+
+def classify_mem_in_src(
+    src_text: str,
+    catalog: dict[str, dict[str, Any]],
+    sram_bit_threshold: int,
+) -> dict[str, Any]:
+    known = set(catalog)
+    inst_mods = find_instantiated(src_text, known)
+    blackbox: list[dict[str, Any]] = []
+    flopped: list[dict[str, Any]] = []
+    est = 0.0
+    for mod in inst_mods:
+        rec = catalog[mod]
+        n = count_instances(src_text, mod)
+        bits = rec.get("bits")
+        entry = {
+            **rec,
+            "n_inst": n,
+            "path": str(rec["path"]) if rec.get("path") else None,
+        }
+        if bits is not None and bits > sram_bit_threshold:
+            entry["blackbox"] = True
+            entry["est_um2"] = sram_estimate_um2(n, rec["depth"], rec["width"])
+            est += entry["est_um2"]
+            blackbox.append(entry)
+        else:
+            entry["blackbox"] = False
+            entry["est_um2"] = 0.0
+            flopped.append(entry)
+    return {
+        "blackbox": blackbox,
+        "flopped": flopped,
+        "sram_est_um2": est,
+        "sram_bits": sum(
+            (b["bits"] or 0) * b["n_inst"] for b in blackbox
+        ),
+    }
+
+
 def synthesize_one(
     *,
     top: str,
@@ -456,10 +1032,11 @@ def synthesize_one(
     tree: Path,
     outdir: Path,
     liberty: Path,
-    chparam: dict[str, str] | None,
-    extra_chparam: dict[str, str] | None,
+    chparam_override: dict[str, str] | None,
     period_ns: float,
     variant: str,
+    mem_catalog: dict[str, dict[str, Any]],
+    sram_bit_threshold: int,
 ) -> dict[str, Any]:
     outdir.mkdir(parents=True, exist_ok=True)
     files = [src]
@@ -473,20 +1050,55 @@ def synthesize_one(
     in_ports = [n for d, n in ports if d in ("input", "inout") and n != clk]
     out_ports = [n for d, n in ports if d in ("output", "inout")]
 
-    merged: dict[str, str] = {}
+    mem_use = classify_mem_in_src(text, mem_catalog, sram_bit_threshold)
+    lib_files: list[Path] = []
+    stubs: list[Path] = []
     notes: list[str] = []
-    if top in PLACEHOLDER_PARAMS:
-        present = {}
-        for k, v in PLACEHOLDER_PARAMS[top]["chparam"].items():
+    for rec in mem_use["flopped"]:
+        p = rec.get("path")
+        if p:
+            fp = Path(p)
+            if fp.is_file() and fp not in files:
+                files.append(fp)
+                notes.append(
+                    f"{rec['name']} {rec['depth']}x{rec['width']}="
+                    f"{rec['bits']} bits ≤ {sram_bit_threshold}; synth as flops"
+                )
+    for rec in mem_use["blackbox"]:
+        p = rec.get("path")
+        if p:
+            fp = Path(p)
+            if fp.is_file():
+                lib_files.append(fp)
+                stub = outdir / f"sta_stub_{rec['name']}.v"
+                src_v = fp.read_text(encoding="utf-8", errors="replace")
+                info = write_mem_sta_stub(rec["name"], src_v, stub)
+                stubs.append(stub)
+                launch = (
+                    "STA rdata is a 1-cycle registered launch"
+                    if info.get("registered")
+                    else "STA stub has no clock; rdata tied 0"
+                )
+                notes.append(
+                    f"blackbox {rec['name']} {rec['n_inst']}× "
+                    f"{rec['depth']}x{rec['width']}={rec['bits']} bits "
+                    f"(>{sram_bit_threshold}); SRAM est "
+                    f"{rec['est_um2']:.1f} um^2; {launch}"
+                )
+        else:
+            notes.append(f"blackbox {rec['name']}: netlist not found in tree")
+
+    merged: dict[str, str] = {}
+    if chparam_override:
+        for k, v in chparam_override.items():
             if re.search(rf"\bparameter\b[^;]*\b{re.escape(k)}\b", text):
-                present[k] = v
-        if present:
-            merged.update(present)
-            notes.append(PLACEHOLDER_PARAMS[top]["label"])
-    if chparam:
-        merged.update(chparam)
-    if extra_chparam:
-        merged.update(extra_chparam)
+                merged[k] = v
+                notes.append(f"optional chparam override {k}={v}")
+            else:
+                notes.append(
+                    f"chparam override {k} skipped "
+                    "(no Verilog parameter; SPEC §2.2 fixed netlist)"
+                )
 
     ch_cmd = ""
     if merged:
@@ -496,12 +1108,15 @@ def synthesize_one(
     env = os.environ.copy()
     env["QS_TOP"] = top
     env["QS_FILES"] = " ".join(str(p) for p in files)
+    env["QS_LIB_FILES"] = " ".join(str(p) for p in lib_files)
     env["QS_LIBERTY"] = str(liberty)
     env["QS_OUTDIR"] = str(outdir)
     env["QS_CHPARAM"] = ch_cmd
-    env["QS_READ_SV"] = "1" if src.suffix == ".sv" or any(
-        p.suffix == ".sv" for p in files
-    ) else "0"
+    env["QS_READ_SV"] = (
+        "1"
+        if src.suffix == ".sv" or any(p.suffix == ".sv" for p in files)
+        else "0"
+    )
 
     yosys_log = outdir / "yosys.log"
     ycmd = ["yosys", "-c", str(SCRIPT_DIR / "quick_synth.tcl")]
@@ -517,6 +1132,15 @@ def synthesize_one(
         "notes": notes,
         "yosys_rc": y.returncode,
         "ok": y.returncode == 0,
+        "placeholder": is_placeholder_name(top),
+        "sram_est_um2": mem_use["sram_est_um2"],
+        "sram_bits": mem_use["sram_bits"],
+        "sram_blackbox": [
+            {k: v for k, v in b.items() if k != "path"} for b in mem_use["blackbox"]
+        ],
+        "sram_flopped": [
+            {k: v for k, v in b.items() if k != "path"} for b in mem_use["flopped"]
+        ],
     }
     if y.returncode != 0:
         result["error"] = "yosys failed"
@@ -531,6 +1155,10 @@ def synthesize_one(
     mapped = parse_stat((outdir / "mapped_stat.txt").read_text(errors="replace"))
     if mapped["cells"] == 0 and mapped["area_um2"] is None:
         mapped["area_um2"] = 0.0
+    n_bb = sum(b["n_inst"] for b in mem_use["blackbox"])
+    cells = mapped["cells"]
+    if cells is not None and n_bb:
+        cells = max(0, cells - n_bb)
     ltp = parse_ltp((outdir / "ltp.txt").read_text(errors="replace"))
     loops = parse_scc((outdir / "scc_synth.txt").read_text(errors="replace"))
     loops += parse_scc((outdir / "scc_proc.txt").read_text(errors="replace"))
@@ -543,7 +1171,7 @@ def synthesize_one(
         {
             "cells_proc_opt": designer["cells"],
             "cells_generic_synth": generic["cells"],
-            "cells_mapped": mapped["cells"],
+            "cells_mapped": cells,
             "area_um2": mapped["area_um2"],
             "flops": mapped["flops"],
             "ltp": ltp,
@@ -553,7 +1181,6 @@ def synthesize_one(
         }
     )
 
-    # STA
     mapped_v = outdir / "mapped.v"
     env["QS_NETLIST"] = str(mapped_v)
     env["QS_PERIOD_NS"] = f"{period_ns:.9f}"
@@ -561,6 +1188,7 @@ def synthesize_one(
     env["QS_CLK_NAME"] = "core_clk"
     env["QS_INPUTS"] = " ".join(in_ports)
     env["QS_OUTPUTS"] = " ".join(out_ports)
+    env["QS_STUB_FILES"] = " ".join(str(p) for p in stubs)
     sta_log = outdir / "sta.log"
     s = run(
         ["sta", "-no_init", "-exit", str(SCRIPT_DIR / "sta.tcl")],
@@ -602,7 +1230,7 @@ def detect_anomalies(r: dict[str, Any], src_text: str, yosys_log: str) -> list[s
     a: list[str] = []
     if r.get("latches_generic"):
         a.append("latch_inferred: " + ", ".join(r["latches_generic"][:8]))
-    if r.get("mem_generic"):
+    if r.get("mem_generic") and not r.get("sram_blackbox"):
         a.append("inferred_memory: " + ", ".join(r["mem_generic"][:8]))
     if r.get("comb_loops"):
         a.append(f"comb_loop_count={r['comb_loops']}")
@@ -614,17 +1242,14 @@ def detect_anomalies(r: dict[str, Any], src_text: str, yosys_log: str) -> list[s
     flops = r.get("flops") or 0
     proc_cells = r.get("cells_proc_opt")
     sequential_src = bool(re.search(r"always\s+@\s*\(\s*posedge", src_text))
-    # Pure wiring (bit permute) maps to 0 std cells; that is not a sweep-away.
     wiring_only = (
-        cells == 0
-        and (proc_cells in (0, None))
-        and not sequential_src
+        cells == 0 and (proc_cells in (0, None)) and not sequential_src
     )
     if wiring_only:
         r.setdefault("notes", []).append(
             "combinational wiring only (0 std cells after map; bit permute / assign)"
         )
-    elif cells == 0:
+    elif cells == 0 and not r.get("sram_blackbox"):
         a.append("near_zero_cells_after_map (module optimized away)")
     elif sequential_src and flops == 0 and cells is not None and cells <= 2:
         a.append("near_zero_cells_after_map (possible unused/undriven sweep)")
@@ -633,7 +1258,7 @@ def detect_anomalies(r: dict[str, Any], src_text: str, yosys_log: str) -> list[s
     if cells is not None and cells > 8000:
         a.append(f"unexpectedly_large_cell_count {cells}")
     if re.search(r"removing unused", yosys_log, re.IGNORECASE):
-        if cells == 0:
+        if cells == 0 and not r.get("sram_blackbox"):
             a.append("yosys_removed_unused_logic")
     return a
 
@@ -655,10 +1280,13 @@ def fmt_num(v: Any, digits: int = 3) -> str:
 
 def write_markdown_table(rows: list[dict[str, Any]]) -> str:
     hdr = (
-        "| module | variant | cells (mapped) | area um^2 | flops | "
-        "logic depth | arrival ns | slack @ period | delta vs main | notes |"
+        "| module | variant | cells (mapped) | area um^2 | SRAM est um^2 | flops | "
+        "max comb logic depth | arrival ns | slack @ period | vs baseline | "
+        "QoR >10% | notes |"
     )
-    sep = "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |"
+    sep = (
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |"
+    )
     lines = [hdr, sep]
     for r in rows:
         notes = "; ".join(r.get("notes") or [])
@@ -667,22 +1295,195 @@ def write_markdown_table(rows: list[dict[str, Any]]) -> str:
             notes = (("ANOMALY: " + "; ".join(an) + ". ") + notes).strip()
         if r.get("error"):
             notes = f"FAIL: {r['error']}. " + notes
-        delta = r.get("delta_vs_main") or "new"
+        flags = r.get("qor_over_10pct") or []
+        flag_s = ",".join(flags) if flags else "—"
+        delta = r.get("delta_vs_baseline") or r.get("delta_vs_main") or "new"
         lines.append(
-            "| {mod} | {var} | {cells} | {area} | {flops} | {depth} | {arr} | {sl} | {delta} | {notes} |".format(
+            "| {mod} | {var} | {cells} | {area} | {sram} | {flops} | {depth} | "
+            "{arr} | {sl} | {delta} | {flag} | {notes} |".format(
                 mod=r.get("top", ""),
                 var=r.get("variant", ""),
                 cells=fmt_num(r.get("cells_mapped"), 0),
                 area=fmt_num(r.get("area_um2"), 1),
+                sram=fmt_num(r.get("sram_est_um2"), 1),
                 flops=fmt_num(r.get("flops"), 0),
                 depth=fmt_num(r.get("logic_depth"), 0),
                 arr=fmt_num(r.get("arrival_ns"), 3),
                 sl=fmt_num(r.get("slack_ns"), 3),
-                delta=delta,
+                delta=str(delta).replace("|", "/"),
+                flag=flag_s,
                 notes=notes.replace("|", "/") or "—",
             )
         )
     return "\n".join(lines)
+
+
+def product_area_totals(rows: list[dict[str, Any]]) -> dict[str, float]:
+    prod = [
+        r
+        for r in rows
+        if r.get("variant") == "PRODUCT"
+        and not is_placeholder_name(r.get("top") or "")
+        and r.get("ok")
+    ]
+    return {
+        "area_um2": sum((r.get("area_um2") or 0) for r in prod),
+        "sram_est_um2": sum((r.get("sram_est_um2") or 0) for r in prod),
+        "n": float(len(prod)),
+    }
+
+
+def write_full_markdown(rows: list[dict[str, Any]]) -> str:
+    main_rows = [r for r in rows if not is_placeholder_name(r.get("top") or "")]
+    ph_rows = [r for r in rows if is_placeholder_name(r.get("top") or "")]
+    totals = product_area_totals(rows)
+    parts = [
+        "## PRODUCT / HOOKS",
+        "",
+        write_markdown_table(main_rows) if main_rows else "_no PRODUCT/HOOKS leaves_",
+        "",
+        (
+            f"**PRODUCT area total** (non-placeholder PRODUCT rows only; "
+            f"HOOKS and `_placeholder` excluded): "
+            f"{totals['area_um2']:.1f} um^2 stdcell, "
+            f"{totals['sram_est_um2']:.1f} um^2 SRAM estimate "
+            f"({int(totals['n'])} leaves)."
+        ),
+    ]
+    if ph_rows:
+        parts.extend(
+            [
+                "",
+                "## `_placeholder` (lint / TB only; excluded from PRODUCT area totals)",
+                "",
+                write_markdown_table(ph_rows),
+            ]
+        )
+    flagged = [
+        r
+        for r in rows
+        if r.get("qor_over_10pct")
+    ]
+    if flagged:
+        parts.extend(["", "## QoR flags (>10% vs baseline)", ""])
+        for r in flagged:
+            parts.append(
+                f"- `{r.get('top')}` {r.get('variant')}: "
+                + ", ".join(r["qor_over_10pct"])
+                + f" — {r.get('delta_vs_baseline', '')}"
+            )
+    return "\n".join(parts)
+
+
+def self_check() -> int:
+    """Parser / mapping / estimate checks. No design-PR synth."""
+    failures: list[str] = []
+
+    def expect(cond: bool, msg: str) -> None:
+        if not cond:
+            failures.append(msg)
+
+    expect(is_placeholder_name("ub_pcs_scrambler_placeholder"), "placeholder suffix")
+    expect(not is_placeholder_name("ub_pcs_scrambler"), "non-placeholder")
+    expect(is_library_cell("ub_cmn_mem_1r1w_d128w64"), "mem is library cell")
+    expect(not is_library_cell("ub_pcs_lane_dist_x4"), "leaf is not library")
+
+    d, w, src = parse_mem_dims("ub_cmn_mem_1r1w_d128w64", None)
+    expect((d, w) == (128, 64) and "tag" in src, f"tag dims {d}x{w} {src}")
+    d, w, src = parse_mem_dims(
+        "ub_cmn_mem_1r1w",
+        "module m; reg [31:0] mem [0:255]; endmodule",
+    )
+    expect((d, w) == (256, 32), f"array dims {d}x{w}")
+    est = sram_estimate_um2(1, 128, 64)
+    expect(abs(est - 8192 * 0.5 * 1.35) < 1e-6, f"sram est {est}")
+    expect(8192 > DEFAULT_SRAM_BIT_THRESHOLD, "8192 is large")
+    expect(1024 <= DEFAULT_SRAM_BIT_THRESHOLD, "1024 is small")
+
+    md = """
+| Item | Value |
+| --- | --- |
+| PR | #5 |
+
+| module | variant | cells | area um^2 | flops | logic depth | arrival ns | slack @ period | delta vs main | notes |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+| ub_pcs_lane_dist | PRODUCT | 0 | 0.0 | 0 | 0 | 0.001 | 12.412 | new | wiring |
+| ub_pcs_lane_dist | PRODUCT_NUM_LANES=8 | 0 | 0.0 | 0 | 0 | 0.001 | 12.412 | new | wiring |
+| ub_dll_bcrc | PRODUCT | 1659 | 17559.3 | 61 | 75 | 33.918 | -21.630 | new | slack |
+"""
+    brows = parse_baseline_markdown(md)
+    expect(len(brows) == 3, f"parsed {len(brows)} baseline rows")
+    hit, how = resolve_baseline(
+        "ub_pcs_lane_dist_x4", "PRODUCT", brows, {}
+    )
+    expect(
+        hit is not None and hit["top"] == "ub_pcs_lane_dist" and hit["variant"] == "PRODUCT",
+        f"x4 map {hit} {how}",
+    )
+    hit, how = resolve_baseline(
+        "ub_pcs_lane_dist_x8", "PRODUCT", brows, {}
+    )
+    expect(
+        hit is not None and hit.get("variant") == "PRODUCT_NUM_LANES=8",
+        f"x8 map {hit} {how}",
+    )
+    hit, how = resolve_baseline("ub_dll_bcrc", "PRODUCT", brows, {})
+    expect(hit is not None and hit["cells_mapped"] == 1659, f"bcrc same name {hit}")
+    hit, how = resolve_baseline(
+        "ub_pcs_lane_dist_x4",
+        "PRODUCT",
+        brows,
+        {"ub_pcs_lane_dist_x4": ("ub_pcs_lane_dist", "PRODUCT")},
+    )
+    expect(hit is not None and "map" in how, f"explicit map {how}")
+
+    cmpd = qor_compare(
+        {"cells_mapped": 100, "area_um2": 100.0, "logic_depth": 10, "slack_ns": 1.0},
+        {"cells_mapped": 100, "area_um2": 100.0, "logic_depth": 10, "slack_ns": 1.0},
+    )
+    expect(cmpd["qor_over_10pct"] == [], f"no flag {cmpd}")
+    cmpd = qor_compare(
+        {"cells_mapped": 120, "area_um2": 100.0, "logic_depth": 10, "slack_ns": 1.0},
+        {"cells_mapped": 100, "area_um2": 100.0, "logic_depth": 10, "slack_ns": 1.0},
+    )
+    expect("cells" in cmpd["qor_over_10pct"], f"cells 20% {cmpd}")
+    cmpd = qor_compare(
+        {"cells_mapped": 0, "area_um2": 0.0, "logic_depth": 0, "slack_ns": 12.4},
+        {"cells_mapped": 0, "area_um2": 0.0, "logic_depth": 0, "slack_ns": 12.4},
+    )
+    expect(cmpd["qor_over_10pct"] == [], f"zero vs zero {cmpd}")
+
+    yml = load_blackbox_yml  # exercise parser on a temp file
+    with tempfile.NamedTemporaryFile("w", suffix=".yml", delete=False) as tf:
+        tf.write("modules:\n  - ub_cmn_mem_1r1w\n  - name: other_mem\n    depth: 512\n    width: 16\n")
+        tf.flush()
+        parsed = load_blackbox_yml(Path(tf.name))
+    expect(
+        len(parsed) == 2 and parsed[1].get("depth") == 512,
+        f"yml parse {parsed}",
+    )
+
+    stub_v = (
+        "module ub_cmn_mem_1r1w_d4w8 (\n"
+        "  input clk,\n  input we,\n  input [1:0] waddr,\n"
+        "  input [7:0] wdata,\n  input [1:0] raddr,\n  output [7:0] rdata\n);\n"
+        "endmodule\n"
+    )
+    with tempfile.TemporaryDirectory() as td:
+        info = write_mem_sta_stub(
+            "ub_cmn_mem_1r1w_d4w8", stub_v, Path(td) / "stub.v"
+        )
+        body = (Path(td) / "stub.v").read_text()
+    expect(info.get("registered") is True, f"stub registered {info}")
+    expect(body.count("sky130_fd_sc_hd__dfxtp_1") == 8, "8 rdata flops")
+
+    if failures:
+        print("self-check FAILED:", file=sys.stderr)
+        for f in failures:
+            print(f"  - {f}", file=sys.stderr)
+        return 1
+    print("self-check OK")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -692,19 +1493,56 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--work-tree", type=Path, help="existing tree (skip git archive)")
     ap.add_argument("--base", default="origin/main", help="diff base for default tops")
     ap.add_argument("--tops", help="comma-separated top module names")
-    ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--liberty", type=Path, default=None)
     ap.add_argument(
-        "--extra-num-lanes",
-        default="8",
-        help="also elaborate lane dist/dedist at this NUM_LANES (empty to skip)",
+        "--chparam",
+        action="append",
+        default=[],
+        help="optional override KEY=VAL or TOP:KEY=VAL (SPEC §2.2 has no required chparam)",
+    )
+    ap.add_argument(
+        "--baseline-json",
+        type=Path,
+        help="prior results.json for QoR compare",
+    )
+    ap.add_argument(
+        "--baseline-report",
+        type=Path,
+        help="prior quick-synth markdown report for QoR compare",
+    )
+    ap.add_argument(
+        "--baseline-map",
+        action="append",
+        default=[],
+        help="NEW=OLD or NEW=OLD:VARIANT (e.g. ub_pcs_lane_dist_x4=ub_pcs_lane_dist:PRODUCT)",
+    )
+    ap.add_argument(
+        "--sram-bit-threshold",
+        type=int,
+        default=int(os.environ.get("QS_SRAM_BIT_THRESHOLD", DEFAULT_SRAM_BIT_THRESHOLD)),
+        help=(
+            f"blackbox ub_cmn_mem_1r1w (and blackbox.yml) instances whose "
+            f"depth×width exceeds this many bits (default {DEFAULT_SRAM_BIT_THRESHOLD})"
+        ),
     )
     ap.add_argument(
         "--json",
         type=Path,
         help="write machine-readable results (default: <out>/results.json)",
     )
+    ap.add_argument(
+        "--self-check",
+        action="store_true",
+        help="run parser/mapping unit checks and exit (no synth)",
+    )
     args = ap.parse_args(argv)
+
+    if args.self_check:
+        return self_check()
+
+    if args.out is None:
+        die("--out is required (unless --self-check)")
 
     repo = args.repo.resolve()
     out = args.out.resolve()
@@ -719,6 +1557,20 @@ def main(argv: list[str] | None = None) -> int:
         "liberty_source": os.environ.get("SKY130_HD_LIB_SOURCE", "env:SKY130_HD_LIB"),
         "liberty_commit": os.environ.get("SKY130_HD_LIB_COMMIT", "unknown"),
     }
+
+    ch_global: dict[str, str] = {}
+    ch_per: dict[str, dict[str, str]] = {}
+    for spec in args.chparam:
+        top, key, val = parse_chparam_arg(spec)
+        if top is None:
+            ch_global[key] = val
+        else:
+            ch_per.setdefault(top, {})[key] = val
+
+    maps: dict[str, tuple[str, str | None]] = {}
+    for spec in args.baseline_map:
+        new, old, var = parse_baseline_map_arg(spec)
+        maps[new] = (old, var)
 
     cleanup: Path | None = None
     head_sha = None
@@ -748,28 +1600,30 @@ def main(argv: list[str] | None = None) -> int:
         else:
             tops = default_tops(repo, tree, args.base, args.ref or head_sha)
         if not tops:
-            die("no tops to synthesize (pass --tops or touch rtl/ leaves)")
+            die("no tops to synthesize (pass --tops or touch rtl/<block>/ leaves)")
+
+        bb_yml = tree / "scripts" / "gate" / "blackbox.yml"
+        if not bb_yml.is_file():
+            bb_yml = repo / "scripts" / "gate" / "blackbox.yml"
+        bb_entries = load_blackbox_yml(bb_yml) if bb_yml.is_file() else []
+        mem_catalog = build_mem_catalog(tree, args.sram_bit_threshold, bb_entries)
 
         versions = tool_versions(liberty, liberty_meta)
         jobs: list[tuple[str, str, Path, dict[str, str] | None]] = []
         for top in tops:
             rec = leaves.get(top)
-            if not rec or "product" not in rec:
-                # still record a skip
+            if not rec or ("product" not in rec and "hooks" not in rec):
                 jobs.append((top, "PRODUCT", Path(), None))
                 continue
-            jobs.append((top, "PRODUCT", rec["product"], None))
+            override = dict(ch_global)
+            override.update(ch_per.get(top, {}))
+            extra = override or None
+            if "product" in rec:
+                jobs.append((top, "PRODUCT", rec["product"], extra))
             if "hooks" in rec:
-                jobs.append((top, "HOOKS", rec["hooks"], None))
-            if top in LANE_LEAF_TOPS and args.extra_num_lanes:
-                jobs.append(
-                    (
-                        top,
-                        f"PRODUCT_NUM_LANES={args.extra_num_lanes}",
-                        rec["product"],
-                        {"NUM_LANES": args.extra_num_lanes},
-                    )
-                )
+                jobs.append((top, "HOOKS", rec["hooks"], extra))
+            if "product" not in rec and "hooks" in rec:
+                pass  # hooks-only already queued
 
         results: list[dict[str, Any]] = []
         for top, variant, src, extra in jobs:
@@ -782,6 +1636,8 @@ def main(argv: list[str] | None = None) -> int:
                         "error": "skipped: rtl file not found in this tree",
                         "notes": ["module of this name is not in the extracted tree"],
                         "anomalies": [],
+                        "placeholder": is_placeholder_name(top),
+                        "sram_est_um2": 0.0,
                     }
                 )
                 continue
@@ -793,12 +1649,38 @@ def main(argv: list[str] | None = None) -> int:
                 tree=tree,
                 outdir=run_dir,
                 liberty=liberty,
-                chparam=None,
-                extra_chparam=extra,
+                chparam_override=extra,
                 period_ns=period_ns,
                 variant=variant,
+                mem_catalog=mem_catalog,
+                sram_bit_threshold=args.sram_bit_threshold,
             )
             results.append(r)
+
+        baseline_rows: list[dict[str, Any]] = []
+        if args.baseline_json or args.baseline_report:
+            baseline_rows = load_baseline_rows(args.baseline_json, args.baseline_report)
+        for r in results:
+            if not baseline_rows:
+                r.setdefault("delta_vs_baseline", "new")
+                r.setdefault("qor_over_10pct", [])
+                continue
+            old, how = resolve_baseline(
+                r.get("top") or "", r.get("variant") or "PRODUCT", baseline_rows, maps
+            )
+            if old is None:
+                r["delta_vs_baseline"] = "new"
+                r["qor_over_10pct"] = []
+                r["baseline_how"] = how
+                continue
+            cmpd = qor_compare(r, old)
+            r["delta_vs_baseline"] = f"{cmpd['delta_vs_baseline']} [{how}]"
+            r["qor_over_10pct"] = cmpd["qor_over_10pct"]
+            r["baseline_how"] = how
+            r["baseline_ref"] = {
+                "top": old.get("top"),
+                "variant": old.get("variant"),
+            }
 
         payload = {
             "head_sha": head_sha,
@@ -806,13 +1688,19 @@ def main(argv: list[str] | None = None) -> int:
             "period_ns": period_ns,
             "period_source": period_src,
             "period_placeholder": period_ph,
+            "sram_bit_threshold": args.sram_bit_threshold,
+            "sram_formula": SRAM_FORMULA_LABEL,
+            "sram_um2_per_bit": SRAM_UM2_PER_BIT,
+            "sram_periph_factor": SRAM_PERIPH_FACTOR,
             "tools": versions,
+            "product_totals": product_area_totals(results),
             "results": results,
         }
         jpath = args.json or (out / "results.json")
         jpath.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        print(write_markdown_table(results))
-        print(f"\nJSON: {jpath}")
+        print(write_full_markdown(results))
+        print(f"\nSRAM formula: {SRAM_FORMULA_LABEL}")
+        print(f"JSON: {jpath}")
         return 0 if all(r.get("ok") for r in results) else 1
     finally:
         if cleanup is not None:

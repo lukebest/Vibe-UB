@@ -3,9 +3,10 @@
 #
 #   QS_TOP          synthesis top
 #   QS_FILES        space-separated Verilog/SV sources
+#   QS_LIB_FILES    optional blackbox memories (read_verilog -lib)
 #   QS_LIBERTY      sky130_fd_sc_hd__tt_025C_1v80.lib
 #   QS_OUTDIR       per-run output directory
-#   QS_CHPARAM      optional Yosys chparam command (already includes module)
+#   QS_CHPARAM      optional Yosys chparam override (SPEC §2.2: not required)
 #   QS_READ_SV      1 to pass -sv to read_verilog
 
 set top     $::env(QS_TOP)
@@ -16,6 +17,18 @@ set outdir  $::env(QS_OUTDIR)
 set sv 0
 if {[info exists ::env(QS_READ_SV)] && $::env(QS_READ_SV) eq "1"} {
     set sv 1
+}
+
+# Large SRAM primitives: interface only (blackbox). Body never enters the design.
+if {[info exists ::env(QS_LIB_FILES)] && $::env(QS_LIB_FILES) ne ""} {
+    foreach f $::env(QS_LIB_FILES) {
+        if {$f eq ""} { continue }
+        if {$sv || [string match *.sv $f]} {
+            yosys "read_verilog -lib -sv $f"
+        } else {
+            yosys "read_verilog -lib $f"
+        }
+    }
 }
 
 foreach f $files {

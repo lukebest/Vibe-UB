@@ -3,6 +3,7 @@
 # (no remove_from_collection / sizeof_collection / report_worst_slack).
 #
 #   QS_TOP QS_NETLIST QS_LIBERTY QS_OUTDIR QS_PERIOD_NS QS_CLK_PORT QS_CLK_NAME
+#   QS_STUB_FILES   optional SRAM STA stubs (1-cycle registered read)
 
 set top       $::env(QS_TOP)
 set netlist   $::env(QS_NETLIST)
@@ -19,6 +20,13 @@ if {[info exists ::env(QS_CLK_PORT)]} {
 }
 
 read_liberty $liberty
+# SRAM stubs first so blackboxed ub_cmn_mem_* have a sequential rdata launch.
+if {[info exists ::env(QS_STUB_FILES)] && $::env(QS_STUB_FILES) ne ""} {
+    foreach f $::env(QS_STUB_FILES) {
+        if {$f eq ""} { continue }
+        read_verilog $f
+    }
+}
 read_verilog $netlist
 link_design $top
 

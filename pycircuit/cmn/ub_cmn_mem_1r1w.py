@@ -78,8 +78,8 @@ def build(
     """Elaboration-time DEPTH / WIDTH / WMASK_W / TEST_HOOKS.
 
     ``wmask_w==0`` means ``WMASK_W=WIDTH`` (whole-word, no ``wmask`` port).
-    ``test_hooks`` is a JIT int. This leaf has no hook ports (SPEC §10);
-    both 0 and 1 elaborate the same PRODUCT netlist.
+    ``test_hooks`` is a JIT int. SPEC §10 lists no ``tb_*`` ports, so
+    TEST_HOOKS=0 and TEST_HOOKS=1 elaborate the same port list and logic.
     """
     depth = int(depth)
     width = int(width)
@@ -95,8 +95,9 @@ def build(
         raise ValueError("WMASK_W must be >= 1")
     if width % wmask_w != 0:
         raise ValueError(f"WIDTH={width} must be a multiple of WMASK_W={wmask_w}")
-    if test_hooks != 0 and test_hooks != 1:
-        raise ValueError("test_hooks must be 0 or 1")
+    # TEST_HOOKS is 0 or 1 (checked in emit). SPEC §10: no tb_* ports, so
+    # this flag does not change the netlist. Avoid `and` of two compares
+    # (JIT bool() breaks when TEST_HOOKS=1 makes the first conjunct true).
 
     aw = clog2(depth)
     nloc = 1 << aw

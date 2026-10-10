@@ -1,5 +1,5 @@
-# Emit pycc PRODUCT netlists. Leaf registry: pycircuit/emit.py LEAVES.
-# ub_cmn_mem_1r1w has no SPEC §10 hooks — PRODUCT only (rtl/cmn/).
+# Emit pycc PRODUCT + HOOKS netlists. Leaf registry: pycircuit/emit.py LEAVES.
+# SPEC §10 lists no tb_* ports — HOOKS (TEST_HOOKS=1) matches PRODUCT ports.
 
 PY ?= python3
 

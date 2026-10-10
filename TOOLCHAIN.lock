@@ -1,0 +1,46 @@
+# Vibe-UB toolchain pins (D7 / D16).
+# This file is the lock record. Install Python deps from tb/requirements.txt.
+# Do not silently upgrade past these pins without re-qualifying (D7).
+
+[python]
+requires = ">=3.11,<3.14"
+# This environment: CPython 3.12.3 (Ubuntu 24.04)
+
+[python-packages]
+# Exact pins. uvm-python is the lukebest fork of upstream 0.4.0.
+cocotb = "1.9.2"
+# Constraint that must remain true: cocotb >=1.9.2,<2 (uvm-python cannot run on 2.x)
+cocotb_constraint = ">=1.9.2,<2"
+cocotb-coverage = "1.2.0"
+# 2.0 requires cocotb>=2 — must stay <2.0
+cocotb-bus = "0.2.1"
+regex = "2024.11.6"
+uvm-python_git = "https://github.com/lukebest/uvm-python"
+uvm-python_commit = "96a06eee7dda1edae2013154b3d3756b040c71ad"
+uvm-python_note = "fork of tpoikela/uvm-python 0.4.0"
+
+[simulators]
+# D7: Icarus 12.0 is the pass/fail gate.
+icarus_lock = "12.0"
+# D7: Verilator 5.032 for compare + line coverage.
+# cocotb 1.9.2 documents Verilator >=5.022; do not move to >=5.036 without re-qual.
+verilator_lock = "5.032"
+
+[simulators-actual]
+# Recorded when this lock was first exercised in the Cloud Agent VM.
+# If a locked simulator cannot be installed, say so here (do not pretend).
+icarus_actual = "12.0 (Icarus Verilog version 12.0 (stable))"
+verilator_actual = "5.020 (Debian 5.020-1) — locked 5.032 not available from apt; source build not completed in this draft"
+verilator_line_coverage = "supported on the actual Verilator (5.020 --coverage); re-run on 5.032 when the pin is installed"
+
+[forbidden]
+sv_uvm = true
+pyvsc = true
+unstructured_bare_cocotb = true
+force_or_deposit_internal_signals = true
+
+[method]
+directed_plus_python_golden = true
+randomize = "uvm-python / cocotb-coverage crv randomize(); log seed every run"
+functional_coverage = "cocotb-coverage CoverPoint / CoverCross"
+line_coverage = "Verilator --coverage; denominator = TEST_HOOKS=1 netlist (SPEC §11)"

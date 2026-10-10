@@ -49,7 +49,7 @@ M1 默认参数（船长已确认，出处见 §9）：
 
 | 非目标 | 依据 |
 | --- | --- |
-| 第 5 章 Network Layer 及之后（TP/TA/FUN/MEM/RSC/SEC） | D2；SPEC_INDEX deferred |
+| 第 5–11 章及管理功能（NW / TP / TA / FUN / MEM / RSC / SEC） | D18 全控制器；**第一批**仍是 PHY+DLL。本 SPEC 的 M1 实现范围不含后续层。顺序 / 并行 / 可选策略待 Luke |
 | 规范可选特性（D4）：不把「可选」当成 M1 必做 | D4 |
 | M1 多时钟域（独立 `pma_clk`） | 架构已定：单时钟；见 §4.1 |
 | 真实 SerDes / PMA 模拟电路 | D3 |
@@ -63,6 +63,7 @@ M1 默认参数（船长已确认，出处见 §9）：
 
 ### 1.3 与后续里程碑的边界
 
+- D18 取代 D2：仓库目标是完整 UB 控制器；**本文件 M1 范围仍是第一批 PHY+DLL**（含 LMSM / 端口寄存器）。后续层的模块清单与里程碑另文，不在本批关闭。
 - M1 对上只提供 **flit + 链路状态**，不解析 Network Header。
 - 附录 D 的 CFG0_BASIC 设备级字段、CFG1_*、CFG0_ROUTE_TABLE：M1 **不实现**；软件若需要完整配置空间，属后续阶段。
 - 测试钩子端口与门控见 §10；验证名 `vibe_lmsm` / `vibe_dll_credit` / `vibe_pcs_tx_pack` 分别对应本规格的 `ub_lmsm`、`ub_dll_credit`、`ub_pcs` TX。
@@ -398,6 +399,8 @@ LMB 为 16 个 8-bit 符号（见 UB-PHY §3.4.1）。种类：LTB、EEIB（§3.
 | `pcs_am_locked` | in | `NLANE` | 每 lane AM/AMCTL 锁定。可被 `tb_inj_am_lock` 旁路，不回灌 PCS |
 | `pcs_lid_bad` | in | 1 | 训练所见 Link_ID 非法/不一致。可被 `tb_inj_lid_bad` 旁路，不回灌 PCS |
 | `pcs_deskew_ok` | in | 1 | deskew 完成 |
+| `pcs2lmsm_null_blk` | in | 1 | **架构提案（§13，待 Luke）**：RX 空块选通。宽 1，**1 拍脉冲**，复位 0。见 §6.1 |
+| `pcs2lmsm_tx_null_blk` | in | 1 | **架构提案（§13，待 Luke）**：TX 空块选通。宽 1，**1 拍脉冲**，复位 0。见 §6.1 |
 
 `ASCEND`：PCS 把物理 lane i 的 Lane_ID 取自 `lmsm2pcs_lane_id_map` 对应字节；`lmsm2pcs_lane_id_base` 等于逻辑 Tx_0 那一字节，供对照。`PHYS`：PCS 写物理 lane 号，不用 map/base。`NULL`（mode=2 或 3）：各激活 lane 的 Lane_ID 均为 §3.4.1.1 的空值 **`8'hFF`**（合法 0–7 或该空值）。同节：`Link_ID` 空值也是 `8'hFF`（合法 0–254 或空值）。`PortNego_Random_Value` 空值是 **0**（另一字段，勿与 Lane_ID 混）。叶子口 `amctl_lid[3:0]` 的 8=`NULL` 是 `AMCTL.LID` 身份（§2.4），**不是** LTB.Lane_ID 编码。
 
@@ -584,7 +587,16 @@ M1 bring-up 裁剪（默认参数已确认）：
 
 顶层 `link_up` / `link_ready` 对应上述变量，均为电平；DLL 只看 `LinkUp` 电平，不看边沿（UB-DL §4.2）。规范未在 Probe / Discovery / Config / Retrain / Change_Speed / Equalization 再写 `LinkUp`（Retrain 期间上次赋值为 1）。§10.2 观察口**不改**：`tb_obs_link_up` = Null\|Active，`tb_obs_link_ready` = Active。Retrain 期间规范 `LinkUp` 与 §10.2 观察是否一致：见 §13。
 
-**`Send_NullBlock` → `Link_Active`（已定，§3.4.3.6）：** 全部已配置 lane 上收到 **8** 个连续 Null Block，且在收到第一个之后至少已发送 **16** 个 Null Block；Null Block 出现在带 SDF 的 AMCTL 之后；开始处理数据流前 deskew 完成。超时 **2 ms** 则 Retrain 或 Idle（同节）。LMSM 如何看到「一个 Null Block」（PCS 指示 vs 拍数折算）：见 §13。
+**`Send_NullBlock` → `Link_Active`（条件已定，§3.4.3.6）：** 全部已配置 lane 上收到 **8** 个连续 Null Block，且在收到第一个之后至少已发送 **16** 个 Null Block；Null Block 出现在带 SDF 的 AMCTL 之后；开始处理数据流前 deskew 完成。超时 **2 ms** 则 Retrain 或 Idle（同节）。
+
+**空块计数口（架构提案，§3.4.3.6 未给并行口；待 Luke，见 §13）：**
+
+| 信号 | 方向（相对 LMSM） | 宽 | 脉冲/电平 | 谁计数 |
+| --- | --- | --- | --- | --- |
+| `pcs2lmsm_null_blk` | in | 1 | **1 拍脉冲**，复位 0 | **LMSM** 累加 RX 连续个数（满 8） |
+| `pcs2lmsm_tx_null_blk` | in | 1 | **1 拍脉冲**，复位 0 | **LMSM** 在收到第一个 RX 脉冲之后累加 TX（满 16） |
+
+PCS 职责：deskew 完成且 AMCTL+SDF 之后，对「全部已配置 RX lane 对齐的一个 Null Block」给一拍 `pcs2lmsm_null_blk`；对「全部已配置 TX lane 发出的一个 Null Block」给一拍 `pcs2lmsm_tx_null_blk`。PCS **不**保持 8/16 计数。勿把 8/16 折算成 `core_clk` 拍数。
 
 **官方超时（已定，时长；周期数 = 时长 × `F_CORE`，§4.1）：**
 
@@ -639,7 +651,7 @@ stateDiagram-v2
 | REQ → WAIT | `Retry_Req_Set` 已连续发完（1 Retry_Idle + 32 Retry_Req） |
 | REQ → RETRAIN | 进入 REQ 时 `NUM_RETRY` 增 1 后等于 `NUM_RETRY_THRESHOLD`，或物理层开始重训；此时清 `NUM_RETRY` |
 | WAIT → NORMAL | 收到对端 `Retry_Ack_Set` |
-| WAIT → REQ | 等应答超时（阈值实现相关，§4.7.3.3 给推荐范围，M1 取值见 §13） |
+| WAIT → REQ | 等应答超时（阈值参数名 `RETRY_WAIT_CYC`，见 §13；§4.7.3.3 只给推荐范围） |
 | WAIT → RETRAIN | 物理层开始重训 |
 | RETRAIN → REQ | 物理层重训成功 |
 | RETRAIN → ERROR | 进入 RETRAIN 时 `NUM_PHY_REINIT` 增 1 后等于 `NUM_PHY_REINIT_THRESHOLD`；此时清 `NUM_PHY_REINIT` |
@@ -647,7 +659,39 @@ stateDiagram-v2
 
 REQ / WAIT：只允许 Retry_Idle / Retry_Req / Retry_Ack；其它 DLLCB/DLLDP 丢弃。RETRAIN / ERROR：不收不发。RETRAIN 中若 PHY 长期不响应并报 `link_up==0`，DLL 回 `DLL_Disabled`（§4.7.3.3、§4.2）。过程对照 §4.7.3.5。
 
-阈值默认：§4.7.3.3 **推荐** `NUM_RETRY_THRESHOLD=15`、`NUM_PHY_REINIT_THRESHOLD=4`（**草案**，见 §13），REGMAP 读回。
+阈值 / 超时参数名（取值仍草案，见 §13；本节点名交叉引用）：`NUM_RETRY_THRESHOLD`、`NUM_PHY_REINIT_THRESHOLD`、`RETRY_WAIT_CYC`。§4.7.3.3 **推荐** 前两个为 15 / 4，WAIT 阈值为「大于 2×链路延迟、1 µs–10 s」。PR #11 的 `docs/regmap/regmap.yaml` 应在 `PARAM_RETRY` 增加 `RETRY_WAIT_CYC` 读回；本 PR 不改 `docs/REGMAP.md` / yaml。
+
+**事件输入口**（`ub_dll_retry` 叶子；命名 `ub_<层>_<功能>`，CODING_STYLE §5。已有模块间口不改名，叶子接线）：
+
+规范只写转移条件与「物理层重训标志位」（§4.7.3.3），**没有** RTL 针脚名，也未写同拍优先级。下表事件集合由 §4.7.3.3 推出；针脚名 / 脉冲（标志位除外）为架构提案，见 §13。
+
+| 叶子口 | 宽 | 脉冲/电平 | 接到 | 触发的转移（§4.7.3.3） |
+| --- | --- | --- | --- | --- |
+| `rst_pyc` / `PORT_RST` | 1 | **电平**（复位有效期间） | §4.2、§3.2.3 | → NORMAL；清 `NUM_RETRY`、`NUM_PHY_REINIT` |
+| `ub_dll_blk_crc_err` | 1 | **1 拍脉冲**，复位 0 | `ub_dll_bcrc_check`：CRC 模式一块 BCRC 失败 | NORMAL → REQ |
+| `ub_dll_fec_uncorr` | 1 | **1 拍脉冲**，复位 0 | `pcs2dll_fec_uncorr && pcs2dll_valid`（已与 flit 对齐，§3.3.2） | NORMAL → REQ（CRC 模式与 FEC 失败并列；非 CRC 模式只看本口） |
+| `ub_dll_phy_retrain` | 1 | **电平**（规范「标志位」，§4.7.3.3） | 已有 `lmsm_retrain_ack`（§3.3.3，禁止脉冲） | NORMAL / REQ / WAIT → RETRAIN |
+| `ub_dll_retry_req_set_done` | 1 | **1 拍脉冲**，复位 0 | 本叶 TX：已连续发完 1 Retry_Idle + 32 Retry_Req | REQ → WAIT |
+| `ub_dll_retry_ack_set` | 1 | **1 拍脉冲**，复位 0 | RX 解析：已收齐对端 `Retry_Ack_Set` | WAIT → NORMAL |
+| `ub_dll_retry_wait_to` | 1 | **1 拍脉冲**，复位 0 | 本叶 WAIT 计时到达 `RETRY_WAIT_CYC` | WAIT → REQ |
+| `ub_dll_phy_retrain_done` | 1 | **1 拍脉冲**，复位 0 | **提案**：`ub_dll_phy_retrain` 1→0 且当拍 `link_up==1`（重训成功、未掉链路） | RETRAIN → REQ |
+| `link_up` | 1 | **电平**（已定，§3.2.6） | LMSM `LinkUp` | RETRAIN 且 `link_up==0` → DLL_Disabled（§4.2，不是 REQ_SM 五态之一） |
+
+内部比较，**不是**事件口：进 REQ 时 `NUM_RETRY`+1 后 `== NUM_RETRY_THRESHOLD` → RETRAIN；进 RETRAIN 时 `NUM_PHY_REINIT`+1 后 `== NUM_PHY_REINIT_THRESHOLD` → ERROR。本叶输出已有 `dll_retrain_req`（进 RETRAIN 时置位，§3.3.3）。
+
+**同拍优先级**（§4.7.3.3 未写；架构提案，见 §13）。只取当前态合法的最高项，其余当拍忽略：
+
+1. 复位 → NORMAL
+2. `link_up==0`（RETRAIN）→ DLL_Disabled
+3. `NUM_PHY_REINIT == NUM_PHY_REINIT_THRESHOLD`（进 RETRAIN 的内部比较）→ ERROR
+4. `ub_dll_phy_retrain==1` 或 `NUM_RETRY == NUM_RETRY_THRESHOLD` → RETRAIN
+5. `ub_dll_phy_retrain_done` → REQ
+6. `ub_dll_retry_ack_set` → NORMAL（仅 WAIT）
+7. `ub_dll_retry_req_set_done` → WAIT（仅 REQ）
+8. `ub_dll_blk_crc_err` / `ub_dll_fec_uncorr`（二者同权，任一即可）→ REQ（仅 NORMAL）
+9. `ub_dll_retry_wait_to` → REQ（仅 WAIT）
+
+例：WAIT 态同拍 `ub_dll_phy_retrain` 与 `ub_dll_retry_ack_set` / `ub_dll_retry_wait_to` → 进 RETRAIN。WAIT 态同拍应答集与超时 → 进 NORMAL（应答优先于超时）。
 
 ### 6.4 RETRY_ACK_SM（UB-DL §4.7.3.4）
 
@@ -661,6 +705,24 @@ REQ / WAIT：只允许 Retry_Idle / Retry_Req / Retry_Ack；其它 DLLCB/DLLDP �
 | ACK 保持 ACK | 正在发送对应重放块时又收到对端 `Retry_Req_Set`（重新按请求处理） |
 
 ACK 态：只发应答集与标记重放块；收方向仍正常收。过程对照 §4.7.3.5。
+
+**事件输入口**（同叶 `ub_dll_retry`；命名同 §6.3。事件集合由 §4.7.3.4 推出；针脚名 / 脉冲 / 同拍优先级为架构提案，见 §13）：
+
+| 叶子口 | 宽 | 脉冲/电平 | 接到 | 触发的转移（§4.7.3.4） |
+| --- | --- | --- | --- | --- |
+| `rst_pyc` / `PORT_RST` | 1 | **电平** | §4.2、§3.2.3 | → NORMAL |
+| `ub_dll_retry_req_set` | 1 | **1 拍脉冲**，复位 0 | RX 解析：已收齐对端 `Retry_Req_Set`（1 Retry_Idle + 32 Retry_Req） | NORMAL → ACK；ACK 保持 ACK（重放中又收到请求则重新处理） |
+| `ub_dll_retry_ack_set_done` | 1 | **1 拍脉冲**，复位 0 | 本叶 TX：已连续发完 `Retry_Ack_Set`（1 Idle + 32 Ack）**并且**已发完本轮标记重放块（两条件都满足后给一拍，不拆成两个 SM 输入） | ACK → NORMAL |
+
+本 SM **没有**重训 / 超时 / 阈值事件口（§4.7.3.4 未列）。
+
+**同拍优先级**（§4.7.3.4 未写；架构提案，见 §13）。只取当前态合法的最高项：
+
+1. 复位 → NORMAL
+2. `ub_dll_retry_req_set` → ACK（进入或保持；覆盖当拍的 `ub_dll_retry_ack_set_done`）
+3. `ub_dll_retry_ack_set_done` → NORMAL
+
+例：ACK 态同拍「应答集+重放发完」与「又收到 Retry_Req_Set」→ 保持 ACK 并按新请求处理。
 
 ---
 
@@ -741,8 +803,9 @@ M1 列中 Xia 提出的默认值已由船长确认。仍标「草案」的是规
 | flit 宽度 | `FLIT_W` | 160 | 160 | 项目接口 |
 | 每 DLLDB 最大 flit | `MAX_DB_FLITS` | 32 | 32 | §4.3 |
 | DLLDP 最大 flit | `MAX_DP_FLITS` | 512 | 512 | UB-DL §4.3.2.1（1–512 flit；>32 则最多 16 个 DLLDB） |
-| `NUM_RETRY_THRESHOLD` | 同名 | 15（规范推荐，草案） | 同 | §4.7.3.3 |
-| `NUM_PHY_REINIT_THRESHOLD` | 同名 | 4（规范推荐，草案） | 同 | §4.7.3.3 |
+| `NUM_RETRY_THRESHOLD` | 同名 | 15（规范推荐，草案） | 同 | §4.7.3.3；取值见 §13；§6.3 只引用本参数名 |
+| `NUM_PHY_REINIT_THRESHOLD` | 同名 | 4（规范推荐，草案） | 同 | §4.7.3.3；取值见 §13；§6.3 只引用本参数名 |
+| WAIT 超时周期 | `RETRY_WAIT_CYC` | **草案**，见 §13 | — | §4.7.3.3 只给范围；§6.3 引用本参数名。PR #11 yaml 的 `PARAM_RETRY` 读回，本 PR 不改 REGMAP |
 | 预编码 | `PRECODE_EN` | 0（关） | **待定** | UB-PHY §3.3.2；M1 默认关，已定 |
 | 工艺 | — | **未知，待 Luke** | — | 非规范；影响库 / SDC / 面积 |
 | 目标频率 | `F_CORE` | ≈80.57 MHz | **待定** | `2.578125e9/32`；已定。工艺仍未知 |
@@ -921,9 +984,10 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 | PMA 均衡针脚 | §3.3 / §3.4.2.9 均衡在 PMA/SerDes；M1 DR0 不做 DR1+ FFE | M1 不加 EQ 系数针脚；需要时再加电平 | PMA 口 | **是**（M1 DR0） |
 | Probe 等待/部分计数超时 | §3.4.3.2 Probe.Wait / Confirm 写「implementation」 | Luke 给 ms/拍，或 TB 用 `LMSM_TMR_SCALE` 缩短真实路径 | `ub_lmsm` 定时器 | 否（有 Probe） |
 | `Change_Speed` 电气空闲停留 | §3.4.3.9 写 implementation（失败停留须长于成功） | M1 不改速：最短停留后回 Retrain；超时 48 ms 已写入 §6.1 | `ub_lmsm` | **是**（改速已非目标） |
-| RETRY WAIT 超时具体值 | §4.7.3.3 推荐大于 2×链路延迟、范围 1 µs–10 s，非单点 | 按 M1 RTT 假设（§9 2 µs）取 ≥4 µs 量级，CSR 可调更好 | `ub_dll_retry`；REGMAP 可选 | 否 |
+| `RETRY_WAIT_CYC`（RETRY WAIT 超时） | §4.7.3.3 推荐大于 2×链路延迟、范围 1 µs–10 s，非单点 | 按 M1 RTT 假设（§9 2 µs）取 ≥4 µs 量级，CSR 可调更好。§6.3 只引用本参数名，默认值等 Luke | `ub_dll_retry`；PR #11 `PARAM_RETRY` | 否 |
 | `LMSM_TMR_SCALE` / `AM_IVL_SCALE` 编码 | 项目 TEST 窗，规范无 | 建议（与现 RTL stub 一致）：0 → 每拍 +1；非 0 → 每拍 +SCALE | REGMAP TEST；TB | 否（验证需要） |
-| `NUM_RETRY_THRESHOLD=15`、`NUM_PHY_REINIT_THRESHOLD=4` | §4.7.3.3 **推荐**，允许按场景改 | 维持 15 / 4，标「规范推荐已采用」等 Luke 点头 | `PARAM_RETRY`；RETRY_REQ_SM | 否 |
+| `NUM_RETRY_THRESHOLD`、`NUM_PHY_REINIT_THRESHOLD` | §4.7.3.3 **推荐** 15 / 4，允许按场景改 | 维持 15 / 4，标「规范推荐已采用」等 Luke 点头。§6.3 只引用参数名 | `PARAM_RETRY`；RETRY_REQ_SM | 否 |
+| RETRY_*_SM 事件口名 / 脉冲或电平 / 同拍优先级 | §4.7.3.3 / §4.7.3.4 只写转移与「重训标志位」；无 RTL 针脚、无同拍仲裁 | **提案（待 Luke）**：叶子口与脉冲突见 §6.3 / §6.4。已定：`ub_dll_phy_retrain` 与 `lmsm_retrain_ack` / `link_up` / 复位为**电平**（§4.7.3.3 标志位、§3.3.3、§3.2.6）。其余事件为 **1 拍脉冲**。`ub_dll_phy_retrain_done` = `ub_dll_phy_retrain` 1→0 且 `link_up==1`。优先级：复位 > `link_up==0` > 阈值进 ERROR > 重训/阈值进 RETRAIN > 重训成功 > 应答/请求进度 > CRC/FEC > WAIT 超时；ACK_SM：复位 > `ub_dll_retry_req_set` > `ub_dll_retry_ack_set_done`。不改已有模块间口名 | `ub_dll_retry` 叶子；PR #12 | 否 |
 | `CRD_BP_THRESHOLD=1024` | 项目观察阈，规范无 | 维持 1024 或改成与 `INIT_CRD` 相关 | `tb_obs_crd_bp`；`PARAM_CRD` | 钩子策略可后期改 |
 | `tb_inj_am_lock` / `tb_inj_lid_bad` 是否删除 | 项目钩子；规范要求真实 AM 锁定（§3.2.4.4） | M1 先保留；PMA 模型能出真实 AM 后再删 | HOOKS 网表；eqy | 删除属后续 |
 | PCS RX unpack `n==0 && have` | 现网 RTL 分支，规范无此实现细节 | 验证端口可达则留；否则删分支或 waiver | 叶子 RTL / waiver | 否 |
@@ -935,7 +999,7 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 | 真实 SerDes 模拟参数 | M1 不含真实 SerDes（D3） | 不实现 | — | **是**（已在 §1.2） |
 | 完整附录 D 复位表 | D15 不抄规范复位表 | 镜像窗写「对照对应节」；实现时对着官方规范填 | REGMAP App. D | 正文不抄 **是** |
 | Retrain 期间 `LinkUp` | §3.4.3.8 只写 `LinkReady=0`，未再赋 `LinkUp`；§3.4.3.6–7 上次赋值为 1 | 建议保持 1，直到回到 Idle 再清 0。§10.2 `tb_obs_link_up` 仍只 Mirror Null\|Active（不改观察口） | `link_up` 对 DLL；观察口 vs 变量 | 否（Retrain 在 M1） |
-| `Send_NullBlock` 空块计数接口 | §3.4.3.6 规定 8 RX / 16 TX Null Block，未给 LMSM 并行口 | 建议 PCS 向 LMSM 出单拍 `pcs2lmsm_null_blk`（CRC/组帧通过的 Null Block）；勿把 8 当成 `core_clk` 拍数 | LMSM↔PCS；既有端口表未列此 strobe | 否（NullBlock 在 M1） |
+| `pcs2lmsm_null_blk`（`Send_NullBlock` 空块计数口） | §3.4.3.6 规定 8 RX / 16 TX，未给并行口、未规定谁计数 | **提案（待 Luke 直接批）：** `pcs2lmsm_null_blk`：PCS→LMSM，宽 **1**，**1 拍脉冲**，复位 0；deskew 完成且 AMCTL+SDF 之后，对全部已配置 RX lane **对齐的一个** Null Block 给一拍。`pcs2lmsm_tx_null_blk`：PCS→LMSM，宽 **1**，**1 拍脉冲**，复位 0；全部已配置 TX lane 发出一个 Null Block 时给一拍。**计数在 LMSM**：RX 连续 8 用 `pcs2lmsm_null_blk`；收到第一个 RX 脉冲后再累加 `pcs2lmsm_tx_null_blk` 至 16。PCS 不计 8/16。勿把 8/16 当 `core_clk` 拍数。口已列入 §3.3.4 / §6.1，未标已定 | LMSM↔PCS；PR #7 | 否（NullBlock 在 M1） |
 | `cfg_*` LTB 通告针脚的 CSR 来源 | §3.3.4 字段口已定；CTRL 窗无对应通告字段。App. D 有能力/控制切片 | 后续 CSR / App. D 镜像驱动电平；M1 可用参数/绑死默认通告 DR0 | REGMAP；`ub_lmsm` 输入 | 通告来源可后期；口本身否 |
 
 `tb_obs_dll_sm_st` 项目编码已在 §10.3 / `STATUS.DLL_SM_ST` 关闭，不再列。

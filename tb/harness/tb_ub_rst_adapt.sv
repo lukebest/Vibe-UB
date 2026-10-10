@@ -1,4 +1,4 @@
-// TB-only wrapper. Not product RTL.
+// TB-only wrapper. Not product RTL. No tb_* (SPEC §10 / Xia).
 `timescale 1ns / 1ps
 
 module tb_ub_rst_adapt #(
@@ -8,7 +8,6 @@ module tb_ub_rst_adapt #(
   input  wire rst_n,
   input  wire rst_n_sync,
   output wire rst_pyc
-`include "leaf_hook_ports.svh"
 );
 
   ub_pyc_rst_adapt #(.PYC_RST_ACTIVE_HIGH(PYC_RST_ACTIVE_HIGH)) dut (
@@ -16,5 +15,4 @@ module tb_ub_rst_adapt #(
     .rst_pyc(rst_pyc)
   );
 
-`include "leaf_hook_body.svh"
 endmodule

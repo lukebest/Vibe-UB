@@ -33,7 +33,6 @@ class RstAdaptLeafTest(LeafUvmTest):
         await self.case_levels()
         await self.case_combo_0cycle()
         await self.case_not_registered()
-        await self.check_hooks_quiet("hooks_transparent", TP)
 
     async def case_levels(self) -> None:
         kind = "invert" if self.pol else "wire"

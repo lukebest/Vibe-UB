@@ -1,4 +1,4 @@
-// TB-only wrapper. rst_n (low) inverted to rst_pyc (SPEC §4.2). Not product RTL.
+// TB-only wrapper. rst_n (low) inverted to rst_pyc (SPEC §4.2). No tb_* (SPEC §10 / Xia).
 `timescale 1ns / 1ps
 
 module tb_ub_bcrc_check (
@@ -14,7 +14,6 @@ module tb_ub_bcrc_check (
   output wire         crc_ok,
   output wire         crc_fail,
   output wire         error_flag_rx
-`include "leaf_hook_ports.svh"
 );
 
   ub_dll_bcrc_check dut (
@@ -32,5 +31,4 @@ module tb_ub_bcrc_check (
     .error_flag_rx(error_flag_rx)
   );
 
-`include "leaf_hook_body.svh"
 endmodule

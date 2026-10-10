@@ -84,9 +84,10 @@ Each leaf is compiled twice (`TEST_HOOKS=0` / `=1`):
 - `TEST_HOOKS=1`: `rtl/<block>/hooks/<module>.v` if present, else PRODUCT
 - `ub_rst_sync`: whitelist SV; both netlists use `rtl/common/ub_rst_sync.sv`
 
-These leaves add no extra ports (SPEC §10). The TB wrapper still exposes
-unused `tb_*` ports on the HOOKS compile so the hook agent can bind.
-Lane TBs sweep `NUM_LANES=1/2/4/8`. Seeds print as `SEED <n>` (D8).
+SPEC §10 lists no hooks on these leaves. HOOKS is port-identical to PRODUCT
+(Xia). Leaf wrappers do **not** add `tb_*` and do **not** bind the hook agent;
+both compiles run the same cases. Lane TBs sweep `NUM_LANES=1/2/4/8`.
+Seeds print as `SEED <n>` (D8).
 
 ## Coverage scaffold
 

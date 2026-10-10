@@ -52,7 +52,6 @@ class RstSyncLeafTest(LeafUvmTest):
         await self.case_short_assert_pulse()
         await self.case_clock_stop_during_reset()
         await self.case_clock_stop_during_release()
-        await self.check_hooks_quiet("hooks_transparent", TP)
 
     async def case_async_assert_any_phase(self) -> None:
         name = "async_assert_any_phase"

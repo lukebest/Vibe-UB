@@ -8,7 +8,8 @@
 #   TEST_HOOKS=0 -> rtl/<block>/<module>.v  (PRODUCT)
 #   TEST_HOOKS=1 -> rtl/<block>/hooks/<module>.v if present, else PRODUCT
 #   ub_rst_sync is whitelist SV: always rtl/common/ub_rst_sync.sv (no hooks copy)
-# TB wrappers still add unused SPEC §10 ports when TEST_HOOKS=1 (leaves add no ports).
+# Leaves listed in SPEC §10 as having no hooks: HOOKS ports == PRODUCT.
+# Leaf wrappers do not add tb_* and do not bind the hook agent.
 
 REPO_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 TB_ROOT   := $(REPO_ROOT)/tb
@@ -86,11 +87,14 @@ endif
 
 VERILOG_INCLUDE_DIRS += $(TB_ROOT)/harness
 
+# -DTB_TEST_HOOKS is only for the passthrough self-check harness, not leaf TBs.
+ifeq ($(LEAF),)
 ifeq ($(TEST_HOOKS),1)
 ifeq ($(SIM),verilator)
 EXTRA_ARGS += -DTB_TEST_HOOKS
 else
 COMPILE_ARGS += -DTB_TEST_HOOKS
+endif
 endif
 endif
 

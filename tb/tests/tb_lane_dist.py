@@ -61,7 +61,6 @@ class LaneDistLeafTest(LeafUvmTest):
         await self.case_walking_one()
         await self.case_random()
         await self.case_latency_0()
-        await self.check_hooks_quiet("hooks_transparent", TP_ALL)
 
     async def case_valid_out_in_reset(self) -> None:
         name = "valid_out_0_in_reset"

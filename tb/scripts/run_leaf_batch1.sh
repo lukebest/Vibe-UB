@@ -39,8 +39,8 @@ run_one() {
   echo "=== $SIM $tag ==="
   rm -rf "$TB/sim_build"
   set +e
-  make -C "$TB" leaf SIM="$SIM" LEAF="$leaf" TEST_HOOKS="$hooks" "${extra[@]}" \
-    >"$log" 2>&1
+  make -C "$TB" leaf SIM="$SIM" LEAF="$leaf" TEST_HOOKS="$hooks" \
+    ${extra[@]+"${extra[@]}"} >"$log" 2>&1
   local rc=$?
   set -e
   grep -E '^DUT_RTL=' "$log" | head -n 1 || true

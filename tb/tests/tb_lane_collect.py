@@ -40,7 +40,6 @@ class LaneCollectLeafTest(LeafUvmTest):
         await self.case_loopback()
         await self.case_corners()
         await self.case_random()
-        await self.check_hooks_quiet("hooks_transparent", TP)
 
     async def case_valid_out_in_reset(self) -> None:
         name = "valid_out_0_in_reset"

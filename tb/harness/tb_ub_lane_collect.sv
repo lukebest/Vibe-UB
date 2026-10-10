@@ -1,4 +1,4 @@
-// TB-only dist→dedist collect loopback. Not product RTL.
+// TB-only dist→dedist collect loopback. No tb_* (SPEC §10 / Xia).
 `timescale 1ns / 1ps
 
 module tb_ub_lane_collect #(
@@ -13,7 +13,6 @@ module tb_ub_lane_collect #(
   output wire [NUM_LANES*PMA_W-1:0]   data_mid,
   output wire [NUM_LANES*PMA_W-1:0]   data_out,
   output wire                         valid_out
-`include "leaf_hook_ports.svh"
 );
 
   ub_pcs_lane_dist #(
@@ -36,5 +35,4 @@ module tb_ub_lane_collect #(
 
   assign valid_out = rst_n & valid_in;
 
-`include "leaf_hook_body.svh"
 endmodule

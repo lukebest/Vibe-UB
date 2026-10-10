@@ -67,7 +67,6 @@ class BcrcCheckLeafTest(LeafUvmTest):
         await self.case_single_bit()
         await self.case_random()
         await self.case_latency_1()
-        await self.check_hooks_quiet("hooks_transparent", TP)
 
     async def case_reset_quiet(self) -> None:
         name = "reset_quiet"

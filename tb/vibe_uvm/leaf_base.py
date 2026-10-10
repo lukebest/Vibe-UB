@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 import cocotb
-from cocotb.triggers import RisingEdge, Timer
+from cocotb.triggers import Timer
 from uvm import UVMConfigDb, UVMTest, uvm_error, uvm_info, UVM_LOW
 
 from tb.vibe_uvm.clk_rst import CORE_CLK_PERIOD_PS
@@ -26,8 +26,33 @@ def env_int(name: str, default: int) -> int:
     return int(raw, 0)
 
 
-def hooks_from_dut(dut) -> int:
-    return 1 if hasattr(dut, "tb_test_mode") else 0
+_TB_PORTS = (
+    "tb_test_mode",
+    "tb_inj_am_lock",
+    "tb_inj_lid_bad",
+    "tb_inj_crd_cells",
+    "tb_obs_link_ready",
+    "tb_obs_link_up",
+    "tb_obs_lmsm_st",
+    "tb_obs_crd_cells",
+    "tb_obs_crd_pend",
+    "tb_obs_crd_low",
+    "tb_obs_crd_bp",
+    "tb_obs_crd_to",
+    "tb_obs_dll_sm_st",
+    "tb_obs_consume_flits",
+)
+
+
+def hooks_netlist() -> int:
+    """Compile-time netlist select (TEST_HOOKS env). These leaves have no tb_* ports."""
+    return 1 if env_int("TEST_HOOKS", 0) else 0
+
+
+def assert_no_tb_ports(dut) -> None:
+    extra = [n for n in _TB_PORTS if hasattr(dut, n)]
+    if extra:
+        raise AssertionError(f"leaf wrapper must not expose {extra} (SPEC §10 / Xia)")
 
 
 def as_int(sig, ctx: str) -> int:
@@ -151,7 +176,7 @@ class LeafUvmTest(UVMTest):
             self.seed = int(seed_arr[0])
         else:
             self.seed = resolve_seed()
-        self.hooks = hooks_from_dut(self.dut)
+        self.hooks = hooks_netlist()
         self.rec = CaseRecorder(self.TB_NAME, self.seed, self.hooks)
 
     async def run_phase(self, phase):
@@ -178,64 +203,8 @@ class LeafUvmTest(UVMTest):
         self.clkgen.start()
         if hasattr(dut, "rst_n"):
             dut.rst_n.value = 0
-        await self.idle_hooks()
+        assert_no_tb_ports(dut)
         await wait_ps(CORE_CLK_PERIOD_PS * 2)
-
-    async def idle_hooks(self) -> None:
-        dut = self.dut
-        if not self.hooks:
-            return
-        dut.tb_test_mode.value = 0
-        dut.tb_inj_am_lock.value = 0
-        dut.tb_inj_lid_bad.value = 0
-        dut.tb_inj_crd_cells.value = 0
-
-    async def check_hooks_quiet(self, case: str, tps: list[str]) -> None:
-        """TEST_HOOKS=1: inj must not reach these leaves; obs stay 0 (SPEC §10 / §11)."""
-        if not self.hooks:
-            return
-        dut = self.dut
-        if hasattr(dut, "start"):
-            dut.start.value = 0
-            dut.valid_in.value = 0
-            dut.last.value = 0
-        if hasattr(dut, "valid_in"):
-            dut.valid_in.value = 0
-        for _ in range(2):
-            await RisingEdge(dut.core_clk)
-        before = {}
-        for name in ("rst_n_sync", "rst_pyc", "data_out", "valid_out", "crc_word", "done",
-                     "crc_ok", "crc_fail", "error_flag_rx"):
-            if hasattr(dut, name):
-                before[name] = as_int(getattr(dut, name), name)
-        dut.tb_test_mode.value = 1
-        dut.tb_inj_am_lock.value = 0xF
-        dut.tb_inj_lid_bad.value = 1
-        dut.tb_inj_crd_cells.value = 0xABCD
-        await RisingEdge(dut.core_clk)
-        for name, exp in before.items():
-            got = as_int(getattr(dut, name), name)
-            if got != exp:
-                self.rec.fail(case, tps, f"hook changed {name}: {exp} -> {got}")
-                raise AssertionError(f"{case}: hook changed {name}")
-        for name in (
-            "tb_obs_link_ready",
-            "tb_obs_link_up",
-            "tb_obs_lmsm_st",
-            "tb_obs_crd_cells",
-            "tb_obs_crd_pend",
-            "tb_obs_crd_low",
-            "tb_obs_crd_bp",
-            "tb_obs_crd_to",
-            "tb_obs_dll_sm_st",
-            "tb_obs_consume_flits",
-        ):
-            got = as_int(getattr(dut, name), name)
-            if got != 0:
-                self.rec.fail(case, tps, f"{name}={got} expected 0")
-                raise AssertionError(f"{case}: {name} not held 0")
-        await self.idle_hooks()
-        self.rec.pass_(case, tps)
 
     async def run_cases(self) -> None:
         raise NotImplementedError

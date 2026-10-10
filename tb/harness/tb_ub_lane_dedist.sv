@@ -1,4 +1,4 @@
-// TB-only wrapper. Combo DUT + valid-only (SPEC §3.1). Not product RTL.
+// TB-only wrapper. Combo DUT + valid-only (SPEC §3.1). No tb_* (SPEC §10 / Xia).
 `timescale 1ns / 1ps
 
 module tb_ub_lane_dedist #(
@@ -12,7 +12,6 @@ module tb_ub_lane_dedist #(
   input  wire                         valid_in,
   output wire [NUM_LANES*PMA_W-1:0]   data_out,
   output wire                         valid_out
-`include "leaf_hook_ports.svh"
 );
 
   ub_pcs_lane_dedist #(
@@ -26,5 +25,4 @@ module tb_ub_lane_dedist #(
 
   assign valid_out = rst_n & valid_in;
 
-`include "leaf_hook_body.svh"
 endmodule

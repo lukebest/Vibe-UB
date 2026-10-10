@@ -1,14 +1,6 @@
-// Verification formula reference. Not product RTL.
-// SPEC §2.6: CRC30 poly 30'h15A94AD5, init all-1s, no invert, no reorder.
-// Byte 0 = data_in[7:0]; each byte MSB first. Last flit: CRC bytes 0..15 only.
-// Pack {1'b0, ERROR_FLAG, crc[29:0]}; TX ERROR_FLAG hardwired 0.
-// Bit-serial loop (not an XOR matrix). 1-cycle to crc_word / done.
-// Xia §2.6: start&&valid same cycle absorbs from INIT (model eat).
-// start&&!valid: load INIT, no data. A new start abandons a non-last block.
-// After valid&&last emits crc_word, crc returns to INIT (PR #39 / Xia).
-// Next-block valid without start (or first block after reset) folds from INIT.
-// Mid-block valid without start continues the current remainder.
-// Do not copy pycircuit/ or rtl/.
+// Negative fixture only: formula reference plus one extra keep-register
+// that the gold side does not have. Used to prove EQUIV_METHODS=regpair
+// fails on an unmatched flop. Not a reference. Not product RTL.
 `timescale 1ns / 1ps
 
 module ub_dll_bcrc (
@@ -26,6 +18,7 @@ module ub_dll_bcrc (
   localparam [29:0] INIT = 30'h3FFF_FFFF;
 
   reg [29:0] crc;
+  (* keep *) reg extra;
 
   function automatic [29:0] crc30_absorb;
     input [29:0]  crc_i;
@@ -50,10 +43,8 @@ module ub_dll_bcrc (
     end
   endfunction
 
-  // start re-seeds INIT; a same-cycle valid_in flit is folded from that seed.
   wire [29:0] seed = start ? INIT : crc;
   wire [29:0] nxt  = crc30_absorb(seed, data_in, last);
-  // last beat: emit nxt on crc_word, reload crc to INIT (not leave nxt).
   wire [29:0] crc_n  = rst_pyc ? INIT :
                        ((valid_in && last) ? INIT :
                         (valid_in ? nxt : (start ? INIT : crc)));
@@ -65,6 +56,7 @@ module ub_dll_bcrc (
     crc      <= crc_n;
     crc_word <= word_n;
     done     <= done_n;
+    extra    <= extra ^ start;
   end
 
 endmodule

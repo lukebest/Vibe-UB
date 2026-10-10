@@ -35,6 +35,14 @@ Affine next-state basis is not a recognized pass.
 3. `write_aiger` of gold and gate, then Yosys `yosys-abc` `dsec`
    (combinational nets fall through to `cec`). If that cannot run:
    `miter -equiv -flatten -make_outputs` + `&r; &cec -m`.
+4. `EQUIV_METHODS=regpair`: flatten, pair FFs by normalized Q name
+   (last hierarchy component; drop trailing `$…` and one `_q`; lowercase;
+   no hand-filled map). Unmatched or width mismatch fails and is listed.
+   Each pair: Q is a shared input, D is a compared output. ABC `cec`
+   (or `&cec`) must prove every PO and every next-state bit. Reset kind
+   (sync / async / none), polarity, and value must match per pair.
+   All three conditions are required. The log prints the pair table,
+   pair / unmatched counts, the raw cec line, and the reset check.
 
 The script prints `equiv_ref METHOD=...`, `equiv_ref TIME method=... sec=... result=...`,
 `equiv_ref abc=... yosys=... yosys_pkg=...`, and `gate_chparam=none|...`.
@@ -47,8 +55,9 @@ Xia §2.6 BCRC `start`/`valid_in` (do not edit `tb/models`):
 | `start && valid_in && last` | `eat(flit, last=True)` — 16 data bytes, not the trailing BCRC word |
 | `start && !valid_in` | load INIT, ignore `data_in` |
 | `start` after a non-last block | abandon the partial remainder, reseed INIT |
+| `valid_in && last` | emit `crc_word` from `nxt`; reload CRC to INIT. Next no-start `valid_in` (or first block after reset) folds from INIT |
 
-Negative fixtures under `formal/dll/negative/` and `formal/pcs/negative/` must FAIL both the leaf TB (where applicable) and `equiv_ref.sh`. `bcrc_drop_start_flit.sv` loads INIT on `start` and drops a same-cycle flit.
+Negative fixtures under `formal/dll/negative/` and `formal/pcs/negative/` must FAIL both the leaf TB (where applicable) and `equiv_ref.sh` (ABC and `regpair`). `bcrc_drop_start_flit.sv` loads INIT on `start` and drops a same-cycle flit. `bcrc_wrong_reset.sv` resets `crc` to 0 instead of INIT. `bcrc_extra_reg.sv` adds a keep-register the gold side does not have. `bcrc_carry_after_last.sv` leaves `nxt` in `crc` after `last` so the next no-start block continues the old remainder. Gold-versus-gold must PASS under `regpair`.
 
 | Leaf | Path | SPEC |
 | --- | --- | --- |

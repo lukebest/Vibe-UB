@@ -7,6 +7,7 @@
 #   (1) equiv_make / equiv_simple / equiv_induct
 #   (2) miter + sat -tempinduct
 #   (3) miter + ABC dsec (or &cec after FFs are ports)
+#   (4) register pairing by normalized Q name + ABC cec + reset check
 # Affine next-state basis is not a recognized pass (premise unproven).
 set -euo pipefail
 
@@ -15,8 +16,8 @@ LEAF="${1:-}"
 NET="${2:-}"
 # Per-method wall time. Timeout of a method is unproven; try the next.
 EQUIV_TMO="${EQUIV_TMO:-90}"
-# Comma list: equiv,sat,abc  (default all, in that order)
-EQUIV_METHODS="${EQUIV_METHODS:-equiv,sat,abc}"
+# Comma list: equiv,sat,abc,regpair  (default all, in that order)
+EQUIV_METHODS="${EQUIV_METHODS:-equiv,sat,abc,regpair}"
 
 usage() {
   echo "usage: $0 <leaf> <netlist.v>" >&2
@@ -28,7 +29,7 @@ usage() {
   echo "  Always -I rtl/pyc_lib for pycc \`include \"pyc_reg.v\". If that dir is" >&2
   echo "  missing (main before #5/#21), fall back to -I rtl/common and WARN." >&2
   echo "  EQUIV_INC=dir[:dir] extra include dirs (after the repo primitive dir)." >&2
-  echo "  EQUIV_METHODS=equiv,sat,abc  which families to try (default all)." >&2
+  echo "  EQUIV_METHODS=equiv,sat,abc,regpair  families to try (default all)." >&2
   echo "  EQUIV_TMO=seconds per method (default 90). Timeout = unproven." >&2
   exit 2
 }
@@ -462,6 +463,76 @@ fi
 # 3) ABC dsec / &cec. Affine basis is not a recognized pass.
 if has_method abc; then
   try_abc || true
+fi
+
+# 4) Auto register pairing (normalized Q names) + ABC cec + reset check.
+# All three must hold. Unmatched / width mismatch / reset mismatch / cec ≠
+# is a conclusive FAIL for this method (listed, no hand-filled pair table).
+try_regpair() {
+  local t0 tmp abc_bin py
+  t0="$(sec_now)"
+  abc_bin="$(command -v yosys-abc || true)"
+  py="$ROOT/scripts/gate/equiv_regpair.py"
+  if [[ ! -f "$py" ]]; then
+    echo "equiv_ref note: equiv_regpair.py missing"
+    log_time "regpair" "$t0" "unproven"
+    return 1
+  fi
+  if [[ -z "$abc_bin" ]]; then
+    echo "equiv_ref note: yosys-abc not on PATH; regpair unproven"
+    log_time "regpair" "$t0" "unproven"
+    return 1
+  fi
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/equiv_ref_regpair.XXXXXX")"
+  echo "equiv_ref note: trying register pairing + ABC cec|&cec (yosys-abc)"
+  local dump="${prep_gold}${prep_gate}
+design -load gold
+autoname
+write_json ${tmp}/gold.json
+write_rtlil ${tmp}/gold.il
+design -load gate
+autoname
+write_json ${tmp}/gate.json
+write_rtlil ${tmp}/gate.il
+"
+  set +e
+  if ! run_yosys "$dump" "$EQUIV_TMO"; then
+    set -e
+    echo "equiv_ref note: flatten/JSON dump failed or timed out"
+    log_time "regpair" "$t0" "timeout"
+    rm -rf "$tmp"
+    return 1
+  fi
+  set -e
+  if [[ ! -s "${tmp}/gold.json" || ! -s "${tmp}/gate.json" ]]; then
+    echo "equiv_ref note: empty JSON for regpair"
+    log_time "regpair" "$t0" "unproven"
+    rm -rf "$tmp"
+    return 1
+  fi
+  set +e
+  python3 "$py" --leaf "$LEAF" --tmp "$tmp" --abc "$abc_bin" --tmo "$EQUIV_TMO"
+  local prc=$?
+  set -e
+  if [[ "$prc" -eq 0 ]]; then
+    log_time "regpair" "$t0" "equivalent"
+    rm -rf "$tmp"
+    pass_method "regpair + ABC cec (auto Q-name pairing; reset checked)"
+  fi
+  if [[ "$prc" -eq 124 ]]; then
+    log_time "regpair" "$t0" "timeout"
+    rm -rf "$tmp"
+    return 1
+  fi
+  log_time "regpair" "$t0" "not_equivalent"
+  rm -rf "$tmp"
+  echo "equiv_ref METHOD=regpair" >&2
+  echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (regpair: pairing/reset/cec)" >&2
+  exit 1
+}
+
+if has_method regpair; then
+  try_regpair || true
 fi
 
 echo "equiv_ref METHOD=unproven" >&2

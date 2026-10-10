@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -828,6 +829,35 @@ def test_equiv_real_csr_tlb() -> None:
             # (structurally different pycc + mem stub). Ports are the gate.
 
 
+def test_equiv_ref_regpair() -> None:
+    """GATE-EQY-004 (4): gold-vs-gold PASS; extra-reg and last-carry FAIL."""
+    root = Path(__file__).resolve().parents[2]
+    script = root / "scripts" / "gate" / "equiv_ref.sh"
+    gold = root / "formal" / "dll" / "ref" / "ub_dll_bcrc.sv"
+    extra = root / "formal" / "dll" / "negative" / "bcrc_extra_reg.sv"
+    carry = root / "formal" / "dll" / "negative" / "bcrc_carry_after_last.sv"
+    if not script.is_file() or not gold.is_file():
+        _fail("equiv-ref-regpair", "equiv_ref.sh or gold missing")
+    env = {**os.environ, "EQUIV_METHODS": "regpair", "EQUIV_TMO": "45"}
+
+    good = run_cmd([str(script), "ub_dll_bcrc", str(gold)], env=env, timeout=90)
+    if good.returncode != 0 or "equiv_ref PASS" not in (good.stdout or ""):
+        _fail("equiv-ref-regpair-gold", (good.stdout or "")[-400:])
+    print("SELFTEST PASS equiv-ref-regpair-gold: gold vs gold")
+
+    bad_extra = run_cmd([str(script), "ub_dll_bcrc", str(extra)], env=env, timeout=90)
+    if bad_extra.returncode == 0:
+        _fail("equiv-ref-regpair-extra", "extra-reg fake must fail")
+    if "unmatched" not in (bad_extra.stdout or ""):
+        _fail("equiv-ref-regpair-extra", "expected unmatched register listing")
+    print("SELFTEST PASS equiv-ref-regpair-extra: unmatched flop")
+
+    bad_carry = run_cmd([str(script), "ub_dll_bcrc", str(carry)], env=env, timeout=90)
+    if bad_carry.returncode == 0:
+        _fail("equiv-ref-regpair-carry", "carry-after-last fake must fail")
+    print("SELFTEST PASS equiv-ref-regpair-carry: last remainder carried")
+
+
 def main() -> int:
     tests = [
         test_emit_skip_missing_script,
@@ -853,6 +883,7 @@ def main() -> int:
         test_hooks_wrong_width,
         test_equiv_wide_bus_and_flip,
         test_equiv_real_csr_tlb,
+        test_equiv_ref_regpair,
     ]
     for fn in tests:
         fn()

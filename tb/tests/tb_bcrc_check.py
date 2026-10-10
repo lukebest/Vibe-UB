@@ -67,6 +67,8 @@ class BcrcCheckLeafTest(LeafUvmTest):
         await self.case_single_bit()
         await self.case_random()
         await self.case_latency_1()
+        await self.case_xia_first_block_nostart()
+        await self.case_xia_last_then_nostart()
 
     async def case_reset_quiet(self) -> None:
         name = "reset_quiet"
@@ -206,6 +208,67 @@ class BcrcCheckLeafTest(LeafUvmTest):
             )
             self.check(1, as_int(self.dut.crc_ok, "crc_ok"), "crc_ok aligned")
             sample_bcrc_check("lat1", self.hooks)
+            self.rec.pass_(name, TP)
+        except Exception as exc:
+            self.rec.fail(name, TP, str(exc))
+            raise
+
+    async def _beat(self, *, start: int = 0, valid: int = 0, last: int = 0,
+                    data: int = 0, crc_recv: int = 0) -> None:
+        self.dut.start.value = start
+        self.dut.valid_in.value = valid
+        self.dut.last.value = last
+        self.dut.data_in.value = data
+        self.dut.crc_recv.value = crc_recv
+        await RisingEdge(self.dut.core_clk)
+        await wait_ps(1)
+
+    async def case_xia_first_block_nostart(self) -> None:
+        """PR #39: first block after reset without start still compares from INIT."""
+        name = "xia_first_block_nostart"
+        try:
+            from tb.vibe_uvm.golden import bcrc as BM
+
+            await self._reset_dut()
+            attached = attach([payload_flit(list(range(16)))])
+            exp30 = BM.UbDllBcrc().eat(attached[0], last=True)
+            recv = extract_word(attached[0])
+            await self._beat(start=0, valid=1, last=1, data=attached[0], crc_recv=recv)
+            self.check(1, as_int(self.dut.done, "done"), "nostart-first done")
+            self.check(1, as_int(self.dut.crc_ok, "crc_ok"), "nostart-first crc_ok")
+            self.check(0, as_int(self.dut.crc_fail, "crc_fail"), "nostart-first crc_fail")
+            self.check(recv, as_int(self.dut.crc_word, "crc_word"),
+                       "nostart-first crc_word")
+            self.check(exp30, recv & 0x3FFFFFFF, "nostart-first model crc30")
+            sample_bcrc_check("xia_first_block_nostart", self.hooks)
+            self.rec.pass_(name, TP)
+        except Exception as exc:
+            self.rec.fail(name, TP, str(exc))
+            raise
+
+    async def case_xia_last_then_nostart(self) -> None:
+        """PR #39: consecutive good blocks without start stay crc_ok."""
+        name = "xia_last_then_nostart"
+        try:
+            from tb.vibe_uvm.golden import bcrc as BM
+
+            await self._reset_dut()
+            a = attach([payload_flit([0x11] * 16)])
+            b = attach([payload_flit([0x22] * 16)])
+            model = BM.UbDllBcrc()
+            exp_a = model.eat(a[0], last=True)
+            exp_b = model.eat(b[0], last=True)
+            await self._beat(start=0, valid=1, last=1, data=a[0],
+                             crc_recv=extract_word(a[0]))
+            self.check(1, as_int(self.dut.crc_ok, "crc_ok"), "blk1 crc_ok")
+            self.check(exp_a, as_int(self.dut.crc_word, "crc_word") & 0x3FFFFFFF,
+                       "blk1 crc30")
+            await self._beat(start=0, valid=1, last=1, data=b[0],
+                             crc_recv=extract_word(b[0]))
+            self.check(1, as_int(self.dut.crc_ok, "crc_ok"), "blk2 crc_ok")
+            self.check(exp_b, as_int(self.dut.crc_word, "crc_word") & 0x3FFFFFFF,
+                       "blk2 crc30")
+            sample_bcrc_check("xia_last_then_nostart", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
             self.rec.fail(name, TP, str(exc))

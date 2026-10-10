@@ -2,6 +2,7 @@
 // SPEC §2.6: same CRC30 as ub_dll_bcrc; compare crc_recv[29:0] only.
 // error_flag_rx = crc_recv[30] (passthrough; not in the CRC). rsvd ignored.
 // Result appears 1 cycle after last (SPEC §7) and holds until the next last.
+// u_crc reloads INIT after last (PR #39); check outputs still hold until next last.
 // Bit-serial loop (not an XOR matrix). Do not copy pycircuit/ or rtl/.
 `timescale 1ns / 1ps
 

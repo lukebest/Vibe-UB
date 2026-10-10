@@ -69,6 +69,9 @@ class BcrcLeafTest(LeafUvmTest):
         await self.case_xia_start_valid_last()
         await self.case_xia_start_only()
         await self.case_xia_start_mid_restart()
+        await self.case_xia_first_block_nostart()
+        await self.case_xia_last_then_nostart()
+        await self.case_xia_single_flit_chain()
 
     async def case_reset_quiet(self) -> None:
         name = "reset_quiet"
@@ -274,6 +277,77 @@ class BcrcLeafTest(LeafUvmTest):
             self.check(pack_word(exp30, 0, 0), as_int(self.dut.crc_word, "crc_word"),
                        "xia mid-start crc_word")
             sample_bcrc("xia_start_mid_restart", 1, self.hooks)
+            self.rec.pass_(name, TP)
+        except Exception as exc:
+            self.rec.fail(name, TP, str(exc))
+            raise
+
+    async def case_xia_first_block_nostart(self) -> None:
+        """PR #39: after reset release, first valid without start folds from INIT."""
+        name = "xia_first_block_nostart"
+        try:
+            from tb.vibe_uvm.golden import bcrc as BM
+
+            await self._reset_dut()
+            attached = attach([payload_flit(list(range(16)))])
+            exp30 = BM.UbDllBcrc().eat(attached[0], last=True)
+            await self._beat(start=0, valid=1, last=1, data=attached[0])
+            self.check(1, as_int(self.dut.done, "done"), "nostart-first done")
+            self.check(pack_word(exp30, 0, 0), as_int(self.dut.crc_word, "crc_word"),
+                       "nostart-first crc_word")
+            sample_bcrc("xia_first_block_nostart", 1, self.hooks)
+            self.rec.pass_(name, TP)
+        except Exception as exc:
+            self.rec.fail(name, TP, str(exc))
+            raise
+
+    async def case_xia_last_then_nostart(self) -> None:
+        """PR #39: after last, next multi-flit block without start starts from INIT."""
+        name = "xia_last_then_nostart"
+        try:
+            from tb.vibe_uvm.golden import bcrc as BM
+
+            await self._reset_dut()
+            first = BM.bytes_to_flit(list(range(20)))
+            second = payload_flit([0xA5] * 16)
+            blk1 = attach([payload_flit([0x11] * 16)])
+            blk2 = attach([first, second])
+            model = BM.UbDllBcrc()
+            exp1 = model.eat(blk1[0], last=True)
+            model.eat(blk2[0], last=False)
+            exp2 = model.eat(blk2[1], last=True)
+            await self._beat(start=0, valid=1, last=1, data=blk1[0])
+            self.check(1, as_int(self.dut.done, "done"), "blk1 done")
+            self.check(pack_word(exp1, 0, 0), as_int(self.dut.crc_word, "crc_word"),
+                       "blk1 crc_word")
+            await self._beat(start=0, valid=1, last=0, data=blk2[0])
+            await self._beat(start=0, valid=1, last=1, data=blk2[1])
+            self.check(1, as_int(self.dut.done, "done"), "blk2 done")
+            self.check(pack_word(exp2, 0, 0), as_int(self.dut.crc_word, "crc_word"),
+                       "blk2 crc_word")
+            sample_bcrc("xia_last_then_nostart", 3, self.hooks)
+            self.rec.pass_(name, TP)
+        except Exception as exc:
+            self.rec.fail(name, TP, str(exc))
+            raise
+
+    async def case_xia_single_flit_chain(self) -> None:
+        """PR #39: consecutive single-flit blocks, no start between them."""
+        name = "xia_single_flit_chain"
+        try:
+            from tb.vibe_uvm.golden import bcrc as BM
+
+            await self._reset_dut()
+            payloads = ([0x00] * 16, [0xFF] * 16, list(range(16)))
+            model = BM.UbDllBcrc()
+            for i, payload in enumerate(payloads):
+                attached = attach([payload_flit(payload)])
+                exp30 = model.eat(attached[0], last=True)
+                await self._beat(start=0, valid=1, last=1, data=attached[0])
+                self.check(1, as_int(self.dut.done, "done"), f"chain{i} done")
+                self.check(pack_word(exp30, 0, 0), as_int(self.dut.crc_word, "crc_word"),
+                           f"chain{i} crc_word")
+            sample_bcrc("xia_single_flit_chain", 3, self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
             self.rec.fail(name, TP, str(exc))

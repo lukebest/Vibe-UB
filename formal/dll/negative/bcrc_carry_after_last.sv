@@ -1,14 +1,7 @@
-// Verification formula reference. Not product RTL.
-// SPEC §2.6: CRC30 poly 30'h15A94AD5, init all-1s, no invert, no reorder.
-// Byte 0 = data_in[7:0]; each byte MSB first. Last flit: CRC bytes 0..15 only.
-// Pack {1'b0, ERROR_FLAG, crc[29:0]}; TX ERROR_FLAG hardwired 0.
-// Bit-serial loop (not an XOR matrix). 1-cycle to crc_word / done.
-// Xia §2.6: start&&valid same cycle absorbs from INIT (model eat).
-// start&&!valid: load INIT, no data. A new start abandons a non-last block.
-// After valid&&last emits crc_word, crc returns to INIT (PR #39 / Xia).
-// Next-block valid without start (or first block after reset) folds from INIT.
-// Mid-block valid without start continues the current remainder.
-// Do not copy pycircuit/ or rtl/.
+// Negative fixture only: after valid&&last, crc keeps the block remainder
+// (nxt) instead of reloading INIT. The next block's first valid without
+// start then folds from that tail. Xia / PR #39: last reloads all-1s so a
+// following no-start flit matches a start flit. Not a reference. Not product RTL.
 `timescale 1ns / 1ps
 
 module ub_dll_bcrc (
@@ -50,13 +43,11 @@ module ub_dll_bcrc (
     end
   endfunction
 
-  // start re-seeds INIT; a same-cycle valid_in flit is folded from that seed.
   wire [29:0] seed = start ? INIT : crc;
   wire [29:0] nxt  = crc30_absorb(seed, data_in, last);
-  // last beat: emit nxt on crc_word, reload crc to INIT (not leave nxt).
+  // Deliberately wrong: last leaves nxt in crc (carry into the next block).
   wire [29:0] crc_n  = rst_pyc ? INIT :
-                       ((valid_in && last) ? INIT :
-                        (valid_in ? nxt : (start ? INIT : crc)));
+                       (valid_in ? nxt : (start ? INIT : crc));
   wire [31:0] word_n = rst_pyc ? 32'b0 :
                        ((valid_in && last) ? {2'b00, nxt} : crc_word);
   wire        done_n = rst_pyc ? 1'b0 : (valid_in && last);

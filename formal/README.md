@@ -124,7 +124,10 @@ make -C formal reset      # one iface
 sby -f reset.sby
 ```
 
-Each job uses a stub/harness in the same directory. Depth is small (16–20).
+Each job uses a stub/harness in the same directory. Depth is small (10–20).
 Engine: `smtbmc z3`. Workdirs (`*_bmc/`, `*_cover/`) are gitignored.
+
+CSR samples 1-bit decode (`mapped` / `test` / `req` / …) into formal-only
+flops so Yosys does not put the 16-bit REGMAP case inside `$past`.
 
 If `sby` / `yosys` are not on PATH, say so — do not pretend the jobs ran.

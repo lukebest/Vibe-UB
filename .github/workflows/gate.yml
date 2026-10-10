@@ -1,0 +1,106 @@
+# Tool-gate CI. Jobs call scripts/gate/* so local `make gate` matches CI.
+# Do not add QoR compare here — scripts/impl/quick_synth.sh is implementation-owned.
+
+name: gate
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUNBUFFERED: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Verilator + gate Python
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y verilator
+          pip install -r scripts/gate/requirements.txt
+      - name: lint
+        run: scripts/gate/lint.sh
+
+  synth-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Yosys + gate Python
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys
+          pip install -r scripts/gate/requirements.txt
+      - name: synth-check
+        run: scripts/gate/synth_check.sh
+
+  cdc-rdc:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install gate Python
+        run: pip install -r scripts/gate/requirements.txt
+      - name: cdc-rdc
+        run: scripts/gate/cdc_rdc.sh
+
+  formal:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Yosys / sby (best effort)
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y sby || true
+          pip install -r scripts/gate/requirements.txt
+      - name: formal
+        run: scripts/gate/formal.sh
+
+  regmap-consistency:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install gate Python
+        run: pip install -r scripts/gate/requirements.txt
+      - name: regmap-consistency
+        run: scripts/gate/regmap_consistency.sh
+
+  tb-selfcheck:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Icarus + TB Python
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iverilog
+          pip install -r scripts/gate/requirements.txt
+          pip install -r tb/requirements.txt
+      - name: tb-selfcheck
+        run: scripts/gate/tb_selfcheck.sh

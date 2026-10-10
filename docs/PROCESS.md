@@ -36,9 +36,9 @@
 | formal | 等价与关键断言 |
 | 快速综合 | 面积 / 时序趋势，供设计迭代 |
 
-工具守门（验证负责人兼任）定检查规则、批准豁免。豁免书面记录，格式为 ID / 检查项 / 模块 / 理由 / 批准人 / 日期；清单文件 `docs/WAIVERS.md` 为后续（FUTURE）。现有具名 waiver 实践见 [CODING_STYLE.md](CODING_STYLE.md) §7（如 `CRD_UF`）。
+工具守门（验证负责人兼任）定检查规则、批准豁免。**豁免必须守门人书面批准**。清单在 `waivers/*.yml`；规则与失败判据见 [rules/verif_gate.md](rules/verif_gate.md)。现有具名 waiver 实践见 [CODING_STYLE.md](CODING_STYLE.md) §7（如 `CRD_UF`）。
 
-流水线实现列为待办，由后续独立 PR 完成；本文件只定流程。
+流水线入口：`.github/workflows/gate.yml` 与 `make gate`（`scripts/gate/`）。快速综合 QoR 仍归实现，不拦合入。
 
 ---
 
@@ -98,8 +98,8 @@ PM 每周汇总并打版本号（v0.1 起，本批骨架日期 2026-10-10）。�
 
 文档落地、现有工作继续推进；实现类改动走后续独立 PR。
 
-- 当前 open PR #6（`tb/models` 中的 golden models，由验证编写，base 为 `cursor/docs-m1-architecture-b2d2`）合入后，这些参考模型的所有权转给架构师 Xia；验证继续负责把它们接入 scoreboard。
-- Open PR #5、#6、#7（以及 #9）按现行规则继续推进。
-- 工具流水线（每次提交 lint / CDC / formal / 快速综合）与 REGMAP 自动生成器尚未实现，列为待办，由后续独立 PR 完成；本 PR 只定流程。
+- `tb/models` 中的 golden 所有权归架构师 Xia；将迁到顶层 `model/`（纯 Python），`tb/models/` 只留转发层。验证把模型接入 scoreboard。门禁同时跑两处 pytest（`model/` 存在时）。
+- Open PR #5、#7（以及 #9、#11）按现行规则继续推进。新叶子一律拦截；D10 手写 RTL 见 `scripts/gate/legacy.txt`，只报告不拦截，待 legacy 迁移 PR 与守门人批准。
+- 工具流水线已落地（lint / CDC / formal / synth-check / regmap `--check` / tb-selfcheck）。REGMAP 生成器仍由架构 PR 交付；生成器不在树内时门禁 skip。
 
 产品 RTL 继续按 D5 / D6 用 pyCircuit 生成、同步复位。验证继续按 D7 / D13 使用 uvm-python + cocotb，经端口或 test hook 注入。一期原型固件消费 REGMAP 生成的驱动与寄存器访问层（D11）。

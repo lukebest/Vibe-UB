@@ -66,15 +66,19 @@
 
 ## 4. 工具守门与豁免
 
-新增「工具守门（tool gatekeeper）」职责，暂由验证（负责人）兼任：每次提交自动跑 lint、CDC、formal、快速综合。规模变大后再设专人。本文件只定职责，CI 配置由后续独立 PR 落地。
+新增「工具守门（tool gatekeeper）」职责，暂由验证（负责人）兼任：每次提交自动跑 lint、CDC、formal、快速综合。规模变大后再设专人。
 
-任何检查豁免（waiver）都需要守门人书面批准，并记录在豁免清单（waiver list）中。
+**任何检查豁免都需要守门人书面批准**，并记录在豁免清单中。守门人不得把未批准草稿当成放行依据。
 
 | 项 | 约定 |
 | --- | --- |
-| 清单落点 | `docs/WAIVERS.md` 为后续文件（FUTURE）；落地前条目仍按下列格式书面记录，并由守门人批准 |
-| 条目格式 | ID / 检查项 / 模块 / 理由 / 批准人 / 日期 |
+| CI | `.github/workflows/gate.yml`（`push` / `pull_request`）；本地 `make gate`；脚本 `scripts/gate/` |
+| 规则 | [rules/verif_gate.md](rules/verif_gate.md) |
+| 清单落点 | `waivers/*.yml`（`approvers.yml` 限定守门人 login）。`docs/WAIVERS.md` 不再作为目标 |
+| 条目格式 | id / check / 模块或文件 / 规则或消息匹配 / 理由 / 批准人 / 批准日期 / 到期或复查条件 |
+| D10 leftover | `scripts/gate/legacy.txt`：只报告不拦截，待 legacy 迁移 PR 与守门人批准后再改名单 |
 | 现有实践 | [CODING_STYLE.md](CODING_STYLE.md) §7 具名 waiver（如 `WAIVER_CRD_UF_CNT`、`WAIVER_CRD_UF_IRQ`）；覆盖率豁免见 [VERIF_PLAN.md](VERIF_PLAN.md) §9 |
+| 审批 | `.github/CODEOWNERS`：`waivers/`、`.github/workflows/gate.yml`、`scripts/gate/legacy.txt` → `lukebest` |
 
 人工评审覆盖每一条豁免；其余检查以工具结果为准。
 

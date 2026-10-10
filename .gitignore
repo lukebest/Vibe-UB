@@ -18,3 +18,8 @@ tb/reports/regress/**
 tb/reports/cov_func/**
 tb/reports/cov_line/**
 !tb/reports/**/.gitkeep
+
+# Tool-gate scratch
+scripts/gate/out/
+formal/**/*.sby_*
+*.sbydir/

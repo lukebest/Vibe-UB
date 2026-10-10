@@ -1,0 +1,67 @@
+# Extensible CDC / RDC rules for the M1 single-clock controller.
+# Add a rule id here and a matching checker in cdc_rdc.py — do not hard-code
+# one-off exceptions in the workflow.
+#
+# Clock / reset contract: SPEC §4.1 / §4.2, CODING_STYLE §2 / §3, D6.
+
+schema_version: 1
+
+require_single_clock: true
+allowed_clocks:
+  - core_clk
+forbidden_clocks:
+  - pma_clk
+
+clock_port_regex: "(^clk$|_clk$|^clock$)"
+reset_port_regex: "(^rst$|^rst_n$|_rst$|_rst_n$|^reset$|^rst_pyc$|^rst_n_sync$)"
+
+# Chip-level async reset entry (async assert, sync deassert).
+rst_sync:
+  cell: ub_rst_sync
+  stages: 2
+  clk: core_clk
+  async_in: rst_n
+  sync_out: rst_n_sync
+
+# Polarity wrapper onto pyc_reg (SPEC §4.2).
+rst_adapt:
+  cell: ub_pyc_rst_adapt
+  sync_in: rst_n_sync
+  pyc_out: rst_pyc
+
+# Only these cells may contain `always @(posedge clk or negedge rst)`.
+async_reset_whitelist_cells:
+  - ub_rst_sync
+
+# 2-flop (or deeper) synchronizers for non-core_clk / async inputs.
+sync_cells:
+  - name: pyc_cdc_sync
+    width_bits: 1
+    min_stages: 2
+  - name: ub_sync2
+    min_stages: 2
+  - name: ub_rst_sync
+    min_stages: 2
+
+# Ports treated as asynchronous at the boundary. Must enter via a sync cell.
+async_input_regex:
+  - "^rst_n$"
+  - "_async"
+  - "^async_"
+
+# Named checks (id → fail when the condition holds, unless waived).
+checks:
+  - id: CLOCK_MULTI
+    when: more than one distinct clock port/signal in a module
+  - id: CLOCK_NOT_CORE
+    when: a clock port is not named core_clk
+  - id: CLOCK_FORBIDDEN
+    when: a forbidden clock (pma_clk) is present
+  - id: RST_ASYNC_NOT_VIA_SYNC
+    when: async reset used outside ub_rst_sync
+  - id: RST_SYNC_MISSING
+    when: chip-level rst_n is consumed without an ub_rst_sync instance
+  - id: ASYNC_INPUT_UNSYNC
+    when: an async / non-core_clk input is not captured by a 2-stage sync cell
+  - id: SYNC_STAGES
+    when: a listed sync cell is configured below min_stages

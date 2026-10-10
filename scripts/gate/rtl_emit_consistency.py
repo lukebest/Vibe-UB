@@ -23,6 +23,7 @@ from gatelib import (
     OUT_DIR,
     REPO_ROOT,
     Finding,
+    collect_import_root_findings,
     collect_layer_netlists,
     collect_placeholder_policy_findings,
     cmn_mem_bits,
@@ -34,16 +35,19 @@ from gatelib import (
     emit_report,
     hooks_extra_for,
     is_cmn_mem_module,
-    is_eqy_tie_low_port,
     is_handwritten_path,
     is_legacy_path,
     is_placeholder_module,
     is_tb_obs_port,
+    is_tb_port,
     iter_rtl_sources,
     large_cmn_mem_lib_files,
+    leaf_process_env,
+    leaf_python_argv,
     looks_generated,
+    packed_width,
     parse_cmn_mem_tag,
-    parse_ports,
+    parse_port_decls,
     print_tool_versions,
     read_cmn_mem_threshold_bits,
     rel,
@@ -58,45 +62,68 @@ from pyc_lib_check import check_pyc_lib
 # Call only this script. Do not add pycc flags here.
 EMIT_SCRIPT = "scripts/emit_rtl.py"
 
-def write_hooks_wrapper(hooks_path: Path, module: str, dest: Path) -> list[str]:
-    """Wrap HOOKS: tb_test_mode=0 and extra inputs tied low (SPEC §11).
+def _port_decl(kind: str, name: str, packed: str) -> str:
+    rng = f"{packed} " if packed else ""
+    return f"  {kind} {rng}{name};"
 
-    Tie-low: tb_test_mode, tb_inj_*, tb_<inst>_bd_*, tb_<inst>_bd_vld_*.
-    Observe (tb_obs_* / tb_<inst>_obs_*) left open. Other ports 1:1 with PRODUCT.
+
+def _tie_low_expr(packed: str) -> str:
+    width = packed_width(packed)
+    if width <= 1:
+        return "1'b0"
+    return f"{width}'b0"
+
+
+def write_hooks_wrapper(
+    hooks_path: Path,
+    module: str,
+    dest: Path,
+    product_path: Path | None = None,
+) -> list[str]:
+    """Wrap HOOKS so only PRODUCT ports are compared (SPEC §11).
+
+    Exposed ports keep the PRODUCT packed width (fixes gold/gate bus
+    mismatch). Extra HOOKS inputs (tb_test_mode / tb_inj_* /
+    tb_<inst>_bd_* / tb_<inst>_bd_vld_*) tie to 0 at their native width.
+    Observe (tb_obs_* / tb_<inst>_obs_*) left open. Other extra tb_*
+    inputs also tie low.
     """
-    ports = parse_ports(hooks_path)
-    tied: list[str] = []
-    exposed: list[tuple[str, str]] = []
-    for kind, name in ports:
-        if is_eqy_tie_low_port(name):
-            tied.append(name)
-        elif is_tb_obs_port(name):
-            tied.append(name)  # observe-only; leave unconnected on the wrapper
-        else:
-            exposed.append((kind, name))
+    hooks = parse_port_decls(hooks_path)
+    if product_path is not None and product_path.is_file():
+        exposed = parse_port_decls(product_path)
+    else:
+        exposed = [(k, n, p) for k, n, p in hooks if not is_tb_port(n)]
+    tied: list[tuple[str, str, str]] = []
+    exposed_names = {n for _k, n, _p in exposed}
+    for kind, name, packed in hooks:
+        if name in exposed_names:
+            continue
+        tied.append((kind, name, packed))
     lines = [
-        f"// Auto-generated eqy wrapper: {module} hooks with tb_test_mode=0,",
-        "// tb_inj_* / tb_<inst>_bd_* / tb_<inst>_bd_vld_* tied low. Do not commit.",
+        f"// Auto-generated eqy wrapper: {module} PRODUCT ports only;",
+        "// extra HOOKS inputs tied low at native width. Do not commit.",
         f"module {module}_eqy_hooks (",
     ]
     if exposed:
-        lines.append("  " + ",\n  ".join(n for _k, n in exposed))
+        lines.append("  " + ",\n  ".join(n for _k, n, _p in exposed))
     lines.append(");")
-    for kind, name in exposed:
-        lines.append(f"  {kind} {name};")
-    conns = [f".{n}({n})" for _k, n in exposed]
-    for name in tied:
-        if is_tb_obs_port(name):
+    for kind, name, packed in exposed:
+        lines.append(_port_decl(kind, name, packed))
+    conns: list[str] = []
+    for _k, name, _p in exposed:
+        conns.append(f".{name}({name})")
+    for kind, name, packed in tied:
+        if is_tb_obs_port(name) or kind == "output":
             conns.append(f".{name}()")
         else:
-            conns.append(f".{name}(1'b0)")
+            conns.append(f".{name}({_tie_low_expr(packed)})")
     lines.append(f"  {module} u_hooks (")
     lines.append("    " + ",\n    ".join(conns))
     lines.append("  );")
     lines.append("endmodule")
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return tied
+    return [n for _k, n, _p in tied]
 
 
 def _lib_reads(lib_files: list[Path] | None) -> list[str]:
@@ -318,11 +345,14 @@ def run_emit_rtl_isolated() -> tuple[list[Finding], Path | None, dict[str, objec
     meta["worktree"] = tmp
     script = tmp / EMIT_SCRIPT
     py = _emit_python()
+    argv = leaf_python_argv(script, python=py)
+    env = leaf_process_env(tmp)
     print(
-        f"=== {py} {EMIT_SCRIPT} (isolated worktree; "
+        f"=== {' '.join(argv)} (isolated worktree; "
+        "PYTHONPATH=<worktree>/pycircuit first; python -P; "
         "pycc argv comes only from this script) ==="
     )
-    proc = run_cmd([py, str(script)], cwd=tmp, timeout=600)
+    proc = run_cmd(argv, cwd=tmp, timeout=600, env=env)
     print(proc.stdout or "")
     if proc.returncode != 0:
         return (
@@ -358,7 +388,7 @@ def run_equiv(
         kind = "no-hook leaf, ports 1:1"
     else:
         wrap = work / f"{module}_eqy_hooks.v"
-        tied = write_hooks_wrapper(hooks, module, wrap)
+        tied = write_hooks_wrapper(hooks, module, wrap, product_path=product)
         gate_top = f"{module}_eqy_hooks"
         gate_reads = [f"read_verilog -sv {hooks}", f"read_verilog -sv {wrap}"]
         kind = f"hooked; extra inputs tied low ({tied or 'none'})"
@@ -467,6 +497,7 @@ def main() -> int:
     )
 
     findings: list[Finding] = []
+    findings.extend(collect_import_root_findings("emit"))
     worktree: Path | None = None
     generated_rtl: Path | None = None
     emit_meta: dict[str, object] = {

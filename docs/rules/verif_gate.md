@@ -4,7 +4,7 @@
 | --- | --- |
 | 分册 | `docs/rules/verif_gate.md` |
 | 所有者 | 工具守门（验证负责人兼任，见 [TEAM.md](../TEAM.md) §4） |
-| 版本 | v0.5 (2026-10-10) |
+| 版本 | v0.6 (2026-10-10) |
 | 类别 | 每次提交的 lint / CDC / formal / 综合 / regmap / TB / emit / 端口 / 来源 / 等价 / spec-leak |
 | 配套 | [verification.md](verification.md)、[PROCESS.md](../PROCESS.md)、[CODING_STYLE.md](../CODING_STYLE.md) §7、[DECISIONS.md](../DECISIONS.md) D6 / D7 / D10 / D17 |
 
@@ -49,6 +49,17 @@ SPEC §2.2 变体：同一叶子多组参数 → `rtl/<layer>/<叶子>_<标签>.
 超阈值变体（`docs/rules/impl_quick_synth.md`，默认 4096 bit）不提交 `.v`，写入 `rtl/<层>/manifest.yml`（变体名、参数、pycc 版本、PRODUCT/HOOKS sha256）。门禁能再生时核 sha256、端口，以及两份网表除模块名外逐字节一致。超阈值却提交了 `.v`、或清单有条目却生成不出，均拦截。
 
 `rtl/pyc_lib/` **等 #21 合入才出现**。目录在就按锁定 pyCircuit 逐字节比对；缺了只报告跳过，不失败。其它目录出现 `pyc_*` 原语仍拦截。`handwritten.yml` 里的 `pyc_reg` 临时项由 #21 自己撤，本分册不撤。
+
+### 0.2 导入根与 `lib/`（守门人已定；Xia 会在 SPEC §2.2 对齐）
+
+调用 pyCircuit 叶子（`pycircuit.cli emit`、`scripts/emit_rtl.py`、以及会 `import` 叶子的 tb-selfcheck）时：
+
+- `PYTHONPATH` **最前面**是 `<repo>/pycircuit`。叶子写 `from <层>.lib import ...`（例：C 线 #27 `from mem.lib import ...`）。
+- **仓库根不得进 `sys.path`**。仓库的 `pycircuit/` 目录与已安装的 pyCircuit 库包同名，根在路径上会遮住安装包（#27 上表现为 `Python package pycircuit is not importable`）。`<repo>/pycircuit` 本身在 `PYTHONPATH` 上不是遮蔽，而是导入根；缺了它则 `from mem.lib` 报 `No module named 'mem'`。
+- 一律用脚本路径调用，不用 `python -m`；`python -P` / `PYTHONSAFEPATH` 让 cwd 不进路径。
+- 叶子只扫 `pycircuit/<层>/*.py`，跳过 `pycircuit/<层>/lib/` 和 `__init__.py`。`lib/` **不生成网表**，但仍跑「禁止拼接 Verilog 文本」静态扫描。层根目录下的 `.py`（即使是 helper）按叶子处理。
+
+命中仓库根进路径记 `IMPORT_ROOT_SHADOW`，拦截。
 
 ---
 
@@ -211,9 +222,10 @@ M1 单时钟 `core_clk`（SPEC §4.1）。`rst_n` 异步置位、同步释放，
 
 | ID | 规则 | 来源 | 日期 |
 | --- | --- | --- | --- |
-| GATE-EMIT-001 | 只调用 `scripts/emit_rtl.py` 重生成到临时目录，与提交的 `rtl/<层>/`、`rtl/<层>/hooks/` 逐字节比对；脚本不存在或 pycc 按 `TOOLCHAIN.lock` 仍装不上则 skip（不拦，写明原因），二者都具备则拦。门禁不拼 pycc 命令 | CODING_STYLE §1 | 2026-10-10 |
+| GATE-EMIT-001 | 只调用 `scripts/emit_rtl.py` 重生成到临时目录，与提交的 `rtl/<层>/`、`rtl/<层>/hooks/` 逐字节比对；脚本不存在或 pycc 按 `TOOLCHAIN.lock` 仍装不上则 skip（不拦，写明原因），二者都具备则拦。门禁不拼 pycc 命令。调用用脚本路径 + `python -P`，`PYTHONPATH` 最前为 `<repo>/pycircuit`，仓库根不进 `sys.path` | CODING_STYLE §1 | 2026-10-10 |
 | GATE-EMIT-004 | 超 `impl_quick_synth.md` 阈值（默认 4096 bit）的变体写入 `rtl/<层>/manifest.yml`（名 / 参数 / pycc / PRODUCT·HOOKS sha256）；现场能再生则核 sha256、端口、除模块名外逐字节；超阈值提交 `.v` 或清单生成不出即拦 | SPEC §2.2 | 2026-10-10 |
 | GATE-EMIT-005 | `rtl/pyc_lib/` 存在则与锁定 pyCircuit 逐字节比对；目录缺失（#21 未合）报告跳过。其它目录的 `pyc_*` 拦截。不撤 `handwritten.yml` 的 pyc_reg 临时项 | #21 / #28 | 2026-10-10 |
+| GATE-EMIT-006 | 调 `emit_rtl.py` 时 `PYTHONPATH` 最前为 `<repo>/pycircuit`，`python -P`，仓库根不进路径 | 守门人；#27 | 2026-10-10 |
 | GATE-EMIT-002 | 非 legacy、非白名单手写叶子必须有 `rtl/<layer>/hooks/<module>.v` | SPEC §11 | 2026-10-10 |
 | GATE-EMIT-003 | 未上 `scripts/gate/handwritten.yml` 的手写 `.v` / `.sv` 记 `HANDWRITTEN_UNLISTED` | D6；§1.1 | 2026-10-10 |
 | GATE-EQY-001 | PRODUCT≡HOOKS。本环境 **eqy 装不上**，主工具是 Yosys `equiv_make` / `equiv_simple` / `equiv_induct` / `equiv_status -assert`。eqy 若在 PATH 再用。报告写明 `tool=yosys-equiv` 或 `tool=eqy`。按 SPEC §2.2 变体逐个跑；`_placeholder` 不做等价 | SPEC §11 (d)；设计 spike | 2026-10-10 |
@@ -337,6 +349,7 @@ PR 审查清单见 §11。本条不写自动 finding，避免误杀尚未补齐�
 | GATE-PROV-004 | 白名单手写 SV 不受此项约束。`ub_cmn_mem_1r1w` 按普通叶子检查 | Xia | 2026-10-10 |
 | GATE-PROV-005 | 参数变体按 SPEC §2.2 逐个发现与比对。`_placeholder` 变体只跑 lint 与 TB，报告标出，不算 PRODUCT | SPEC §2.2 | 2026-10-10 |
 | GATE-PROV-006 | PRODUCT 网表不得例化 `_placeholder`；placeholder 源码必须有 `PLACEHOLDER_SOURCE` | SPEC §2.2 | 2026-10-10 |
+| GATE-PROV-007 | 导入根是 `<repo>/pycircuit`（`from <层>.lib`）；仓库根不得进 `sys.path`（`IMPORT_ROOT_SHADOW`）。叶子只扫 `pycircuit/<层>/*.py`，跳过 `lib/` 与 `__init__.py`。`lib/` 不 emit，仍扫禁止拼接 Verilog 文本 | 守门人；#27 | 2026-10-10 |
 
 违规报告「迁移待办」栏列出 main、PR #5、#7、#12，以及 PR #11 的 `pycircuit/csr/ub_csr_regs.py`（状态「已迁」）。
 
@@ -379,6 +392,7 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 | VER-GATE-014 | `ub_cmn_mem_1r1w` 时钟口为 `core_clk` | Xia | 2026-10-10 |
 | VER-GATE-015 | 公式参考等价（`formal/<层>/ref/`）：Yosys `equiv_*` 全证或 `miter`+`sat -tempinduct` 其一通过，报告写明路径；每个参考须有假网表且必须失败 | PM | 2026-10-10 |
 | VER-GATE-016 | 大网表走 `rtl/<层>/manifest.yml`；超阈值 `.v` / 清单生成不出拦截；`rtl/pyc_lib/` 缺了跳过、有了逐字节；`tb_<inst>_obs_*` 只出；sby bind 信号必须存在；D10/迁移名册缺文件标已删除并扣总数；COMBO_DEPTH 只数逻辑门 | 本分册 v0.5 | 2026-10-10 |
+| VER-GATE-017 | 导入根 `<repo>/pycircuit` 置 `PYTHONPATH` 最前；仓库根不进 `sys.path`；叶子不含 `lib/`；`lib/` 只做拼接扫描 | 本分册 v0.6 | 2026-10-10 |
 
 ---
 

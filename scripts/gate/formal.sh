@@ -7,7 +7,7 @@ set -euo pipefail
 # shellcheck disable=SC1091
 source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
-python3 "$GATE_DIR/formal_bind.py"
+python3 -P "$GATE_DIR/formal_bind.py"
 
 mapfile -t SBY_FILES < <(find "$REPO_ROOT/formal" -type f -name '*.sby' 2>/dev/null | sort || true)
 

@@ -12,7 +12,7 @@ Lists live in this directory (`legacy.txt`, `handwritten.yml`, `blackbox.yml`,
 | `spec_leak.sh` | Private-spec leak scan (allowlist `leak_allow.yml`) |
 | `rtl_emit_consistency.sh` | Line A: `scripts/emit_rtl.py` only (temp dir, byte-compare `rtl/<layer>/` + hooks); skip if missing / pycc uninstallable; large-mem manifest; `rtl/pyc_lib/` compare-or-skip |
 | `equiv.sh` | PRODUCT≡HOOKS per variant (Yosys `equiv_*` primary; eqy if present; large cmn mem = bytes except name + ports) |
-| `pycircuit_provenance.sh` | AST provenance (no homemade pycc argv; regen is emit_rtl.py) |
+| `pycircuit_provenance.sh` | AST provenance (no homemade pycc argv; regen is emit_rtl.py); import-root + `lib/` splice-scan |
 | `setup_pycircuit.sh` | Design spike recipe (clone pin, apt LLVM 19, `pyc build`, venv) |
 | `hooks_port_consistency.sh` | Independent HOOKS vs PRODUCT ports |
 | `lint.sh` | Verilator `--lint-only -Wall` + unlisted stub/macro |
@@ -30,6 +30,13 @@ Three lines, every hierarchy level auto-discovered (`pycircuit/*/`, `rtl/*/`, `f
 
 Xia: `ub_cmn_mem_1r1w` is a normal leaf (`pycircuit/cmn/` → `rtl/cmn/`).
 `blackbox.yml` `kind` is `stub` | `macro` only.
+
+Import root: `PYTHONPATH` starts with `<repo>/pycircuit` so leaves can
+`from <layer>.lib import ...`. The repo root must not be on `sys.path`
+(the `pycircuit/` tree would shadow the installed package). Invoke by
+script path with `python -P`, never `python -m`. Leaf discovery is
+`pycircuit/<layer>/*.py` only (`lib/` and `__init__.py` skipped; `lib/`
+is splice-scanned, not emitted).
 
 Rules, fail criteria, and the waiver flow:
 [docs/rules/verif_gate.md](../../docs/rules/verif_gate.md).

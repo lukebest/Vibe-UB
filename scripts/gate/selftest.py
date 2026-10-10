@@ -13,12 +13,20 @@ from formal_bind import check_formal_binds
 from gatelib import (
     Finding,
     collect_lock_completeness_findings,
+    discover_pycircuit_leaves,
+    discover_pycircuit_lib_helpers,
+    import_root_shadow_findings,
+    leaf_process_env,
+    leaf_python_argv,
     mark_deleted_findings,
+    repo_root_on_sys_path,
+    run_cmd,
     sha256_file,
 )
 from hooks_port_consistency import compare_ports
 from large_mem_manifest import check_large_mem_manifest
 from pyc_lib_check import check_pyc_lib
+from pycircuit_provenance import static_splice_check
 from rtl_emit_consistency import compare_emitted_rtl, emit_unavailable_findings
 
 
@@ -319,6 +327,144 @@ def test_deleted_roster_not_error() -> None:
     print("SELFTEST PASS deleted-roster: 已删除 excluded from totals")
 
 
+def _write_fake_layer(root: Path, *, helper_at_root: bool = False) -> Path:
+    """Fake pycircuit/<layer> with lib/ helper and a leaf that imports it."""
+    layer = root / "pycircuit" / "toy"
+    lib = layer / "lib"
+    lib.mkdir(parents=True)
+    (layer / "__init__.py").write_text("", encoding="utf-8")
+    (lib / "__init__.py").write_text("# helpers only\n", encoding="utf-8")
+    (lib / "helper.py").write_text(
+        "def mark():\n    return 'helper-ok'\n",
+        encoding="utf-8",
+    )
+    (layer / "ub_toy.py").write_text(
+        "from pycircuit import Circuit\n"
+        "from toy.lib import helper\n"
+        "FLAG = helper.mark()\n",
+        encoding="utf-8",
+    )
+    (root / "pycircuit" / "__init__.py").write_text("", encoding="utf-8")
+    if helper_at_root:
+        (layer / "at_root_helper.py").write_text(
+            "from pycircuit import Circuit\nROOT_HELPER = True\n",
+            encoding="utf-8",
+        )
+    return layer
+
+
+def test_layer_lib_discovered_and_emit() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _write_fake_layer(root)
+        leaves = discover_pycircuit_leaves(root / "pycircuit")
+        names = {leaf["leaf"] for leaf in leaves}
+        if "ub_toy" not in names:
+            _fail("layer-lib-discover", f"leaf ub_toy not found: {names}")
+        if "helper" in names or "lib" in names:
+            _fail("layer-lib-discover", f"lib/ helper must not be a leaf: {names}")
+        helpers = discover_pycircuit_lib_helpers(root / "pycircuit")
+        if not any(p.name == "helper.py" for p in helpers):
+            _fail("layer-lib-discover", f"lib helper not scanned: {helpers}")
+        emit = root / "scripts" / "emit_rtl.py"
+        emit.parent.mkdir(parents=True)
+        emit.write_text(
+            "from toy.lib import helper\nprint(helper.mark())\n",
+            encoding="utf-8",
+        )
+        proc = run_cmd(
+            leaf_python_argv(emit),
+            cwd=root,
+            env=leaf_process_env(root),
+            timeout=30,
+        )
+        if proc.returncode != 0 or "helper-ok" not in (proc.stdout or ""):
+            _fail(
+                "layer-lib-emit",
+                f"emit with PYTHONPATH=<repo>/pycircuit failed: {proc.stdout!r}",
+            )
+        print("SELFTEST PASS layer-lib-discover+emit: from toy.lib works; lib/ not a leaf")
+
+
+def test_helper_at_layer_root_is_leaf() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _write_fake_layer(root, helper_at_root=True)
+        names = {leaf["leaf"] for leaf in discover_pycircuit_leaves(root / "pycircuit")}
+        if "at_root_helper" not in names:
+            _fail(
+                "helper-at-layer-root",
+                f"file at pycircuit/<layer>/*.py must be a leaf: {names}",
+            )
+        if "helper" in names:
+            _fail("helper-at-layer-root", "lib/helper.py must still be skipped")
+        print("SELFTEST PASS helper-at-layer-root: layer-root .py is a leaf")
+
+
+def test_repo_root_on_path_shadows() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _write_fake_layer(root)
+        if not repo_root_on_sys_path([str(root)], root):
+            _fail("import-root-shadow", "repo root on sys.path must be detected")
+        if repo_root_on_sys_path([str(root / "pycircuit")], root):
+            _fail(
+                "import-root-shadow",
+                "<repo>/pycircuit on PYTHONPATH is the import root, not a shadow",
+            )
+        hits = import_root_shadow_findings([str(root)], "provenance", root)
+        _expect_rule("import-root-shadow", hits, "IMPORT_ROOT_SHADOW")
+        # Reproduce #27: cwd/repo root on path → import pycircuit binds to the tree.
+        bad_env = {
+            **leaf_process_env(root),
+            "PYTHONPATH": str(root),
+            "PYTHONSAFEPATH": "0",
+        }
+        probe = (
+            "import sys, pathlib\n"
+            "print('path0=' + sys.path[0])\n"
+            "try:\n"
+            "    import pycircuit, inspect\n"
+            "    loc = pathlib.Path(inspect.getfile(pycircuit)).resolve()\n"
+            "    print('loc=' + str(loc))\n"
+            "    tree = pathlib.Path(" + repr(str(root / 'pycircuit')) + ").resolve()\n"
+            "    print('SHADOW_TREE' if loc == tree or loc.parent == tree else 'OTHER')\n"
+            "except Exception as exc:\n"
+            "    print('IMPORT_FAIL ' + type(exc).__name__ + ': ' + str(exc))\n"
+        )
+        proc = run_cmd(
+            [sys.executable, "-c", probe],
+            cwd=root,
+            env=bad_env,
+            timeout=30,
+        )
+        text = proc.stdout or ""
+        if "SHADOW_TREE" not in text and "IMPORT_FAIL" not in text:
+            _fail("import-root-shadow-repro", f"expected tree shadow or fail, got {text!r}")
+        # Without <repo>/pycircuit on PYTHONPATH, from <layer>.lib fails (#27 mem).
+        empty = {**leaf_process_env(root), "PYTHONPATH": ""}
+        miss = run_cmd(
+            [sys.executable, "-P", "-c", "from toy.lib import helper"],
+            cwd=root,
+            env=empty,
+            timeout=30,
+        )
+        if miss.returncode == 0:
+            _fail("import-root-shadow-repro", "from toy.lib must fail without import root")
+        print(
+            "SELFTEST PASS import-root-shadow: repo root shadows install; "
+            "missing import root → No module named layer"
+        )
+
+
+def test_lib_helper_splice() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        helper = Path(tmp) / "bad.py"
+        helper.write_text('VERILOG = "module sneak(); endmodule"\n', encoding="utf-8")
+        hits = static_splice_check(helper, "bad")
+        _expect_rule("lib-helper-splice", hits, "VERILOG_SPLICE")
+
+
 def main() -> int:
     tests = [
         test_emit_skip_missing_script,
@@ -335,6 +481,10 @@ def main() -> int:
         test_obs_must_be_output,
         test_sby_bind_missing_signal,
         test_deleted_roster_not_error,
+        test_layer_lib_discovered_and_emit,
+        test_helper_at_layer_root_is_leaf,
+        test_repo_root_on_path_shadows,
+        test_lib_helper_splice,
     ]
     for fn in tests:
         fn()

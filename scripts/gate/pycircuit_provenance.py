@@ -24,11 +24,14 @@ from gatelib import (
     OUT_DIR,
     REPO_ROOT,
     Finding,
+    collect_import_root_findings,
     collect_placeholder_policy_findings,
     discover_pycircuit_leaves,
+    discover_pycircuit_lib_helpers,
     emit_report,
     is_handwritten_path,
     is_migrate_path,
+    leaf_process_env,
     print_tool_versions,
     rel,
     run_cmd,
@@ -98,6 +101,53 @@ def _code_strings(tree: ast.AST) -> list[str]:
     return out
 
 
+def _splice_needles(tree: ast.AST) -> list[str]:
+    return sorted(
+        {
+            needle
+            for blob in _code_strings(tree)
+            for needle in VERILOG_NEEDLES
+            if needle in blob
+        }
+    )
+
+
+def static_splice_check(
+    path: Path, module: str, file_rel: str | None = None
+) -> list[Finding]:
+    """lib/ helpers: no netlist, but Verilog-splice scan still runs."""
+    if not path.is_file() or is_handwritten_path(path):
+        return []
+    text = path.read_text(encoding="utf-8", errors="replace")
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:
+        return [
+            Finding(
+                check="provenance",
+                module=module,
+                file=file_rel or rel(path),
+                rule="PY_SYNTAX",
+                message=f"cannot parse: {exc}",
+            )
+        ]
+    hits = _splice_needles(tree)
+    if not hits:
+        return []
+    return [
+        Finding(
+            check="provenance",
+            module=module,
+            file=file_rel or rel(path),
+            rule="VERILOG_SPLICE",
+            message=(
+                "string literals splice Verilog text "
+                f"{hits}; use the pyCircuit modeling API"
+            ),
+        )
+    ]
+
+
 def static_check(leaf: dict[str, str]) -> list[Finding]:
     path = REPO_ROOT / leaf["source"]
     if not path.is_file():
@@ -131,27 +181,7 @@ def static_check(leaf: dict[str, str]) -> list[Finding]:
                 ),
             )
         )
-    hits = sorted(
-        {
-            needle
-            for blob in _code_strings(tree)
-            for needle in VERILOG_NEEDLES
-            if needle in blob
-        }
-    )
-    if hits:
-        findings.append(
-            Finding(
-                check="provenance",
-                module=leaf["module"],
-                file=leaf["source"],
-                rule="VERILOG_SPLICE",
-                message=(
-                    "string literals splice Verilog text "
-                    f"{hits}; use the pyCircuit modeling API"
-                ),
-            )
-        )
+    findings.extend(static_splice_check(path, leaf["module"], leaf["source"]))
     return findings
 
 
@@ -186,7 +216,12 @@ def _venv_python() -> str:
 def toolchain_ready() -> bool:
     if _pycc_bin() is None:
         return False
-    proc = run_cmd([_venv_python(), "-c", "import pycircuit"], timeout=30)
+    # -P + leaf env: repo root must not be on sys.path (shadows install).
+    proc = run_cmd(
+        [_venv_python(), "-P", "-c", "import pycircuit"],
+        env=leaf_process_env(),
+        timeout=30,
+    )
     return proc.returncode == 0
 
 
@@ -206,12 +241,18 @@ def main() -> int:
         seen_src.add(leaf["source"])
 
     findings: list[Finding] = []
+    findings.extend(collect_import_root_findings("provenance"))
     findings.extend(collect_placeholder_policy_findings("provenance"))
     for source in sorted(seen_src):
         if Path(source).name in SKIP_PY:
             continue
         leaf = next(L for L in leaves if L["source"] == source)
         findings.extend(static_check(leaf))
+    helpers = discover_pycircuit_lib_helpers()
+    print(f"lib/ helpers (splice-scan only, not leaves): {len(helpers)}")
+    for helper in helpers:
+        print(f"  [lib] {rel(helper)}")
+        findings.extend(static_splice_check(helper, helper.stem))
 
     print(
         "=== pycc setup (install only; regen compare is rtl-emit-consistency "

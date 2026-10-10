@@ -238,6 +238,7 @@ def run_cmd(
     argv: list[str],
     cwd: Path | None = None,
     timeout: int | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         argv,
@@ -247,6 +248,7 @@ def run_cmd(
         stderr=subprocess.STDOUT,
         timeout=timeout,
         check=False,
+        env=env,
     )
 
 
@@ -1420,14 +1422,200 @@ def discover_rtl_variants(layer: str, leaf: str) -> list[str]:
     return names
 
 
-def discover_pycircuit_leaves() -> list[dict[str, Any]]:
-    """Leaves from pycircuit/<layer>/*.py, expanded per SPEC §2.2 variant."""
-    root = REPO_ROOT / "pycircuit"
+def layer_import_root(repo: Path | None = None) -> Path:
+    """Directory that must be first on PYTHONPATH so `from <layer>.lib` works."""
+    return (repo or REPO_ROOT) / "pycircuit"
+
+
+def leaf_process_env(repo: Path | None = None) -> dict[str, str]:
+    """Env for invoking pyCircuit leaves / emit_rtl.py.
+
+    ``<repo>/pycircuit`` is first. The repo root is never on PYTHONPATH
+    (that directory is also named pycircuit and would shadow the install).
+    PYTHONSAFEPATH=1 plus ``python -P`` keep cwd off sys.path.
+    """
+    root = (repo or REPO_ROOT).resolve()
+    env = os.environ.copy()
+    front = [str(layer_import_root(root)), str(GATE_DIR)]
+    seen: set[str] = set()
+    parts: list[str] = []
+    for item in front + env.get("PYTHONPATH", "").split(os.pathsep):
+        if not item or item in {".", ""}:
+            continue
+        try:
+            resolved = Path(item).resolve()
+        except OSError:
+            continue
+        if resolved == root:
+            continue
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        parts.append(str(Path(item)))
+    env["PYTHONPATH"] = os.pathsep.join(parts)
+    env["PYTHONSAFEPATH"] = "1"
+    env["GATE_REPO_ROOT"] = str(root)
+    return env
+
+
+def leaf_python_argv(script: Path, *args: str, python: str | None = None) -> list[str]:
+    """Invoke a script by path. Never ``python -m``. ``-P`` keeps cwd off sys.path."""
+    exe = python or sys.executable
+    return [exe, "-P", str(script), *args]
+
+
+def repo_root_on_sys_path(sys_path: list[str], repo: Path | None = None) -> bool:
+    """True if the repo root (not ``<repo>/pycircuit``) is on *sys_path*."""
+    root = (repo or REPO_ROOT).resolve()
+    for item in sys_path:
+        if item in {"", "."}:
+            return True
+        try:
+            if Path(item).resolve() == root:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def pycircuit_shadowed_by_tree(sys_path: list[str], repo: Path | None = None) -> bool:
+    """True if ``import pycircuit`` would bind to the leaf tree.
+
+    Only the *repo root* on ``sys.path`` causes that (``<repo>/pycircuit``
+    is a directory, not an installed package). Putting ``<repo>/pycircuit``
+    itself first on PYTHONPATH is required so ``from <layer>.lib`` works
+    and is *not* a shadow.
+    """
+    return repo_root_on_sys_path(sys_path, repo)
+
+
+def import_root_shadow_findings(
+    sys_path: list[str],
+    check: str = "provenance",
+    repo: Path | None = None,
+) -> list[Finding]:
+    """Blocking findings when *sys_path* would shadow the installed package."""
+    if not pycircuit_shadowed_by_tree(sys_path, repo):
+        return []
+    return [
+        Finding(
+            check=check,
+            module="*",
+            file="pycircuit",
+            rule="IMPORT_ROOT_SHADOW",
+            message=(
+                "repo root is on sys.path; pycircuit/ would shadow the "
+                "installed pyCircuit package (use <repo>/pycircuit on "
+                "PYTHONPATH, python -P / PYTHONSAFEPATH, never python -m)"
+            ),
+        )
+    ]
+
+
+def pycircuit_cli_argv(*args: str, python: str | None = None) -> list[str]:
+    """Invoke the installed pycircuit CLI by script path. Never ``python -m``."""
+    exe = python or sys.executable
+    script = Path(exe).resolve().parent / "pycircuit"
+    if script.is_file():
+        return [str(script), *args]
+    # -P -c keeps cwd / repo root off sys.path (unlike python -m).
+    return [
+        exe,
+        "-P",
+        "-c",
+        (
+            "import runpy, sys;"
+            "sys.argv = ['pycircuit'] + sys.argv[1:];"
+            "runpy.run_module('pycircuit.cli', run_name='__main__')"
+        ),
+        *args,
+    ]
+
+
+def collect_import_root_findings(
+    check: str = "provenance", repo: Path | None = None
+) -> list[Finding]:
+    """Probe a leaf-style python -P process; repo root on sys.path is blocking."""
+    root = repo or REPO_ROOT
+    probe = (
+        "import os, sys\n"
+        "from pathlib import Path\n"
+        "root = Path(os.environ['GATE_REPO_ROOT']).resolve()\n"
+        "hits = []\n"
+        "for p in sys.path:\n"
+        "    try:\n"
+        "        rp = root if p in ('', '.') else Path(p).resolve()\n"
+        "    except OSError:\n"
+        "        continue\n"
+        "    if rp == root:\n"
+        "        hits.append(p or '.')\n"
+        "print('SHADOW' if hits else 'OK')\n"
+        "print('hits=' + repr(hits))\n"
+    )
+    proc = run_cmd(
+        [sys.executable, "-P", "-c", probe],
+        cwd=root,
+        env=leaf_process_env(root),
+        timeout=30,
+    )
+    text = proc.stdout or ""
+    print(f"import-root probe: {(text.strip().splitlines() or [''])[0]}")
+    if proc.returncode != 0:
+        return [
+            Finding(
+                check=check,
+                module="*",
+                file="pycircuit",
+                rule="IMPORT_ROOT_SHADOW",
+                message=(
+                    "import-root probe failed; "
+                    f"probe={text.strip()[:200]}"
+                ),
+            )
+        ]
+    hits = import_root_shadow_findings(
+        # Reconstruct from the probe: any printed hits mean the live path
+        # still contained the repo root (should be empty with -P + env).
+        ["."] if "SHADOW" in text else [],
+        check=check,
+        repo=root,
+    )
+    if hits:
+        hits[0].message += f" probe={text.strip()[:200]}"
+    return hits
+
+
+def discover_pycircuit_lib_helpers(pyc_root: Path | None = None) -> list[Path]:
+    """pycircuit/<layer>/lib/**/*.py — not leaves; splice-scan only."""
+    root = pyc_root or (REPO_ROOT / "pycircuit")
+    out: list[Path] = []
+    if not root.is_dir():
+        return out
+    for layer in discover_layers(root):
+        lib = root / layer / "lib"
+        if not lib.is_dir():
+            continue
+        for path in sorted(lib.rglob("*.py")):
+            out.append(path)
+    return out
+
+
+def discover_pycircuit_leaves(pyc_root: Path | None = None) -> list[dict[str, Any]]:
+    """Leaves from pycircuit/<layer>/*.py only (not lib/, not __init__.py)."""
+    root = pyc_root or (REPO_ROOT / "pycircuit")
     skip_py = {"__init__.py", "emit.py", "selfcheck.py"}
     leaves: list[dict[str, Any]] = []
+    if not root.is_dir():
+        return leaves
     for layer in discover_layers(root):
-        for path in sorted((root / layer).glob("*.py")):
+        layer_dir = root / layer
+        if not layer_dir.is_dir():
+            continue
+        for path in sorted(layer_dir.glob("*.py")):
             if path.name in skip_py:
+                continue
+            if path.parent.name == "lib":
                 continue
             table = parse_variant_table(path)
             rtl_names = discover_rtl_variants(layer, path.stem)
@@ -1869,17 +2057,49 @@ def collect_layer_netlists(rtl_root: Path) -> dict[str, Path]:
     return out
 
 
-def parse_ports(path: Path) -> list[tuple[str, str]]:
-    """Return (direction, name) in declaration order."""
+PORT_DECL_RE = re.compile(
+    r"\b(input|output|inout)\b"
+    r"(?:\s+(?:wire|reg|logic|signed))*"
+    r"(?:\s*(\[[^\]]+\]))?"
+    r"\s*([A-Za-z_][A-Za-z0-9_]*)",
+    re.I,
+)
+
+
+def packed_width(packed: str) -> int:
+    """Bits in a packed range like ``[15:0]`` / ``[108:0]``. Scalar → 1."""
+    text = (packed or "").strip()
+    if not text:
+        return 1
+    m = re.fullmatch(r"\[\s*(\d+)\s*:\s*(\d+)\s*\]", text)
+    if not m:
+        return 1
+    hi, lo = int(m.group(1)), int(m.group(2))
+    return abs(hi - lo) + 1
+
+
+def parse_port_decls(path: Path) -> list[tuple[str, str, str]]:
+    """Return (direction, name, packed_range) in declaration order.
+
+    packed_range is '' for a 1-bit port or '[15:0]' (including brackets).
+    """
     text = strip_verilog_comments(path.read_text(encoding="utf-8", errors="replace"))
     skip = {"input", "output", "inout", "wire", "reg", "logic", "signed"}
-    ports: list[tuple[str, str]] = []
-    for kind, blob in PORT_CHUNK_RE.findall(text):
-        for name in PORT_IDENT_RE.findall(blob):
-            if name.lower() in skip:
-                continue
-            ports.append((kind.lower(), name))
+    ports: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for kind, packed, name in PORT_DECL_RE.findall(text):
+        if name.lower() in skip:
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        ports.append((kind.lower(), name, packed or ""))
     return ports
+
+
+def parse_ports(path: Path) -> list[tuple[str, str]]:
+    """Return (direction, name) in declaration order."""
+    return [(kind, name) for kind, name, _packed in parse_port_decls(path)]
 
 
 def collect_blackbox_findings(check: str = "lint") -> list[Finding]:

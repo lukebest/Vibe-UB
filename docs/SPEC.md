@@ -120,6 +120,16 @@ PMA 模型在仿真里实例化，与 PCS 的边界是 M1 的 **PHY 数字/模�
 
 现有 `rtl/pcs/ub_pcs_lmsm.v` 骨架不代表规范 LMSM，M1 以 §6.1 为准重写。
 
+**参数展开为固定网表（已定）：** pycc 按参数集产出固定网表：一套参数一份模块，常量在生成期写入，模块内无 Verilog `parameter`。叶子源码自带 tag → 参数值表，`scripts/emit_rtl.py` 按表逐条生成。只有一套参数的叶子，模块名即为 `<leaf>`。上层按配置例化对应变体。
+
+| 对象 | 约定 |
+| --- | --- |
+| 模块名与文件名 | `<leaf>_<tag>`。例：`ub_pcs_lane_dist_x4` / `ub_pcs_lane_dist_x8` |
+| 产品网表 | `rtl/<blk>/<leaf>_<tag>.v` |
+| 钩子网表 | 同名，放 `rtl/<blk>/hooks/`（§11） |
+
+用占位值生成的网表（例如扰码抽头 / 种子仍待定，见 §13）tag 后缀 `_placeholder`，供 lint / TB 使用；PRODUCT 只收录已闭合参数的变体。是否提交占位变体由 PM 定。
+
 ### 2.3 PMA 模型边界
 
 PCS 交给 PMA 的是 **已按 8-bit 符号分发到各 lane 的并行比特**（见 UB-PHY §3.2.2.3、§3.2.5）。下列功能 **不在 PCS**：

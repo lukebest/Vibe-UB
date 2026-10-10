@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -829,8 +830,35 @@ def test_equiv_real_csr_tlb() -> None:
             # (structurally different pycc + mem stub). Ports are the gate.
 
 
+def _shuffle_bcrc_ports(src: Path, dest: Path) -> None:
+    """Same gold body, port list reordered so order-based cec would see a different AIGER."""
+    text = src.read_text(encoding="utf-8")
+    shuffled = (
+        "module ub_dll_bcrc (\n"
+        "  output reg          done,\n"
+        "  input  wire         last,\n"
+        "  output reg  [31:0]  crc_word,\n"
+        "  input  wire [159:0] data_in,\n"
+        "  input  wire         valid_in,\n"
+        "  input  wire         start,\n"
+        "  input  wire         rst_pyc,\n"
+        "  input  wire         core_clk\n"
+        ");"
+    )
+    new, n = re.subn(
+        r"module\s+ub_dll_bcrc\s*\([^)]*\);",
+        shuffled,
+        text,
+        count=1,
+        flags=re.S,
+    )
+    if n != 1:
+        raise SystemExit(f"shuffle rewrite failed n={n}")
+    dest.write_text(new, encoding="utf-8")
+
+
 def test_equiv_ref_regpair() -> None:
-    """GATE-EQY-004 (4): gold-vs-gold PASS; extra-reg and last-carry FAIL."""
+    """GATE-EQY-004 (4): gold-vs-gold (+ shuffled ports) PASS; fakes and omitted rp_d FAIL."""
     root = Path(__file__).resolve().parents[2]
     script = root / "scripts" / "gate" / "equiv_ref.sh"
     gold = root / "formal" / "dll" / "ref" / "ub_dll_bcrc.sv"
@@ -845,6 +873,23 @@ def test_equiv_ref_regpair() -> None:
         _fail("equiv-ref-regpair-gold", (good.stdout or "")[-400:])
     print("SELFTEST PASS equiv-ref-regpair-gold: gold vs gold")
 
+    with tempfile.TemporaryDirectory() as td:
+        shuffled = Path(td) / "bcrc_port_shuffle.sv"
+        _shuffle_bcrc_ports(gold, shuffled)
+        shuf = run_cmd([str(script), "ub_dll_bcrc", str(shuffled)], env=env, timeout=90)
+        if shuf.returncode != 0 or "equiv_ref PASS" not in (shuf.stdout or ""):
+            _fail("equiv-ref-regpair-shuffle", (shuf.stdout or "")[-400:])
+    print("SELFTEST PASS equiv-ref-regpair-shuffle: shuffled port order")
+
+    omit_env = {**env, "EQUIV_REGPAIR_OMIT_PO": "rp_d_crc", "EQUIV_REGPAIR_OMIT_SIDE": "gold"}
+    omit = run_cmd([str(script), "ub_dll_bcrc", str(gold)], env=omit_env, timeout=90)
+    omit_out = omit.stdout or ""
+    if omit.returncode == 0:
+        _fail("equiv-ref-regpair-omit-po", "omitted rp_d_crc must fail")
+    if "ports=FAIL" not in omit_out or "rp_d_crc" not in omit_out:
+        _fail("equiv-ref-regpair-omit-po", omit_out[-400:])
+    print("SELFTEST PASS equiv-ref-regpair-omit-po: missing rp_d_crc listed")
+
     bad_extra = run_cmd([str(script), "ub_dll_bcrc", str(extra)], env=env, timeout=90)
     if bad_extra.returncode == 0:
         _fail("equiv-ref-regpair-extra", "extra-reg fake must fail")
@@ -853,8 +898,11 @@ def test_equiv_ref_regpair() -> None:
     print("SELFTEST PASS equiv-ref-regpair-extra: unmatched flop")
 
     bad_carry = run_cmd([str(script), "ub_dll_bcrc", str(carry)], env=env, timeout=90)
+    carry_out = bad_carry.stdout or ""
     if bad_carry.returncode == 0:
         _fail("equiv-ref-regpair-carry", "carry-after-last fake must fail")
+    if "rp_d_" not in carry_out and "crc_word" not in carry_out:
+        _fail("equiv-ref-regpair-carry", f"expected witness on rp_d_* or output: {carry_out[-400:]}")
     print("SELFTEST PASS equiv-ref-regpair-carry: last remainder carried")
 
 

@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Register-pair + ABC cec compare for scripts/gate/equiv_ref.sh.
+"""Register-pair compare for scripts/gate/equiv_ref.sh.
 
 After flatten, pair FFs by normalized Q net name (no hand-written map).
-Each pair: Q is a shared PI, D is a PO. Then ABC cec / &cec on the
-combinational remainder. Reset kind / polarity / value are checked
-separately. All three must hold for PASS.
+Cut each pair: Q → shared PI `rp_q_<name>`, D → PO `rp_d_<name>`.
+Strip clock (and async-reset used by the cut FFs) so both sides share one
+named interface; leftover original ports keep their names. Name-set
+mismatch is FAIL. Prove with a single Yosys `miter -equiv` (pairs by port
+name, not order) plus combo `sat -prove-asserts` or ABC on that miter.
+Reset kind / polarity / value are checked separately. All must hold.
 """
 
 from __future__ import annotations
@@ -29,6 +32,14 @@ FF_TYPES = {
     "$dffsr",
     "$dffsre",
     "$aldff",
+}
+
+ASYNC_RST_PINS = {
+    "$adff": ("ARST",),
+    "$adffe": ("ARST",),
+    "$dffsr": ("CLR", "SET"),
+    "$dffsre": ("CLR", "SET"),
+    "$aldff": ("ALOAD",),
 }
 
 DELETE_SEL = " ".join(f"t:{t}" for t in sorted(FF_TYPES))
@@ -81,7 +92,7 @@ def _bits_tuple(bits: list) -> tuple:
 
 def _net_by_bits(mod: dict, bits: list) -> str | None:
     target = _bits_tuple(bits)
-    scored: list[tuple[int, int, str]] = []
+    scored: list[tuple[int, int, int, str]] = []
     for name, info in (mod.get("netnames") or {}).items():
         nb = _bits_tuple(info.get("bits") or [])
         if nb != target:
@@ -92,7 +103,6 @@ def _net_by_bits(mod: dict, bits: list) -> str | None:
     if scored:
         scored.sort()
         return scored[0][3]
-    # Slice of a wider named net: keep the covering user name.
     for name, info in (mod.get("netnames") or {}).items():
         if info.get("hide_name"):
             continue
@@ -116,6 +126,8 @@ class Flop:
     polarity: int | None
     value: int | None
     q_bits: tuple = field(default_factory=tuple)
+    clk_name: str | None = None
+    async_rst: tuple[str, ...] = ()
 
 
 def _ff_reset(ftype: str, params: dict) -> tuple[str, int | None, int | None]:
@@ -154,6 +166,12 @@ def extract_flops(mod: dict) -> list[Flop]:
         if not key:
             key = normalize_reg_name(cname) or f"cell_{len(found)}"
         kind, pol, val = _ff_reset(ftype, params)
+        clk_name = _net_by_bits(mod, conns.get("CLK") or [])
+        arst: list[str] = []
+        for pin in ASYNC_RST_PINS.get(ftype, ()):
+            n = _net_by_bits(mod, conns.get(pin) or [])
+            if n:
+                arst.append(n)
         found.append(
             Flop(
                 cell=cname,
@@ -166,6 +184,8 @@ def extract_flops(mod: dict) -> list[Flop]:
                 polarity=pol,
                 value=val,
                 q_bits=_bits_tuple(conns.get("Q") or []),
+                clk_name=clk_name,
+                async_rst=tuple(arst),
             )
         )
     return found
@@ -241,20 +261,80 @@ def eval_d_under_reset(rtlil: Path, top: str, d_names: list[str], rst: str, acti
 def abc_kind(log: str) -> str:
     if re.search(r"Networks are equivalent", log):
         return "equivalent"
-    if re.search(r"NOT EQUIVALENT|Verification failed", log, re.I):
+    if re.search(r"\bUNSATISFIABLE\b", log) and not re.search(r"NOT EQUIVALENT", log, re.I):
+        return "equivalent"
+    if re.search(r"NOT EQUIVALENT|Verification failed|\bSATISFIABLE\b", log, re.I):
         return "not_equivalent"
     return "unproven"
 
 
-def cec_line(log: str) -> str:
+def sat_kind(log: str) -> str:
+    if re.search(r"time ?out|timed out", log, re.I):
+        return "unproven"
+    if re.search(r"SAT [Mm]odel|Assert failed|failed to prove|SATISFIABLE", log, re.I):
+        return "not_equivalent"
+    if re.search(r"proved|UNSAT|verified successfully|successful proof", log, re.I):
+        return "equivalent"
+    return "unproven"
+
+
+def conclusion_line(log: str) -> str:
+    pats = (
+        r"Networks are equivalent",
+        r"NOT EQUIVALENT",
+        r"Verification failed",
+        r"Assert failed",
+        r"SAT [Mm]odel",
+        r"successful proof",
+        r"proved",
+        r"UNSAT",
+        r"SATISFIABLE",
+        r"timeout",
+    )
     for line in log.splitlines():
-        if re.search(r"Networks are equivalent|NOT EQUIVALENT|Verification failed", line, re.I):
+        if re.search("|".join(pats), line, re.I):
             return line.strip()
     tail = [ln.strip() for ln in log.splitlines() if ln.strip()]
-    return tail[-1] if tail else "(no abc conclusion line)"
+    return tail[-1] if tail else "(no prove conclusion line)"
 
 
-def write_cut_script(path: Path, top: str, pairs: list[tuple[str, Flop]], src_il: Path, dst_il: Path) -> None:
+def port_sets(mod: dict) -> tuple[list[str], list[str]]:
+    pi: list[str] = []
+    po: list[str] = []
+    for name, info in (mod.get("ports") or {}).items():
+        direction = info.get("direction")
+        if direction == "input":
+            pi.append(name)
+        elif direction == "output":
+            po.append(name)
+        elif direction == "inout":
+            pi.append(name)
+            po.append(name)
+    return sorted(pi), sorted(po)
+
+
+def strip_ports_for(flops: list[Flop], mod: dict) -> list[str]:
+    """Clock + async-reset PIs used by the cut FFs. Original data ports stay."""
+    ports = set(mod.get("ports") or {})
+    drop: set[str] = set()
+    for ff in flops:
+        if ff.clk_name and ff.clk_name in ports:
+            drop.add(ff.clk_name)
+        for rst in ff.async_rst:
+            if rst in ports:
+                drop.add(rst)
+    return sorted(drop)
+
+
+def write_cut_script(
+    path: Path,
+    top: str,
+    pairs: list[tuple[str, Flop]],
+    src_il: Path,
+    dst_il: Path,
+    dst_json: Path,
+    strip: list[str],
+) -> None:
     lines = [
         f"read_rtlil {src_il}",
         f"cd {top}",
@@ -271,14 +351,28 @@ def write_cut_script(path: Path, top: str, pairs: list[tuple[str, Flop]], src_il
         ]
     lines += [
         f"delete {DELETE_SEL}",
+    ]
+    for name in strip:
+        lines.append(f"delete -input {yosys_id(name)}")
+    lines += [
         "opt_clean",
         f"write_rtlil {dst_il}",
+        f"write_json {dst_json}",
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def run_yosys_file(script: Path, tmo: int) -> subprocess.CompletedProcess[str]:
     argv = ["yosys", "-q", "-s", str(script)]
+    if tmo > 0:
+        argv = ["timeout", str(tmo), *argv]
+    return subprocess.run(argv, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
+
+
+def run_yosys_p(script: str, tmo: int, quiet: bool = False) -> subprocess.CompletedProcess[str]:
+    argv = ["yosys", "-p", script]
+    if quiet:
+        argv = ["yosys", "-q", "-p", script]
     if tmo > 0:
         argv = ["timeout", str(tmo), *argv]
     return subprocess.run(argv, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
@@ -291,12 +385,225 @@ def run_abc(cmd: str, tmo: int, abc: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
 
 
+def omit_output(il: Path, top: str, port: str, dst_il: Path, dst_json: Path, tmo: int) -> subprocess.CompletedProcess[str]:
+    ys = (
+        f"read_rtlil {il}\n"
+        f"cd {top}\n"
+        f"delete -output {yosys_id(port)}\n"
+        "opt_clean\n"
+        f"write_rtlil {dst_il}\n"
+        f"write_json {dst_json}\n"
+    )
+    return run_yosys_p(ys, tmo, quiet=True)
+
+
+def print_port_tables(label: str, pi: list[str], po: list[str]) -> None:
+    print(f"equiv_ref REGPAIR {label}_pi={' '.join(pi) if pi else '(none)'}")
+    print(f"equiv_ref REGPAIR {label}_po={' '.join(po) if po else '(none)'}")
+
+
+def report_port_diffs(gold_pi: list[str], gold_po: list[str], gate_pi: list[str], gate_po: list[str]) -> bool:
+    """Return True if name sets match. On mismatch print FAIL + missing names."""
+    g_pi, t_pi = set(gold_pi), set(gate_pi)
+    g_po, t_po = set(gold_po), set(gate_po)
+    ok = g_pi == t_pi and g_po == t_po
+    if ok:
+        print("equiv_ref REGPAIR ports=PASS")
+        return True
+    for name in sorted(g_pi - t_pi):
+        print(f"equiv_ref REGPAIR port_missing side=gate dir=pi name={name}")
+    for name in sorted(t_pi - g_pi):
+        print(f"equiv_ref REGPAIR port_missing side=gold dir=pi name={name}")
+    for name in sorted(g_po - t_po):
+        print(f"equiv_ref REGPAIR port_missing side=gate dir=po name={name}")
+    for name in sorted(t_po - g_po):
+        print(f"equiv_ref REGPAIR port_missing side=gold dir=po name={name}")
+    print(
+        "equiv_ref REGPAIR ports=FAIL "
+        f"gold_only_pi={','.join(sorted(g_pi - t_pi)) or '-'} "
+        f"gate_only_pi={','.join(sorted(t_pi - g_pi)) or '-'} "
+        f"gold_only_po={','.join(sorted(g_po - t_po)) or '-'} "
+        f"gate_only_po={','.join(sorted(t_po - g_po)) or '-'}"
+    )
+    return False
+
+
+def witnesses_from_log(log: str, po_names: list[str]) -> list[str]:
+    found: list[str] = []
+    for name in po_names:
+        if re.search(rf"\b{re.escape(name)}\b", log):
+            found.append(name)
+    for m in re.finditer(r"\b(rp_d_[A-Za-z0-9_]+)\b", log):
+        if m.group(1) not in found:
+            found.append(m.group(1))
+    return found
+
+
+def witnesses_from_sat_json(path: Path) -> list[str]:
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    names: list[str] = []
+
+    def _walk(obj: object) -> None:
+        if isinstance(obj, dict):
+            name = obj.get("name") or obj.get("net") or obj.get("signal")
+            val = obj.get("wave") or obj.get("value") or obj.get("data")
+            if isinstance(name, str) and val is not None:
+                text = name if isinstance(val, str) else f"{name}={val}"
+                if re.search(r"rp_d_|cmp_|trigger", name) and re.search(r"[1xX]", str(val)):
+                    names.append(name)
+                elif isinstance(val, str) and "1" in val and name.startswith("cmp_"):
+                    names.append(name)
+            for v in obj.values():
+                _walk(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                _walk(v)
+
+    _walk(data)
+    return names
+
+
+def find_sat_witness(tmp: Path, tmo: int, abc: str, po_names: list[str]) -> list[str]:
+    """Name-paired per-PO trigger miter + ABC: which POs / rp_d_* differ."""
+    found: list[str] = []
+    for po in po_names:
+        others = [n for n in po_names if n != po]
+        drop_g = "\n".join(f"delete -output {yosys_id(n)}" for n in others)
+        ys = tmp / f"wit_{po}.ys"
+        aig = tmp / f"wit_{po}.aig"
+        g1 = tmp / f"wit_{po}_gold.il"
+        t1 = tmp / f"wit_{po}_gate.il"
+        ys.write_text(
+            f"read_rtlil {tmp / 'gold_cut.il'}\n"
+            "hierarchy -top gold\n"
+            f"cd gold\n{drop_g}\n"
+            f"write_rtlil {g1}\n"
+            "design -reset\n"
+            f"read_rtlil {tmp / 'gate_cut.il'}\n"
+            "hierarchy -top gate\n"
+            f"cd gate\n{drop_g}\n"
+            f"write_rtlil {t1}\n"
+            "design -reset\n"
+            f"read_rtlil {g1}\n"
+            f"read_rtlil {t1}\n"
+            "miter -equiv -flatten -make_assert gold gate wit\n"
+            "hierarchy -top wit\n"
+            "delete t:$assert t:$assume t:$live t:$fair\n"
+            "techmap; opt; aigmap; opt\n"
+            f"write_aiger -symbols -miter {aig}\n",
+            encoding="utf-8",
+        )
+        built = run_yosys_file(ys, tmo)
+        if built.returncode != 0 or not aig.is_file():
+            print(built.stdout or "")
+            continue
+        proc = run_abc(f"&r {aig}; &cec -m -v -T {min(tmo, 15) if tmo else 15}", tmo, abc)
+        log = proc.stdout or ""
+        kind = abc_kind(log)
+        print(f"equiv_ref REGPAIR po_cec name={po} result={kind} line={conclusion_line(log)}")
+        if kind != "equivalent":
+            found.append(po)
+    return found
+
+
+def prove_miter(tmp: Path, tmo: int, abc: str, po_names: list[str]) -> tuple[str, str, str, list[str]]:
+    """Name-paired miter, then ABC / sat on that single miter. No order-cec."""
+    build = tmp / "miter_build.ys"
+    build.write_text(
+        f"read_rtlil {tmp / 'gold_cut.il'}\n"
+        f"read_rtlil {tmp / 'gate_cut.il'}\n"
+        "miter -equiv -flatten -make_assert gold gate miter\n"
+        "hierarchy -top miter\n"
+        f"write_rtlil {tmp / 'miter.il'}\n"
+        f"write_json {tmp / 'miter.json'}\n",
+        encoding="utf-8",
+    )
+    built = run_yosys_file(build, tmo)
+    if built.returncode != 0 or not (tmp / "miter.il").is_file():
+        print(built.stdout or "")
+        return "unproven", "miter-build", "miter build failed", []
+    # write_aiger -miter rejects $assert; keep them for sat, strip for ABC.
+    aig_ys = tmp / "miter_aig.ys"
+    aig_ys.write_text(
+        f"read_rtlil {tmp / 'miter.il'}\n"
+        "hierarchy -top miter\n"
+        "delete t:$assert t:$assume t:$live t:$fair\n"
+        "techmap; opt; aigmap; opt\n"
+        f"write_aiger -symbols -miter {tmp / 'miter.aig'}\n",
+        encoding="utf-8",
+    )
+    aig = run_yosys_file(aig_ys, tmo)
+    if aig.returncode != 0:
+        print(aig.stdout or "")
+
+    last_log = ""
+    last_used = "miter-build"
+    if (tmp / "miter.aig").is_file():
+        abc_cmds = [
+            ("abc-&cec", f"&r {tmp / 'miter.aig'}; &cec -m -v -T {tmo}"),
+            ("abc-iprove", f"read {tmp / 'miter.aig'}; iprove"),
+            ("abc-dprove", f"read {tmp / 'miter.aig'}; dprove"),
+        ]
+        for used, cmd in abc_cmds:
+            proc = run_abc(cmd, tmo, abc)
+            log = proc.stdout or ""
+            print(log)
+            last_log = log
+            last_used = used
+            kind = abc_kind(log)
+            if kind == "unproven" and re.search(r"SATISFIABLE", log, re.I):
+                kind = "not_equivalent"
+            if kind == "equivalent":
+                return kind, used, conclusion_line(log), []
+            if kind == "not_equivalent":
+                wit = witnesses_from_log(log, po_names) or find_sat_witness(tmp, tmo, abc, po_names)
+                return kind, used, conclusion_line(log), wit
+
+    sat_script = (
+        f"read_rtlil {tmp / 'miter.il'}\n"
+        "hierarchy -top miter\n"
+        f"sat -verify -prove-asserts -timeout {tmo} "
+        f"-dump_json {tmp / 'sat_cex.json'}\n"
+    )
+    sat = run_yosys_p(sat_script, tmo + 5 if tmo > 0 else 0)
+    sat_log = sat.stdout or ""
+    print(sat_log)
+    kind = sat_kind(sat_log)
+    if sat.returncode == 124 or re.search(r"time ?out|timed out", sat_log, re.I):
+        kind = "unproven"
+    elif sat.returncode == 0 and kind == "unproven":
+        kind = "equivalent"
+    elif sat.returncode != 0 and kind == "unproven":
+        kind = "not_equivalent"
+    last_log = sat_log
+    last_used = "sat-prove-asserts"
+    if kind == "equivalent":
+        return kind, last_used, conclusion_line(sat_log), []
+    if kind == "not_equivalent":
+        wit = witnesses_from_sat_json(tmp / "sat_cex.json") or find_sat_witness(tmp, tmo, abc, po_names)
+        if not wit:
+            wit = witnesses_from_log(sat_log, po_names)
+        return kind, last_used, conclusion_line(sat_log), wit
+    return "unproven", last_used, conclusion_line(last_log), witnesses_from_log(last_log, po_names)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--leaf", required=True)
     ap.add_argument("--tmp", required=True, type=Path)
     ap.add_argument("--abc", default="yosys-abc")
     ap.add_argument("--tmo", type=int, default=90)
+    ap.add_argument(
+        "--omit-po",
+        default="",
+        help="Self-test: drop this output on --omit-side after the cut (e.g. rp_d_crc).",
+    )
+    ap.add_argument("--omit-side", default="gold", choices=("gold", "gate"))
     args = ap.parse_args()
     tmp = args.tmp
     gold_json = json.loads((tmp / "gold.json").read_text(encoding="utf-8"))
@@ -360,7 +667,6 @@ def main() -> int:
         return 1
     print("equiv_ref REGPAIR pairing=PASS")
 
-    # Reset check: cell kind/polarity/value, plus eval of D when kind is none.
     rst_g, act_g = reset_port(gold_mod)
     rst_t, act_t = reset_port(gate_mod)
     eval_g: dict[str, int] = {}
@@ -409,11 +715,33 @@ def main() -> int:
     else:
         print("equiv_ref REGPAIR reset=FAIL")
 
-    # Combinational cec after cutting paired FFs (Q=PI, D=PO).
+    gold_strip = strip_ports_for([g for _k, g, _t in pairs], gold_mod)
+    gate_strip = strip_ports_for([t for _k, _g, t in pairs], gate_mod)
+    print(f"equiv_ref REGPAIR strip_gold={' '.join(gold_strip) if gold_strip else '(none)'}")
+    print(f"equiv_ref REGPAIR strip_gate={' '.join(gate_strip) if gate_strip else '(none)'}")
+
     gold_cut = tmp / "gold_cut.il"
     gate_cut = tmp / "gate_cut.il"
-    write_cut_script(tmp / "cut_gold.ys", "gold", [(k, g) for k, g, _t in pairs], tmp / "gold.il", gold_cut)
-    write_cut_script(tmp / "cut_gate.ys", "gate", [(k, t) for k, _g, t in pairs], tmp / "gate.il", gate_cut)
+    gold_cut_json = tmp / "gold_cut.json"
+    gate_cut_json = tmp / "gate_cut.json"
+    write_cut_script(
+        tmp / "cut_gold.ys",
+        "gold",
+        [(k, g) for k, g, _t in pairs],
+        tmp / "gold.il",
+        gold_cut,
+        gold_cut_json,
+        gold_strip,
+    )
+    write_cut_script(
+        tmp / "cut_gate.ys",
+        "gate",
+        [(k, t) for k, _g, t in pairs],
+        tmp / "gate.il",
+        gate_cut,
+        gate_cut_json,
+        gate_strip,
+    )
     gcut = run_yosys_file(tmp / "cut_gold.ys", args.tmo)
     tcut = run_yosys_file(tmp / "cut_gate.ys", args.tmo)
     if gcut.returncode != 0 or tcut.returncode != 0:
@@ -422,54 +750,38 @@ def main() -> int:
         print("equiv_ref REGPAIR method=regpair result=unproven")
         return 1
 
-    def _write_aig(src: Path, top: str, dest: Path) -> subprocess.CompletedProcess[str]:
-        ys = tmp / f"aig_{top}.ys"
-        ys.write_text(
-            f"read_rtlil {src}\nhierarchy -top {top}\n"
-            f"techmap; opt; dffunmap; aigmap; opt\n"
-            f"write_aiger -symbols {dest}\n",
-            encoding="utf-8",
-        )
-        return run_yosys_file(ys, args.tmo)
+    omit_po = (args.omit_po or "").strip()
+    if omit_po:
+        side = args.omit_side
+        src = gold_cut if side == "gold" else gate_cut
+        dst_il = tmp / f"{side}_cut.il"
+        dst_js = tmp / f"{side}_cut.json"
+        omitted = omit_output(src, side, omit_po, dst_il, dst_js, args.tmo)
+        if omitted.returncode != 0:
+            print(omitted.stdout or "")
+            print(f"equiv_ref REGPAIR cec_line=omit-po {omit_po} failed")
+            print("equiv_ref REGPAIR method=regpair result=unproven")
+            return 1
+        print(f"equiv_ref REGPAIR omit_po={omit_po} side={side}")
 
-    g_aig = _write_aig(gold_cut, "gold", tmp / "gold.aig")
-    t_aig = _write_aig(gate_cut, "gate", tmp / "gate.aig")
-    miter_ys = tmp / "miter.ys"
-    miter_ys.write_text(
-        f"read_rtlil {gold_cut}\nread_rtlil {gate_cut}\n"
-        f"miter -equiv -flatten gold gate miter\n"
-        f"hierarchy -top miter\n"
-        f"techmap; opt; dffunmap; aigmap; opt\n"
-        f"write_aiger -symbols -miter {tmp / 'miter.aig'}\n",
-        encoding="utf-8",
-    )
-    aig = run_yosys_file(miter_ys, args.tmo)
-    if g_aig.returncode != 0 or t_aig.returncode != 0:
-        print((g_aig.stdout or "") + (t_aig.stdout or ""))
-        print("equiv_ref REGPAIR cec_line=AIGER write failed")
-        print("equiv_ref REGPAIR method=regpair result=unproven")
-        return 1
-    if aig.returncode != 0 or not (tmp / "gold.aig").is_file() or not (tmp / "gate.aig").is_file():
-        print(aig.stdout or "")
-        print("equiv_ref REGPAIR cec_line=AIGER write failed")
-        print("equiv_ref REGPAIR method=regpair result=unproven")
+    gold_cut_mod = json.loads(gold_cut_json.read_text(encoding="utf-8"))["modules"]["gold"]
+    gate_cut_mod = json.loads(gate_cut_json.read_text(encoding="utf-8"))["modules"]["gate"]
+    gold_pi, gold_po = port_sets(gold_cut_mod)
+    gate_pi, gate_po = port_sets(gate_cut_mod)
+    print_port_tables("gold", gold_pi, gold_po)
+    print_port_tables("gate", gate_pi, gate_po)
+    ports_ok = report_port_diffs(gold_pi, gold_po, gate_pi, gate_po)
+    if not ports_ok:
+        print("equiv_ref REGPAIR cec_line=skipped (port name sets differ)")
+        print("equiv_ref REGPAIR method=regpair result=ports_fail")
         return 1
 
-    abc_bin = args.abc
-    used = "cec"
-    proc = run_abc(f"cec -T {args.tmo} -v {tmp / 'gold.aig'} {tmp / 'gate.aig'}", args.tmo, abc_bin)
-    log = proc.stdout or ""
-    print(log)
-    kind = abc_kind(log)
-    if kind == "unproven":
-        used = "&cec"
-        proc = run_abc(f"&r {tmp / 'miter.aig'}; &cec -m -v -T {args.tmo}", args.tmo, abc_bin)
-        log = proc.stdout or ""
-        print(log)
-        kind = abc_kind(log)
-
-    line = cec_line(log)
+    po_names = sorted(set(gold_po) | set(gate_po))
+    kind, used, line, wit = prove_miter(tmp, args.tmo, args.abc, po_names)
+    if wit:
+        print(f"equiv_ref REGPAIR witness={' '.join(wit)}")
     print(f"equiv_ref REGPAIR cec_line={line}")
+    print(f"equiv_ref REGPAIR prove_method={used}")
     print(f"equiv_ref REGPAIR method={used} result={kind}")
 
     if kind != "equivalent":
@@ -477,6 +789,7 @@ def main() -> int:
     if not reset_ok:
         return 1
     return 0
+
 
 
 if __name__ == "__main__":

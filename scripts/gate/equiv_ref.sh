@@ -7,7 +7,7 @@
 #   (1) equiv_make / equiv_simple / equiv_induct
 #   (2) miter + sat -tempinduct
 #   (3) miter + ABC dsec (or &cec after FFs are ports)
-#   (4) register pairing by normalized Q name + ABC cec + reset check
+#   (4) register pairing by normalized Q name + name-paired miter + reset check
 # Affine next-state basis is not a recognized pass (premise unproven).
 set -euo pipefail
 
@@ -465,11 +465,11 @@ if has_method abc; then
   try_abc || true
 fi
 
-# 4) Auto register pairing (normalized Q names) + ABC cec + reset check.
-# All three must hold. Unmatched / width mismatch / reset mismatch / cec ≠
-# is a conclusive FAIL for this method (listed, no hand-filled pair table).
+# 4) Auto register pairing (normalized Q names) + name-paired miter + reset.
+# Pairing / port-name-set / reset / prove must all hold. Unmatched / width
+# mismatch / leftover-PI name mismatch / reset mismatch / miter ⊭ is FAIL.
 try_regpair() {
-  local t0 tmp abc_bin py
+  local t0 tmp abc_bin py extra=()
   t0="$(sec_now)"
   abc_bin="$(command -v yosys-abc || true)"
   py="$ROOT/scripts/gate/equiv_regpair.py"
@@ -484,7 +484,11 @@ try_regpair() {
     return 1
   fi
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/equiv_ref_regpair.XXXXXX")"
-  echo "equiv_ref note: trying register pairing + ABC cec|&cec (yosys-abc)"
+  echo "equiv_ref note: trying register pairing + name-paired miter (sat/ABC)"
+  if [[ -n "${EQUIV_REGPAIR_OMIT_PO:-}" ]]; then
+    extra+=(--omit-po "$EQUIV_REGPAIR_OMIT_PO")
+    extra+=(--omit-side "${EQUIV_REGPAIR_OMIT_SIDE:-gold}")
+  fi
   local dump="${prep_gold}${prep_gate}
 design -load gold
 autoname
@@ -511,13 +515,13 @@ write_rtlil ${tmp}/gate.il
     return 1
   fi
   set +e
-  python3 "$py" --leaf "$LEAF" --tmp "$tmp" --abc "$abc_bin" --tmo "$EQUIV_TMO"
+  python3 "$py" --leaf "$LEAF" --tmp "$tmp" --abc "$abc_bin" --tmo "$EQUIV_TMO" "${extra[@]}"
   local prc=$?
   set -e
   if [[ "$prc" -eq 0 ]]; then
     log_time "regpair" "$t0" "equivalent"
     rm -rf "$tmp"
-    pass_method "regpair + ABC cec (auto Q-name pairing; reset checked)"
+    pass_method "regpair + miter -equiv -make_assert + sat/ABC (name-paired; reset checked)"
   fi
   if [[ "$prc" -eq 124 ]]; then
     log_time "regpair" "$t0" "timeout"
@@ -527,7 +531,7 @@ write_rtlil ${tmp}/gate.il
   log_time "regpair" "$t0" "not_equivalent"
   rm -rf "$tmp"
   echo "equiv_ref METHOD=regpair" >&2
-  echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (regpair: pairing/reset/cec)" >&2
+  echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (regpair: pairing/ports/reset/prove)" >&2
   exit 1
 }
 

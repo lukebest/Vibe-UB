@@ -105,5 +105,61 @@ else
 fi
 rm -f "$gold_log"
 
+echo "=== expect PASS: gold vs shuffled-port gold (regpair) ==="
+shuf_sv="$(mktemp --suffix=_bcrc_shuffle.sv)"
+python3 - "$GOLD" "$shuf_sv" <<'PY'
+import re, sys
+from pathlib import Path
+src, dest = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text(encoding="utf-8")
+shuffled = (
+    "module ub_dll_bcrc (\n"
+    "  output reg          done,\n"
+    "  input  wire         last,\n"
+    "  output reg  [31:0]  crc_word,\n"
+    "  input  wire [159:0] data_in,\n"
+    "  input  wire         valid_in,\n"
+    "  input  wire         start,\n"
+    "  input  wire         rst_pyc,\n"
+    "  input  wire         core_clk\n"
+    ");"
+)
+new, n = re.subn(r"module\s+ub_dll_bcrc\s*\([^)]*\);", shuffled, text, count=1, flags=re.S)
+if n != 1:
+    raise SystemExit(f"shuffle rewrite failed n={n}")
+dest.write_text(new, encoding="utf-8")
+PY
+shuf_log="$(mktemp)"
+set +e
+env EQUIV_METHODS=regpair EQUIV_TMO="${EQUIV_TMO:-30}" \
+  "$ROOT/scripts/gate/equiv_ref.sh" ub_dll_bcrc "$shuf_sv" >"$shuf_log" 2>&1
+shuf_rc=$?
+set -e
+tail -n 20 "$shuf_log"
+if [[ "$shuf_rc" -ne 0 ]] || ! grep -q 'equiv_ref PASS' "$shuf_log"; then
+  echo "NEG_MISS gold-vs-shuffle (regpair) should pass rc=$shuf_rc"
+  fail=$((fail + 1))
+else
+  echo "NEG_OK gold-vs-shuffle (regpair) rc=$shuf_rc"
+fi
+rm -f "$shuf_sv" "$shuf_log"
+
+echo "=== expect FAIL: omit rp_d_crc on gold (regpair ports) ==="
+omit_log="$(mktemp)"
+set +e
+env EQUIV_METHODS=regpair EQUIV_TMO="${EQUIV_TMO:-30}" \
+  EQUIV_REGPAIR_OMIT_PO=rp_d_crc EQUIV_REGPAIR_OMIT_SIDE=gold \
+  "$ROOT/scripts/gate/equiv_ref.sh" ub_dll_bcrc "$GOLD" >"$omit_log" 2>&1
+omit_rc=$?
+set -e
+tail -n 20 "$omit_log"
+if [[ "$omit_rc" -eq 0 ]] || ! grep -q 'ports=FAIL' "$omit_log" || ! grep -q 'rp_d_crc' "$omit_log"; then
+  echo "NEG_MISS omit-rp_d_crc should ports=FAIL and list rp_d_crc rc=$omit_rc"
+  fail=$((fail + 1))
+else
+  echo "NEG_OK omit-rp_d_crc (regpair) rc=$omit_rc"
+fi
+rm -f "$omit_log"
+
 echo "=== bcrc negatives miss=$fail ==="
 exit "$fail"

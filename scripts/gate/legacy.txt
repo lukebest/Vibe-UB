@@ -11,8 +11,6 @@
 # Do not list pyCircuit PRODUCT/HOOKS or scripts/gate/handwritten.yml cells.
 # CODEOWNERS: this file is gatekeeper-owned.
 
-rtl/ub_controller_tx.v
-rtl/ub_controller_rx.v
 rtl/common/ub_gf_math.vh
 rtl/pcs/ub_pcs_fec_enc.v
 rtl/pcs/ub_pcs_fec_dec.v
@@ -26,7 +24,5 @@ rtl/pcs/ub_pcs_lane_dedist.v
 rtl/pcs/ub_pcs_gray_coder.v
 rtl/pcs/ub_pcs_gray_decoder.v
 rtl/pcs/ub_pcs_lmsm.v
-rtl/dll/ub_dll_crc32.v
-rtl/dll/ub_dll_crc_check.v
 rtl/dll/ub_dll_reassembler.v
 rtl/dll/ub_dll_segmenter.v

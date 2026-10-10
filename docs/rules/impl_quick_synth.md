@@ -37,7 +37,7 @@
    - PRODUCT：`rtl/<block>/<leaf>_<tag>.v`（白名单 `.sv` 同样）。
    - HOOKS：同名，放 `rtl/<block>/hooks/`，作次行。生成期展开，Verilog 里无 `` `ifdef ``。
    - `_placeholder` 变体（用占位值生成、仅 lint / TB）进 **单独表**，**不计入 PRODUCT 面积合计**。
-   - 待删除遗留：`ub_dll_crc32`、`ub_dll_crc_check`、`ub_controller_tx`、`ub_controller_rx` 只进 **「待删除 / to be deleted」** 行，**不综合、不进合计、不对 baseline**。
+   - 待删除遗留：`TO_BE_DELETED` 为空。D10 CRC-32 / 旧顶层（`ub_dll_crc32`、`ub_dll_crc_check`、`ub_controller_tx`、`ub_controller_rx`）已从树中删除，不再出现在报告里。
    - 任何 `pyc_*` 模块是库单元（`rtl/pyc_lib/`），不是报告 top。
    - **不**再默认 `chparam`。`--chparam KEY=VAL` / `TOP:KEY=VAL` 只作可选覆盖（模块里若已无该 parameter 则跳过并注明）。
 2. **Yosys**
@@ -120,7 +120,7 @@ OPEN §13 参数已按 §2.2 做成 `_placeholder` 固定网表时：综合进 p
 | IMP-QS-007 | 可用 `--baseline-map` 把迁移后的 `<leaf>_<tag>` 对到旧模块+参数；cells / area / depth / slack 相对 baseline 超 10% 标旗 | 本分册 | 2026-10-10 |
 | IMP-QS-008 | `ub_cmn_mem_1r1w`（及 `scripts/gate/blackbox.yml` 中的模块）depth×width 超过可配阈值（默认 4096 bit）作黑盒，SRAM est 列用标明的 bit 面积公式；小实例按 flop 综合；STA 按 1 拍 registered read。阈值与公式在工艺确定后重看 | 本分册；PR #9 §13 | 2026-10-10 |
 | IMP-QS-009 | Yosys 默认 `-I rtl/pyc_lib`（TOOLCHAIN.lock 钉住的 pyCircuit 原语）。目录未到时回退 `rtl/common` 并 WARN。`--incdir` / `QS_INCDIRS` 为额外路径。`pyc_*` 不作报告 top | 本分册；#21 / #5 | 2026-10-10 |
-| IMP-QS-010 | `ub_dll_crc32` / `ub_dll_crc_check` / `ub_controller_tx` / `ub_controller_rx` 只报「待删除 / to be deleted」，不进合计、不对 baseline | 本分册 | 2026-10-10 |
+| IMP-QS-010 | D10 CRC-32 / 旧顶层已删除；`TO_BE_DELETED` 为空。名单里的名字只报「待删除 / to be deleted」，不进合计、不对 baseline | 本分册 | 2026-10-10 |
 | IMP-QS-011 | abc 映射后默认对高扇出数据网插确定性 `buf_4`/`buf_8` 树（max fanout 16）。`--no-buffer` 可关。每叶子报告缓冲后 max fanout。时钟 / 复位网不插。`logic depth` 不计这些 buf，须与 `--no-buffer` 深度一致；slack/area 仍用缓冲后网表。这是 proxy，用来避免无 wire-load 时单 cell 灌数千 load 的悲观 WNS | 本分册 | 2026-10-10 |
 
 ---

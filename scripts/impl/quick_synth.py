@@ -55,14 +55,8 @@ QOR_FIELD_SHORT = {
 MEM_PRIMITIVE_PREFIX = "ub_cmn_mem_1r1w"
 DEFAULT_SRAM_BIT_THRESHOLD = 4096
 # Legacy files marked for deletion: list only, never totals / baseline compare.
-TO_BE_DELETED = frozenset(
-    {
-        "ub_dll_crc32",
-        "ub_dll_crc_check",
-        "ub_controller_tx",
-        "ub_controller_rx",
-    }
-)
+# D10 CRC-32 / old tops removed; keep the hook empty for future leftovers.
+TO_BE_DELETED = frozenset()
 # Estimate only — not a foundry macro. Revisit when PR #9 §13 sets the node.
 SRAM_UM2_PER_BIT = 0.5
 SRAM_PERIPH_FACTOR = 1.35
@@ -1645,8 +1639,8 @@ def self_check() -> int:
     expect(is_library_cell("pyc_foo"), "any pyc_* is library")
     expect(not is_library_cell("ub_pcs_lane_dist_x4"), "leaf is not library")
     expect(not is_library_cell("ub_pyc_rst_adapt"), "ub_pyc_* is a leaf")
-    expect(is_to_be_deleted("ub_dll_crc32"), "crc32 to-be-deleted")
-    expect(is_to_be_deleted("ub_controller_tx"), "controller_tx to-be-deleted")
+    expect(not is_to_be_deleted("ub_dll_crc32"), "crc32 leftover removed")
+    expect(not is_to_be_deleted("ub_controller_tx"), "old top leftover removed")
     expect(not is_to_be_deleted("ub_dll_bcrc"), "bcrc is live")
     expect(
         count_instances(

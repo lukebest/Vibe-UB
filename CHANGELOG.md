@@ -34,3 +34,7 @@
 - `LMSM_CTRL.START` 更名为 `CTRL.LMSM_START`（REGMAP `0x0000` bit1）。关闭 `STATUS.RETRY_REQ_ST` / `RETRY_ACK_ST` 与 `PARAM_PHY.NUM_LANES_{TX,RX}` 编码（二进制 1/2/4/8）；保留值 RTL 不产出、TB assert。
 - `docs/TEAM.md`、`docs/PROCESS.md`：按 D18 写全层级范围；PROCESS §6 为「全层级推进」。
 - `docs/TEAM.md`、`docs/PROCESS.md`：按 D19 写入三条轨道、轨道所有权，以及「设计-B」/「验证-B」、「设计-C」/「验证-C」新角色。
+- `docs/CODING_STYLE.md` §10：统一存储原语 `ub_cmn_mem_1r1w`（`DEPTH`/`WIDTH`；时钟口 `core_clk`；阵列无复位；1R1W `we/waddr/wdata` + `re/raddr/rdata`；读 1 拍寄存、同址 read-old — Xia 提案，规范未裁定）。pyCircuit 行为模型、pycc 生成、门禁 stub 名单；换宏不改口。线 B RTP 重传/重排、TA 未决与线 C `mem_tlb_w0`…`w3` / `mem_dec_b0`…`b7` / `mem_dec_tlb` 必须例化。页表与 MAPT 在系统内存；PLB 为 FF。
+- SPEC §10.5 + CODING_STYLE §4：§10 点名存储允许 HOOKS-only `tb_<inst>_bd_*`（阵列 we/addr/wdata/re/rdata + 原语外 valid flop 伴随口 `tb_<inst>_bd_vld_*`），`tb_test_mode` 门控；等价检查接低。其它叶子内部缓冲不得加钩子。不改 TEAM/PROCESS/DECISIONS；不改 `regmap.yaml`。
+- SPEC §11 (d) / §10.5 / CODING_STYLE：PRODUCT vs HOOKS 形式等价的规范工具改为 Yosys **`equiv`**（版本见 `TOOLCHAIN.lock`）；eqy 可安装后作可选补充。规则不变：`tb_test_mode=0`，全部 `tb_*` 钩子**输入**（含 `tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`）接低；只比 PRODUCT 已有端口。
+- SPEC §10 / §10.5 / §11 + CODING_STYLE §4：增加叶子只读观察口 `tb_<inst>_obs_*`（与 `tb_<inst>_bd_*` 并列）。仅 HOOKS、只出、不受 `tb_test_mode`、不回灌；未登记 `tb_*` 门禁拒绝；不用 keep 钉内部名。首个叶子 `ub_mem_tlb`：`tb_mem_tlb_obs_lkup_v`、`obs_hit[3:0]`、`obs_vld[3:0]`、`obs_tag_w0`…`w3`（各 60）；四口对齐查找请求下一拍（原语寄存 `rdata` 比较拍）。断言仅 `lkup_v=1`。`formal/mem/` 经 HOOKS bind。PRODUCT / quick-synth 不受影响。

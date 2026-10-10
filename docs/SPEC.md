@@ -1,13 +1,17 @@
-# Vibe-UB M1 功能规格
+# Vibe-UB 功能规格（M1 = batch 1）
 
 | 项 | 值 |
 | --- | --- |
 | 文档状态 | 草案 |
-| 适用范围 | M1：开源 UnifiedBus（UB，灵衢）控制器的 PHY/PCS/PMA 模型边界 / LMSM / DLL |
-| 规范基线 | UB Base Specification Rev 2.0（2025-12-31），见 [DECISIONS.md](DECISIONS.md) D1 |
-| 阶段范围 | [SPEC_INDEX.md](SPEC_INDEX.md) phase 1：第 3 章 PHY/PCS/PMA/LMSM，第 4 章 DLL，附录 D 寄存器子集 |
+| 仓库范围 | 完整 UB 控制器：第 3–11 章 + 规范管理功能（[DECISIONS.md](DECISIONS.md) D18，取代 D2） |
+| 本文件 M1 | 第一批：PHY/PCS/PMA 模型边界 / LMSM / DLL / 附录 D 端口子集 |
+| 规范基线 | UB Base Specification Rev 2.0（2025-12-31），见 D1 |
+| 阶段列 | [SPEC_INDEX.md](SPEC_INDEX.md)：`batch 1 (M1)` / `later batch` / `reference` |
+| 模块清单 | [arch/MODULE_INVENTORY.md](arch/MODULE_INVENTORY.md)（77 模块；S12 / M33 / L32；M1 覆盖 20） |
+| 层间契约 | [arch/LAYER_CONTRACTS.md](arch/LAYER_CONTRACTS.md) |
+| 权衡 | [arch/TRADEOFFS.md](arch/TRADEOFFS.md) **已定 D19**：线 A/B/C；优先 NW→TP→TA→LS；各层必做先；附录 M10 后。本包截止 **Tue 2026-10-13** |
 | 实现语言 | 产品 RTL 一律由 pyCircuit（pyc4.0）生成，见 [CODING_STYLE.md](CODING_STYLE.md)、D5/D6 |
-| 配套寄存器 | [REGMAP.md](REGMAP.md) |
+| 配套寄存器 | [REGMAP.md](REGMAP.md)。后续层一律进 `docs/regmap/regmap.yaml`（PR #11）；本 PR 不改 yaml |
 
 职责与流程见 [TEAM.md](TEAM.md)、[PROCESS.md](PROCESS.md)。
 
@@ -49,7 +53,7 @@ M1 默认参数（船长已确认，出处见 §9）：
 
 | 非目标 | 依据 |
 | --- | --- |
-| 第 5 章 Network Layer 及之后（TP/TA/FUN/MEM/RSC/SEC） | D2；SPEC_INDEX deferred |
+| 第 5–11 章及管理功能（NW / TP / TA / FUN / MEM / RSC / SEC） | D18 全控制器；**不在本文件 M1 实现范围**。按 D19 分线 A/B/C，见 §1.4 |
 | 规范可选特性（D4）：不把「可选」当成 M1 必做 | D4 |
 | M1 多时钟域（独立 `pma_clk`） | 架构已定：单时钟；见 §4.1 |
 | 真实 SerDes / PMA 模拟电路 | D3 |
@@ -63,9 +67,26 @@ M1 默认参数（船长已确认，出处见 §9）：
 
 ### 1.3 与后续里程碑的边界
 
-- M1 对上只提供 **flit + 链路状态**，不解析 Network Header。
-- 附录 D 的 CFG0_BASIC 设备级字段、CFG1_*、CFG0_ROUTE_TABLE：M1 **不实现**；软件若需要完整配置空间，属后续阶段。
+- D18 取代 D2：仓库目标是完整 UB 控制器。**本文件正文（§2 起）仍只写 M1 / batch 1**（PHY+DLL+端口寄存器）。后续层的端口与状态机不在本文件展开，见模块清单与层间契约。
+- M1 对上只提供 **flit + 链路状态**，不解析 Network Header。后续 NW 接同一套 DLL↔NW 口（LAYER_CONTRACTS §1：160 b、1 flit/拍、valid/ready）。
+- 附录 D 的 CFG0_BASIC 设备级字段、CFG1_*、CFG0_ROUTE_TABLE：M1 **不实现**；软件若需要完整配置空间，属 later batch。
 - 测试钩子端口与门控见 §10；验证名 `vibe_lmsm` / `vibe_dll_credit` / `vibe_pcs_tx_pack` 分别对应本规格的 `ub_lmsm`、`ub_dll_credit`、`ub_pcs` TX。
+
+### 1.4 全层级里程碑草案（D19；日期除本包截止外均为未知）
+
+D18：PHY+DLL 第一批。**D19**（17:22）：三线并行；DLL 之后先打通 NW→TP→TA→Load/Store（**争资源时该通路赢**）；各层必做先；附录功能放 M10 之后的扩展里程碑。不含工期估算。不改 DECISIONS/TEAM/PROCESS（PM 另 PR）。
+
+| 里程碑 | 线 | 内容 | 日期 / 状态 |
+| --- | --- | --- | --- |
+| 本架构包 | — | `MODULE_INVENTORY` / `LAYER_CONTRACTS` / `TRADEOFFS` + SPEC_INDEX Phase | **截止 Tue 2026-10-13** |
+| M1 / batch 1 | **A** | PHY + DLL + LMSM + 附录 D 端口子集（本文件 §2 起） | 进行中 |
+| A 续：NW 最小 | **A** | 16-b CNA NTH + SL→VL + 单端口本端/转发判定，接已锁 DLL↔NW 口 | **未知** |
+| **优先通路** | **A∩B**（+ C 的 decoder 最小表） | **NW→TP bypass→TA Read/Write→Load/Store**。争 SRAM / 人手 / 契约带宽时让路给本通路 | **未知** |
+| B 必做第二波 | **B** | RTP / 可靠窗；URMA / Jetty；TA 其余必做操作 | **未知** |
+| C 必做 | **C** | UMMU 全表、RSC 配置/管理/RAS、SEC 场景必做 | **未知** |
+| 扩展 | 延后 | 各层可选（MAY）+ App. E/F/G/H | **M10 之后** |
+
+工艺节点仍未知（PR #9 §13）；面积/时序未定前用 Sky130 作代理，见 TRADEOFFS #1。D4 + D19：各层第一波不把 MAY 当必做。
 
 ---
 

@@ -20,15 +20,24 @@ uvm-python_commit = "96a06eee7dda1edae2013154b3d3756b040c71ad"
 uvm-python_note = "fork of tpoikela/uvm-python 0.4.0"
 
 [pycircuit]
-# D5. Same pin as pycircuit/TOOLCHAIN.lock. TOOLCHAIN.lock on main (PR #6)
-# did not record pyCircuit; this records the frontend used by rtl/csr.
+# Single lock file. Former pycircuit/TOOLCHAIN.lock keys merged here
+# (values already matched; no conflicts). Root keys win.
 repo = "https://github.com/lukebest/pyCircuit"
 commit = "43cc5918e3d09ecc0c814cabef6c1384cb9980ae"
 package = "pycircuit-hisi"
 package_version = "0.1.0"
 release = "pyc4.0"
+# Aliases matching the deleted pycircuit/TOOLCHAIN.lock PYCIRCUIT_* names
+# (and scripts/gate/setup_pycircuit.sh parse_lock keys).
+pycircuit_repo = "https://github.com/lukebest/pyCircuit"
+pycircuit_commit = "43cc5918e3d09ecc0c814cabef6c1384cb9980ae"
+pycircuit_package = "pycircuit-hisi"
+pycircuit_package_version = "0.1.0"
+pycircuit_release = "pyc4.0"
+llvm_lock = "19.1.1"
+mlir_lock = "19.1.1"
 install = "pip install git+https://github.com/lukebest/pyCircuit@43cc5918e3d09ecc0c814cabef6c1384cb9980ae"
-note = "Frontend pip install of this pin. pycc (Circuit→Verilog) needs LLVM 19; PRODUCT .v is compile()+pycc --emit=verilog."
+note = "Frontend pip install of this pin. pycc (Circuit→Verilog) needs LLVM 19.1.1; PRODUCT .v is compile()+pycc --emit=verilog --logic-depth=64."
 
 [simulators]
 # D7: Icarus 12.0 is the pass/fail gate.

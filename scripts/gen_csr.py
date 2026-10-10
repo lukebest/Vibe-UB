@@ -91,11 +91,11 @@ TEST window gating; unmapped ``csr_err``; full-word writes; 1-cycle read.
 Wiring event sources into ``ev_*`` / ``inc_*`` and fanning ``port_rst_pulse``
 to PCS/LMSM/DLL/credit is **outside** this module (parent / ub_controller).
 
-Regenerate: ``python3 scripts/gen_regmap.py``
-Check:      ``python3 scripts/gen_regmap.py --check``
+Regenerate: ``python3 scripts/gen_regmap.py`` then ``python3 scripts/emit_rtl.py``
+Check:      ``python3 scripts/gen_regmap.py --check`` (YAML artifacts + pycc
+``.v`` byte-equality when pycc is on PATH).
 
-Verilog lands in ``rtl/csr/`` via ``scripts/emit_rtl.py`` / ``pycircuit/emit.py``
-(PR #5; not on main — follow-up: register this leaf for PRODUCT and HOOKS).
+Committed Verilog: ``rtl/csr/ub_csr_<tag>.v`` and ``rtl/csr/hooks/ub_csr_<tag>.v``.
 Do not hand-write ``.v``.
 """
 
@@ -674,15 +674,20 @@ def elaborate(test_hooks: int = 0, variant: str | None = None) -> dict:
     return status
 
 
+def _write_verilog(path: Path, text: str) -> None:
+    if not text.endswith("\n"):
+        text += "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="\n")
+
+
 def generate():
     written = []
     for tag in VARIANTS:
         dest_p = product_v(tag)
         dest_h = hooks_v(tag)
-        dest_p.parent.mkdir(parents=True, exist_ok=True)
-        dest_h.parent.mkdir(parents=True, exist_ok=True)
-        dest_p.write_text(emit_verilog(False, variant=tag), encoding="utf-8")
-        dest_h.write_text(emit_verilog(True, variant=tag), encoding="utf-8")
+        _write_verilog(dest_p, emit_verilog(False, variant=tag))
+        _write_verilog(dest_h, emit_verilog(True, variant=tag))
         written.extend((dest_p, dest_h))
     return written
 

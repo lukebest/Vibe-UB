@@ -34,6 +34,16 @@ from regmap_lib import (  # noqa: E402
     variant_tags,
 )
 
+
+def csr_rtl_paths(data: dict[str, Any]) -> list[str]:
+    """Committed pycc netlists: 4 tags × PRODUCT + HOOKS."""
+    paths: list[str] = []
+    for tag in variant_tags(data):
+        mod = csr_module_name(tag)
+        paths.append(f"rtl/csr/{mod}.v")
+        paths.append(f"rtl/csr/hooks/{mod}.v")
+    return paths
+
 BANNER = "GENERATED — edit docs/regmap/regmap.yaml"
 NL = "\n"
 
@@ -801,8 +811,8 @@ def emit_gen_init() -> str:
 # ---------------------------------------------------------------------------
 
 # Official generated paths (docs/regmap/README.md).
-# pyCircuit source lives under pycircuit/<layer>/. rtl/ is generated Verilog
-# only, written by scripts/emit_rtl.py (PR #5; not on main yet — follow-up).
+# pyCircuit source lives under pycircuit/<layer>/. rtl/ holds pycc Verilog
+# written by scripts/emit_rtl.py (ub_csr_<tag> PRODUCT + HOOKS).
 OUTPUT_PATHS = (
     "docs/REGMAP.md",
     "pycircuit/csr/ub_csr_regs.py",
@@ -844,6 +854,41 @@ def generate(data: dict[str, Any], out_root: Path) -> list[Path]:
     return written
 
 
+def check_csr_rtl(repo_root: Path, data: dict[str, Any]) -> list[str]:
+    """Require committed rtl/csr netlists; byte-compare pycc regen when present."""
+    import runpy
+
+    drift: list[str] = []
+    expected = csr_rtl_paths(data)
+    if len(expected) != 8:
+        drift.append(f"rtl/csr: expected 8 netlists, planned {len(expected)}")
+    for rel_path in expected:
+        if not (repo_root / rel_path).is_file():
+            drift.append(f"{rel_path}: missing committed pycc netlist")
+    if drift:
+        return drift
+    ns = runpy.run_path(str(repo_root / "pycircuit" / "csr" / "ub_csr_regs.py"))
+    if not ns.get("_find_pycc")():
+        print("regmap check: skip pycc rtl byte-compare (pycc not on PATH)")
+        return drift
+    for tag in ns["VARIANTS"]:
+        for hooks, dest in (
+            (False, ns["product_v"](tag)),
+            (True, ns["hooks_v"](tag)),
+        ):
+            fresh = ns["emit_verilog"](hooks, variant=tag)
+            if not fresh.endswith("\n"):
+                fresh += "\n"
+            old = dest.read_text(encoding="utf-8")
+            if old != fresh:
+                rel_path = rel(dest, repo_root)
+                drift.append(
+                    f"{rel_path}: pycc regen differs from committed "
+                    f"({len(old)} vs {len(fresh)} bytes)"
+                )
+    return drift
+
+
 def check_drift(data: dict[str, Any], repo_root: Path) -> list[str]:
     """Regenerate into a temp dir and diff against committed outputs."""
     import tempfile
@@ -865,6 +910,7 @@ def check_drift(data: dict[str, Any], repo_root: Path) -> list[str]:
                 drift.append(f"{rel_path}: differs from generator ({len(old)} vs {len(new)} bytes)")
             if text != new:
                 drift.append(f"{rel_path}: temp write mismatch")
+    drift.extend(check_csr_rtl(repo_root, data))
     return drift
 
 

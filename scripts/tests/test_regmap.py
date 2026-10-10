@@ -213,12 +213,19 @@ def test_csr_compile_ports_and_hooks_split():
 
 
 def test_ral_lives_under_tb_ral():
-    from gen_regmap import OUTPUT_PATHS
+    from gen_regmap import OUTPUT_PATHS, csr_rtl_paths
 
     assert "tb/ral/ub_regmodel.py" in OUTPUT_PATHS
     assert "pycircuit/csr/ub_csr_regs.py" in OUTPUT_PATHS
     assert "gen/tb_ral/ub_regmodel.py" not in OUTPUT_PATHS
     assert "rtl/csr/ub_csr_regs.py" not in OUTPUT_PATHS
+    rtl = csr_rtl_paths(load_regmap())
+    assert len(rtl) == 8
+    assert "rtl/csr/ub_csr_product_x4_vl2.v" in rtl
+    assert "rtl/csr/hooks/ub_csr_x8_vl2_placeholder.v" in rtl
+    root = SCRIPT_DIR.parent
+    for rel_path in rtl:
+        assert (root / rel_path).is_file(), rel_path
 
 
 def test_param_variant_reuses_num_lanes():

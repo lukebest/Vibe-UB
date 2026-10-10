@@ -55,21 +55,19 @@ string-templated. GitHub CI has the frontend only; verilator lint runs when
 `pycc` is on `PATH` (all tags). Reset fields marked `reset_from: variant` are
 filled from the table; they are not handwritten.
 
-### Verilog emit (follow-up — PR #5 not on main)
+### Verilog emit
 
-PR #5 is **not on main**. This PR does **not** hand-write or commit `rtl/csr/*.v`.
-When `scripts/emit_rtl.py` / `pycircuit/emit.py` land, register each `variants:` tag:
+`scripts/emit_rtl.py` writes the 8 committed netlists from
+`pycircuit/csr/ub_csr_regs.py` (`compile()` + `pycc --emit=verilog --logic-depth=64`):
 
-```python
-from csr.ub_csr_regs import VARIANTS, emit_verilog as emit_csr
-# PRODUCT → rtl/csr/ub_csr_<tag>.v
-# HOOKS   → rtl/csr/hooks/ub_csr_<tag>.v
-for tag in VARIANTS:
-    ("csr", f"ub_csr_{tag}", lambda th=False, t=tag: emit_csr(th, variant=t))
-```
+| Netlist | Path |
+| --- | --- |
+| PRODUCT | `rtl/csr/ub_csr_<tag>.v` |
+| HOOKS | `rtl/csr/hooks/ub_csr_<tag>.v` |
 
-Until then: `python3 pycircuit/csr/ub_csr_regs.py` can write those paths locally
-for lint; do not commit the `.v`.
+`python3 scripts/gen_regmap.py --check` regenerates via the same `emit_verilog()`
+and fails on a byte mismatch (skipped only when `pycc` is not on PATH; the
+committed files must still exist). Do not hand-write `.v`.
 
 `PARAM_VARIANT` (`0x011C`) is the RO capability word for a single driver:
 `NUM_VL[3:0]`, `SCR_PLACEHOLDER[4]`, `RSVD[31:5]`. Lane count is
@@ -128,7 +126,7 @@ Do not put that fanout inside `ub_csr_regs.py`.
 - In-repo pyc4.0 style: Python under `pycircuit/<layer>/` emits Verilog into
   `rtl/`. `pyc_reg` = sync flop on `core_clk` / `rst_pyc`. `elaborate(0/1)` uses
   `from pycircuit import Circuit, compile, module, u` (`lukebest/pyCircuit`
-  @ `43cc5918`, see `pycircuit/TOOLCHAIN.lock`). `compile()` produces frontend
+  @ `43cc5918`, see `TOOLCHAIN.lock`). `compile()` produces frontend
   MLIR. PRODUCT `.v` is `pycc --emit=verilog` (LLVM 19). Do not put the
   repo root on `PYTHONPATH` (shadows the toolchain package named `pycircuit`).
 

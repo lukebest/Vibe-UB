@@ -39,7 +39,8 @@ MODULE_RE = re.compile(
 PORT_RE = re.compile(
     r"\b(input|output|inout)\b((?:\s+(?:wire|reg|logic|signed))*"
     r"(?:\s+\[[^\]]+\])?\s*"
-    r"[A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)",
+    r"[A-Za-z_][A-Za-z0-9_]*"
+    r"(?:\s*,\s*(?!input\b|output\b|inout\b)[A-Za-z_][A-Za-z0-9_]*)*)",
     re.I,
 )
 IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")

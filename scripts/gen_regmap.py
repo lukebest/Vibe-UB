@@ -780,7 +780,7 @@ def emit_ral(data: dict[str, Any]) -> str:
 def emit_csr_init() -> str:
     return (
         f'"""ub_csr package. {BANNER}"""\n'
-        "from .ub_csr_regs import (\n"
+        "from .ub_csr import (\n"
         "    DEFAULT_VARIANT,\n"
         "    PORT_RST_PULSE_CYCLES,\n"
         "    VARIANTS,\n"
@@ -815,7 +815,7 @@ def emit_gen_init() -> str:
 # written by scripts/emit_rtl.py (ub_csr_<tag> PRODUCT + HOOKS).
 OUTPUT_PATHS = (
     "docs/REGMAP.md",
-    "pycircuit/csr/ub_csr_regs.py",
+    "pycircuit/csr/ub_csr.py",
     "tb/ral/ub_regmodel.py",
     "sw/include/ub_regs.h",
     "sw/hal/ub_regs_access.h",
@@ -833,7 +833,7 @@ COMPANION_PATHS = (
 def render_all(data: dict[str, Any]) -> dict[str, str]:
     return {
         "docs/REGMAP.md": emit_regmap_md(data),
-        "pycircuit/csr/ub_csr_regs.py": emit_ub_csr_regs(data),
+        "pycircuit/csr/ub_csr.py": emit_ub_csr_regs(data),
         "pycircuit/csr/__init__.py": emit_csr_init(),
         "tb/ral/ub_regmodel.py": emit_ral(data),
         "tb/ral/__init__.py": emit_gen_init(),
@@ -867,7 +867,7 @@ def check_csr_rtl(repo_root: Path, data: dict[str, Any]) -> list[str]:
             drift.append(f"{rel_path}: missing committed pycc netlist")
     if drift:
         return drift
-    ns = runpy.run_path(str(repo_root / "pycircuit" / "csr" / "ub_csr_regs.py"))
+    ns = runpy.run_path(str(repo_root / "pycircuit" / "csr" / "ub_csr.py"))
     if not ns.get("_find_pycc")():
         print("regmap check: skip pycc rtl byte-compare (pycc not on PATH)")
         return drift

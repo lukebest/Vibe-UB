@@ -8,11 +8,19 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# SPEC §2.2: single copy of pyc_* primitives lives in rtl/pyc_lib/.
+# That directory is not on main yet (PR #28/#29 mentioned it; files not
+# landed). Prefer it when present; otherwise fall back to the pycc install.
 INC_DIR=""
-if [[ -n "${PYC_PRIMITIVES:-}" && -d "${PYC_PRIMITIVES}" ]]; then
+if [[ -d "$ROOT/rtl/pyc_lib" ]]; then
+  INC_DIR="$ROOT/rtl/pyc_lib"
+  echo "lint_csr: -I rtl/pyc_lib (SPEC §2.2 single copy)"
+elif [[ -n "${PYC_PRIMITIVES:-}" && -d "${PYC_PRIMITIVES}" ]]; then
   INC_DIR="${PYC_PRIMITIVES}"
+  echo "lint_csr: NOTE rtl/pyc_lib/ not on this tree; -I $INC_DIR"
 elif [[ -n "${PYC_TOOLCHAIN_ROOT:-}" && -d "${PYC_TOOLCHAIN_ROOT}/include/verilog" ]]; then
   INC_DIR="${PYC_TOOLCHAIN_ROOT}/include/verilog"
+  echo "lint_csr: NOTE rtl/pyc_lib/ not on this tree; -I $INC_DIR"
 else
   PYCC_BIN="${PYCC:-}"
   if [[ -z "$PYCC_BIN" ]]; then
@@ -27,6 +35,9 @@ else
   if [[ -z "$INC_DIR" && -d /tmp/pyCircuit/runtime/verilog ]]; then
     INC_DIR="/tmp/pyCircuit/runtime/verilog"
   fi
+  if [[ -n "$INC_DIR" ]]; then
+    echo "lint_csr: NOTE rtl/pyc_lib/ not on this tree; -I $INC_DIR"
+  fi
 fi
 
 shopt -s nullglob
@@ -36,7 +47,7 @@ if [[ ${#PRODUCTS[@]} -eq 0 ]]; then
   exit 1
 fi
 if [[ -z "$INC_DIR" ]]; then
-  echo "error: pycc Verilog primitives dir not found (set PYC_PRIMITIVES or PYC_TOOLCHAIN_ROOT)"
+  echo "error: pyc_reg.v include dir not found (want rtl/pyc_lib; else PYC_PRIMITIVES / PYC_TOOLCHAIN_ROOT)"
   exit 1
 fi
 

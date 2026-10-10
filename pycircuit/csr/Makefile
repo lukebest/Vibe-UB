@@ -11,7 +11,7 @@ PYTHON ?= python3
 all: elaborate lint
 
 elaborate:
-	$(PYTHON) -c "import runpy; ns=runpy.run_path('ub_csr_regs.py'); \
+	$(PYTHON) -c "import runpy; ns=runpy.run_path('ub_csr.py'); \
 	[print(ns['elaborate'](h, variant=t)) for t in ns['VARIANTS'] for h in (0,1)]"
 
 lint:

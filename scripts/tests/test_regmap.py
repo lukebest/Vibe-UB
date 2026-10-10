@@ -168,7 +168,7 @@ def test_csr_compile_ports_and_hooks_split():
     import runpy
     import shutil
 
-    path = SCRIPT_DIR.parent / "pycircuit" / "csr" / "ub_csr_regs.py"
+    path = SCRIPT_DIR.parent / "pycircuit" / "csr" / "ub_csr.py"
     ns = runpy.run_path(str(path))
     for tag in ns["VARIANTS"]:
         mod = ns["csr_module_name"](tag)
@@ -216,9 +216,10 @@ def test_ral_lives_under_tb_ral():
     from gen_regmap import OUTPUT_PATHS, csr_rtl_paths
 
     assert "tb/ral/ub_regmodel.py" in OUTPUT_PATHS
-    assert "pycircuit/csr/ub_csr_regs.py" in OUTPUT_PATHS
+    assert "pycircuit/csr/ub_csr.py" in OUTPUT_PATHS
     assert "gen/tb_ral/ub_regmodel.py" not in OUTPUT_PATHS
-    assert "rtl/csr/ub_csr_regs.py" not in OUTPUT_PATHS
+    assert "rtl/csr/ub_csr.py" not in OUTPUT_PATHS
+    assert "pycircuit/csr/ub_csr_regs.py" not in OUTPUT_PATHS
     rtl = csr_rtl_paths(load_regmap())
     assert len(rtl) == 8
     assert "rtl/csr/ub_csr_product_x4_vl2.v" in rtl

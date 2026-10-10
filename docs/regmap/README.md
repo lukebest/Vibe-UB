@@ -32,7 +32,7 @@ pytest scripts/tests
 | Path | Role |
 | --- | --- |
 | `docs/REGMAP.md` | Human table (header: `GENERATED — edit docs/regmap/regmap.yaml`) |
-| `pycircuit/csr/ub_csr_regs.py` | pyCircuit CSR leaf (`ub_csr_<tag>` per `variants:`); SPEC §2.2 |
+| `pycircuit/csr/ub_csr.py` | pyCircuit CSR leaf (`ub_csr_<tag>` per `variants:`); SPEC §2.2 |
 | `tb/ral/ub_regmodel.py` | uvm-python register model |
 | `sw/include/ub_regs.h` | Firmware address / mask / shift macros + inline field accessors |
 | `sw/hal/ub_regs_access.h` | HAL declarations |
@@ -58,7 +58,7 @@ filled from the table; they are not handwritten.
 ### Verilog emit
 
 `scripts/emit_rtl.py` writes the 8 committed netlists from
-`pycircuit/csr/ub_csr_regs.py` (`compile()` + `pycc --emit=verilog --logic-depth=64`):
+`pycircuit/csr/ub_csr.py` (`compile()` + `pycc --emit=verilog --logic-depth=64`):
 
 | Netlist | Path |
 | --- | --- |
@@ -68,6 +68,12 @@ filled from the table; they are not handwritten.
 `python3 scripts/gen_regmap.py --check` regenerates via the same `emit_verilog()`
 and fails on a byte mismatch (skipped only when `pycc` is not on PATH; the
 committed files must still exist). Do not hand-write `.v`.
+
+Netlists `` `include "pyc_reg.v" `` and do **not** copy `pyc_*` runtime files
+into `rtl/csr/` or `rtl/csr/hooks/` (SPEC §2.2). Lint / synth / gate use
+`-I rtl/pyc_lib`. That single-copy directory is **not on main yet**; until it
+lands, `scripts/lint_csr.sh` falls back to `PYC_TOOLCHAIN_ROOT` / pycc
+`include/verilog` and prints a NOTE.
 
 `PARAM_VARIANT` (`0x011C`) is the RO capability word for a single driver:
 `NUM_VL[3:0]`, `SCR_PLACEHOLDER[4]`, `RSVD[31:5]`. Lane count is
@@ -81,7 +87,7 @@ that do not match `xN_vlM` in the tag.
 
 ## YAML-driven CSR semantics
 
-`pycircuit/csr/ub_csr_regs.py` walks YAML attributes (not per-register handwritten logic):
+`pycircuit/csr/ub_csr.py` walks YAML attributes (not per-register handwritten logic):
 
 | Attribute | Behavior |
 | --- | --- |
@@ -119,7 +125,7 @@ block wrappers) stays handwritten for:
 1. Wiring block event sources into `ev_*` and `inc_*`
 2. Fanning `port_rst_pulse` out to PCS / LMSM / DLL / credit
 
-Do not put that fanout inside `ub_csr_regs.py`.
+Do not put that fanout inside `ub_csr.py`.
 
 ## pyCircuit / uvm-python assumptions
 

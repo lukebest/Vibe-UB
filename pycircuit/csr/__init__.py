@@ -1,5 +1,5 @@
 """ub_csr package. GENERATED — edit docs/regmap/regmap.yaml"""
-from .ub_csr_regs import (
+from .ub_csr import (
     DEFAULT_VARIANT,
     PORT_RST_PULSE_CYCLES,
     VARIANTS,

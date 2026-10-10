@@ -55,40 +55,59 @@ module ub_csr_if_props #(
     a_csr_ready_hi: assert (csr_ready == 1'b1);
   end
 
-  reg f_past_ok;
-  initial f_past_ok = 1'b0;
-  always @(posedge core_clk)
+  // Formal helpers only. Sample 1-bit decode so Yosys does not put the
+  // 16-bit address case inside $past (z3 BMC timeout).
+  reg f_past_ok, f_rst, f_req, f_wr, f_rdy, f_mapped, f_test, f_quiet;
+  initial begin
+    f_past_ok = 1'b0;
+    f_rst     = 1'b0;
+    f_req     = 1'b0;
+    f_wr      = 1'b0;
+    f_rdy     = 1'b0;
+    f_mapped  = 1'b0;
+    f_test    = 1'b0;
+    f_quiet   = 1'b0;
+  end
+  always @(posedge core_clk) begin
     f_past_ok <= 1'b1;
+    f_rst     <= rst_n;
+    f_req     <= csr_req;
+    f_wr      <= csr_wr;
+    f_rdy     <= csr_ready;
+    f_mapped  <= mapped_now;
+    f_test    <= test_now;
+    f_quiet   <= test_quiet;
+  end
 
   always @(posedge core_clk) begin
     if (rst_n && f_past_ok) begin
       // SPEC §3.2.3 / §5: read response is the cycle after an accepted read.
-      if ($past(rst_n && csr_req && csr_ready && !csr_wr))
+      if (f_rst && f_req && f_rdy && !f_wr)
         a_csr_read_1cycle: assert (csr_rvalid);
 
       // SPEC §3.2.3: write response has csr_rvalid=0 next cycle.
-      if ($past(rst_n && csr_req && csr_ready && csr_wr))
+      if (f_rst && f_req && f_rdy && f_wr)
         a_csr_write_no_rvalid: assert (!csr_rvalid);
 
       // No request → no response the next cycle (fixed 1-cycle, no pipeline).
-      if ($past(rst_n && !(csr_req && csr_ready)))
+      if (f_rst && !(f_req && f_rdy))
         a_csr_idle_no_resp: assert (!csr_rvalid);
 
       // SPEC §3.2.3 / §7: unmapped (incl. unaligned) → csr_err next cycle.
-      if ($past(rst_n && csr_req && csr_ready && !mapped_now))
+      if (f_rst && f_req && f_rdy && !f_mapped)
         a_csr_err_unmapped: assert (csr_err);
-      if ($past(rst_n && csr_req && csr_ready && mapped_now))
+      if (f_rst && f_req && f_rdy && f_mapped)
         a_csr_err_mapped: assert (!csr_err);
 
       // SPEC §3.2.3: unmapped read returns 0.
-      if ($past(rst_n && csr_req && csr_ready && !csr_wr && !mapped_now))
+      if (f_rst && f_req && f_rdy && !f_wr && !f_mapped)
         a_csr_unmap_rdata0: assert (csr_rdata == 32'h0);
 
       // SPEC §3.2.3 / §10.1 / §11 / REGMAP §2.4: TEST window mapped; quiet ⇒
       // read 0, write ignore, csr_err=0.
-      if ($past(rst_n && csr_req && csr_ready && test_now && test_quiet))
+      if (f_rst && f_req && f_rdy && f_test && f_quiet)
         a_csr_test_quiet_err0: assert (!csr_err);
-      if ($past(rst_n && csr_req && csr_ready && !csr_wr && test_now && test_quiet))
+      if (f_rst && f_req && f_rdy && !f_wr && f_test && f_quiet)
         a_csr_test_quiet_rd0: assert (csr_rdata == 32'h0);
 
       c_csr_read_mapped:  cover (csr_req && !csr_wr && mapped_now);

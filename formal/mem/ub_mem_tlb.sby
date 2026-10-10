@@ -7,37 +7,41 @@
 # origin/cursor/cmn-mem-1r1w-5d26). After #21 merges, drop inc/ and
 # read `-I rtl/pyc_lib`.
 #
-# Bound names are HOOKS ports (obs + fill/lk handshake). Array has no
-# reset; valid bits do — arbitrary array init is expected.
+# Default tasks (scripts/gate/formal.sh: `sby -f`):
+#   cover — depth 20. Deepest cover is step 17 (c_way3_hit /
+#           c_all_vld_lkup). 20 = 17 + small search margin.
+#   bmc   — depth 17 (exactly the deepest cover). yices at depth 18
+#           already sits on one step for minutes; z3 at 16 took ~50 min.
+# prove is not a default task (see README): k-induction basecase
+# passes, induction fails on an unreachable a_tag_unique_* CEX
+# (arrays start arbitrary). abc pdr / abc bmc3 crash this sby.
 #
-# BMC depth 32:
-#   rst_pyc high 4 cycles (smoke convention), then:
-#   fill = 3 cycles (accept + CMP + WB); lookup result = request + 1.
-#   c_way*_hit: 4 fills (first-invalid ways 0..3) + 4 lookups ~= 20
-#   c_all_vld_lkup: 4 fills + 1 lookup ~= 18
-#   c_two_fill_same_then_hit: 2 fills + 1 lookup ~= 12
-# 32 leaves margin for ready gaps. Cover task uses the same depth.
+# [files] paths are repo-root relative: gate and README invoke
+#   sby -f formal/mem/ub_mem_tlb.sby
+# from the repo root.
 
 [tasks]
-bmc
 cover
+bmc
 
 [options]
-depth 32
-bmc:
-mode bmc
---
 cover:
 mode cover
+depth 20
+--
+bmc:
+mode bmc
+depth 17
 --
 
 [engines]
-# Apt boolector 1.5 dies on this SMT2 (BrokenPipe even with --nounroll).
-# z3 accepts $mem arrays. Run tasks sequentially on 16 GB.
-smtbmc --nopresat z3
+# Timed on this VM (cover+bmc sequential ≈ 70 s). See README.
+# apt boolector 1.5: BrokenPipe on this SMT2. abc bmc3/pdr: sby
+# KeyError. z3: too slow for the gate budget.
+smtbmc yices
 
 [script]
-# Keep $mem (no FF explosion). prep would map the 4×64×109 arrays.
+# Keep $mem (no FF explosion). prep/aiger would map the 4×64×109 arrays.
 read -formal ub_cmn_mem_1r1w_d64w109.v
 read -formal ub_mem_tlb.v
 read -formal ub_mem_tlb_if_props.sv
@@ -50,8 +54,8 @@ memory -nomap
 opt -purge
 
 [files]
-ub_mem_tlb_if_props.sv
-ub_mem_tlb_harness.sv
-inc/pyc_reg.v
-../../rtl/mem/hooks/ub_mem_tlb.v
-../../tb/mem/lint_placeholder/ub_cmn_mem_1r1w_d64w109.v
+formal/mem/ub_mem_tlb_if_props.sv
+formal/mem/ub_mem_tlb_harness.sv
+formal/mem/inc/pyc_reg.v
+rtl/mem/hooks/ub_mem_tlb.v
+tb/mem/lint_placeholder/ub_cmn_mem_1r1w_d64w109.v

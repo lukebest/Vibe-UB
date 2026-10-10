@@ -48,7 +48,7 @@ note "SRC=$SRC OUT=$OUT VENV=$VENV"
 already_ok() {
   [[ -x "$OUT/bin/pycc" ]] || return 1
   [[ -x "$VENV/bin/python" ]] || return 1
-  "$VENV/bin/python" -c "import pycircuit" >/dev/null 2>&1 || return 1
+  "$VENV/bin/python" -P -c "import pycircuit" >/dev/null 2>&1 || return 1
   return 0
 }
 
@@ -148,7 +148,7 @@ if ! "$VENV/bin/pip" install -e "$SRC" >>"$LOG" 2>&1; then
   note "SETUP_OK=0"
   exit 0
 fi
-if ! "$VENV/bin/python" -c "import pycircuit" 2>/dev/null; then
+if ! "$VENV/bin/python" -P -c "import pycircuit" 2>/dev/null; then
   note "BLOCKER: venv cannot import pycircuit"
   note "SETUP_OK=0"
   exit 0

@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -34,6 +35,10 @@ from gatelib import (
 
 # HOOKS netlists are lint/CDC only (CODING_STYLE §1). Synth-check is PRODUCT.
 HOOKS_DIR_PARTS = {"hooks", "hooks1"}
+# Observed wall on main is ~8.5–12.5 min (several modules hit the old 120s
+# cap). Per-module 180s + job timeout-minutes 25 leaves headroom without
+# hanging the runner for the GHA default 360 min.
+MODULE_TIMEOUT_S = 180
 
 
 def is_product(path: Path) -> bool:
@@ -211,12 +216,12 @@ def synth_module(
         ]
     )
     try:
-        proc = run_cmd(["yosys", "-p", script], timeout=120)
+        proc = run_cmd(["yosys", "-p", script], timeout=MODULE_TIMEOUT_S)
         text = proc.stdout or ""
         rc = proc.returncode
     except subprocess.TimeoutExpired as exc:
         text = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
-        text += f"\nTIMEOUT after 120s on {module}"
+        text += f"\nTIMEOUT after {MODULE_TIMEOUT_S}s on {module}"
         rc = 124
     print(f"--- yosys synth {module} ({rel(file)}) ---")
     # Keep the log readable: last 40 lines always include stat / errors.
@@ -232,7 +237,7 @@ def synth_module(
                 module=module,
                 file=rel(file),
                 rule="SYNTH_TIMEOUT",
-                message="yosys exceeded 120s (structural synth -noabc)",
+                message=f"yosys exceeded {MODULE_TIMEOUT_S}s (structural synth -noabc)",
             )
         )
     elif rc != 0 and not findings:
@@ -271,6 +276,8 @@ def main() -> int:
     if not modules:
         print("synth-check: no PRODUCT modules; PASS")
         return emit_report("synth", [])
+    timings: list[tuple[str, float]] = []
+    t_job = time.monotonic()
     for unit in modules:
         if unit.module in skip:
             print(f"synth-check skip top {unit.module}: listed in blackbox.yml (used as -lib)")
@@ -307,10 +314,21 @@ def main() -> int:
                 f"synth-check {unit.module}: -lib large ub_cmn_mem_1r1w "
                 f"{[rel(p) for p in extra_lib]}"
             )
+        t0 = time.monotonic()
         f, _ = synth_module(
             unit.module, unit.file, needed, disc["incdirs"], lib_extra=extra_lib
         )
+        elapsed = time.monotonic() - t0
+        timings.append((unit.module, elapsed))
         findings.extend(f)
+    timings.sort(key=lambda item: item[1], reverse=True)
+    print(
+        f"synth-check wall {time.monotonic() - t_job:.1f}s; "
+        f"per-module timeout={MODULE_TIMEOUT_S}s"
+    )
+    print("synth-check slowest 3 modules:")
+    for name, sec in timings[:3]:
+        print(f"  {name}: {sec:.1f}s")
     return emit_report("synth", findings)
 
 

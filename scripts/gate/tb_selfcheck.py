@@ -17,7 +17,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from gatelib import REPO_ROOT, print_tool_versions, rel, run_cmd, shutil_which
+from gatelib import (
+    REPO_ROOT,
+    leaf_process_env,
+    print_tool_versions,
+    rel,
+    run_cmd,
+    shutil_which,
+)
 
 COCOTB_IMPORT_RE = re.compile(
     r"^\s*(?:import\s+cocotb\b|from\s+cocotb\b)",
@@ -97,7 +104,7 @@ def discover_cocotb_makefiles() -> list[tuple[Path, str]]:
 
 def run_or_fail(argv: list[str], cwd: Path | None = None) -> int:
     print(f"=== {' '.join(argv)} ===")
-    proc = run_cmd(argv, cwd=cwd)
+    proc = run_cmd(argv, cwd=cwd, env=leaf_process_env())
     if proc.stdout:
         print(proc.stdout.rstrip())
     if proc.returncode != 0:
@@ -130,14 +137,21 @@ def main() -> int:
     fail = 0
     if model_dir.is_dir():
         fail |= run_or_fail(
-            [sys.executable, "-m", "pytest", str(model_dir), "-q"]
+            [sys.executable, "-P", "-m", "pytest", str(model_dir), "-q"]
         )
     else:
         print("NOTE: model/ not present; skip top-level golden pytest")
 
     if pytest_files:
         fail |= run_or_fail(
-            [sys.executable, "-m", "pytest", *[str(p) for p in pytest_files], "-q"]
+            [
+                sys.executable,
+                "-P",
+                "-m",
+                "pytest",
+                *[str(p) for p in pytest_files],
+                "-q",
+            ]
         )
     else:
         print("NOTE: no non-cocotb pytest files under tb/")

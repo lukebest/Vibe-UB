@@ -6,6 +6,7 @@ set -u
 source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
 jobs=(
+  gate-selftest
   spec-leak
   rtl-emit-consistency
   equiv
@@ -22,7 +23,11 @@ jobs=(
 declare -A rc
 fail=0
 for job in "${jobs[@]}"; do
-  script="$GATE_DIR/${job//-/_}.sh"
+  if [[ "$job" == "gate-selftest" ]]; then
+    script="$GATE_DIR/selftest.sh"
+  else
+    script="$GATE_DIR/${job//-/_}.sh"
+  fi
   echo
   echo "########## gate job: $job ##########"
   if [[ -x "$script" ]]; then

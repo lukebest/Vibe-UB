@@ -36,7 +36,7 @@ class UbCmnMemUnwrittenError(ValueError):
 class UbCmnMem1r1w:
     """Cycle-accurate behavioural model of ``ub_cmn_mem_1r1w``.
 
-    ``tick()`` is one rising ``clk``. After a tick with ``re`` of a
+    ``tick()`` is one rising ``core_clk``. After a tick with ``re`` of a
     written address, ``rdata`` is that entry's old data (read-old if the
     same address was also written). ``rdata`` holds when ``re`` is 0.
 

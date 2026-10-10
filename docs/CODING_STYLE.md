@@ -118,7 +118,7 @@
 
 ## 10. 统一存储原语（`ub_cmn_mem_1r1w`）— 实现路径
 
-端口、参数与时序（`DEPTH`/`WIDTH`，`AW=$clog2(DEPTH)`；`clk`；`we/waddr/wdata` + `re/raddr/rdata`；读 1 拍寄存；同址同拍 **read-old**；阵列无复位）见 **PR #20** 对 §10 的提案（Xia；规范未裁定）。PR #20 未合入前以该草案为准；合入后把本段接到其 §10 正文之后，不改写端口表。
+端口、参数与时序（`DEPTH`/`WIDTH`，`AW=$clog2(DEPTH)`；时钟 **`core_clk`**（§5）；**无复位口**——业务叶标准复位名是 **`rst_pyc`**（`pyc_reg` 原生极性，§2 / §5），本原语不引出；`we/waddr/wdata` + `re/raddr/rdata`；读 1 拍寄存；同址同拍 **read-old**；阵列与 `rdata` 不复位）见 **PR #20** 对 §10 的提案（Xia；规范未裁定）。PR #20 未合入前以该草案为准；合入后把本段接到其 §10 正文之后，不改写端口表。时钟以本节为准（`core_clk`，不是 `clk`）。
 
 **实现路径：**
 

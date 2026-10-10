@@ -1,3 +1,6 @@
+# Clock port is core_clk (CODING_STYLE §5). No reset port; business
+# reset name is rst_pyc — this primitive does not bring it out.
+
 [tasks]
 bmc
 cover

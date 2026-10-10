@@ -38,36 +38,56 @@ NUM_LANES_TX = 1  # SPEC §9 / REGMAP PARAM_PHY: binary, legal 1/2/4/8, reset 1
 NUM_LANES_RX = 1  # SPEC §9: default equals TX; same legal set
 NLANE = NUM_LANES_RX  # SPEC §9 / §10 hook width
 
-# Implementation-defined timeouts in core_clk cycles (F_CORE SPEC §4.1 / §9).
-# SPEC §13.2 / §7: official "implementation related" µs not in-repo. Stubs.
+# F_CORE = 2.578125e9 / 32 = 80566406.25 Hz (SPEC §4.1 / §9).
+# Official timeouts: cycles = round(duration × F_CORE) (SPEC §6.1 per PR #9 @1277cce0).
+F_CORE_HZ = 2_578_125_000 / 32
+
+
+def _cycles(seconds: float) -> int:
+    return int(round(seconds * F_CORE_HZ))
+
+
 TMR_W = 32
-P_TMR_PROBE_WAIT = 806  # stub ~10 us @ F_CORE; SPEC §13.2
-P_TMR_PROBE_CONFIRM = 806  # stub; SPEC §13.2
-P_TMR_RXEQ = 80570  # stub ~1 ms; EQ/RXEQ empty-spin SPEC §6.1 / §13.2
-P_TMR_DISC_ACTIVE = 1933680  # stub ~24 ms; SPEC §13.2
-P_TMR_DISC_CONFIRM = 3867360  # stub ~48 ms; SPEC §13.2
-P_TMR_CFG = 161140  # stub ~2 ms; SPEC §13.2
-P_TMR_NULL = 161140  # stub; SPEC §6.1 Send_NullBlock / §13.2
-P_TMR_RETRAIN_ACTIVE = 1933680  # stub; SPEC §13.2
-P_TMR_RETRAIN_CONFIRM = 3867360  # stub; SPEC §13.2
-P_TMR_CHG_SPD = 80570  # stub; SPEC §6.1 Change_Speed / §13.2
-P_TMR_EQ = 5156480  # stub ~64 ms; SPEC §6.1 / §13.2
-P_NULL_BLK_NEED = 8  # stub cycle count; SPEC §6.1 「连续空块」 (no LMB tick)
-P_MAX_RETRAIN = 4  # SPEC §9 NUM_PHY_REINIT_THRESHOLD (draft §13.1)
-P_PROBE_MAX_RETRY = 8  # stub; SPEC §13.2 / §13.3 Probe
+# Probe.Wait / Probe.Confirm: still implementation / SPEC §13 (PR #9). Stubs.
+P_TMR_PROBE_WAIT = 806  # stub ~10 us @ F_CORE; SPEC §13 Probe
+P_TMR_PROBE_CONFIRM = 806  # stub; SPEC §13 Probe
+P_TMR_RXEQ = _cycles(0.048)  # 48 ms; SPEC §6.1 / §3.4.3.3 (PR #9 @1277cce0)
+P_TMR_DISC_ACTIVE = _cycles(0.024)  # 24 ms; other-entry Discovery.Active §6.1
+P_TMR_DISC_ACTIVE_RTR_CFG = _cycles(10e-6)  # 10 us; from Retrain/Config §6.1
+P_TMR_DISC_CONFIRM = _cycles(0.048)  # 48 ms; SPEC §6.1
+P_TMR_CFG = _cycles(0.002)  # 2 ms per Config substate; SPEC §6.1 / §3.4.3.5
+P_TMR_NULL = _cycles(0.002)  # 2 ms Send_NullBlock; SPEC §6.1 / §3.4.3.6
+P_TMR_RETRAIN_ACTIVE = _cycles(0.024)  # 24 ms; SPEC §6.1
+P_TMR_RETRAIN_CONFIRM = _cycles(0.048)  # 48 ms; SPEC §6.1
+P_TMR_CHG_SPD = _cycles(0.048)  # 48 ms fail → Idle; SPEC §6.1 / §3.4.3.9
+P_TMR_EQ_PASSIVE = _cycles(0.032)  # 32 ms EQ.Passive ≤DR4; SPEC §6.1
+P_TMR_EQ_ACTIVE = _cycles(0.024)  # 24 ms EQ.Active ≤DR4; SPEC §6.1
+# Official Null Block counts (SPEC §6.1 / §3.4.3.6). Count interface still §13-open.
+P_NULL_RX_NEED = 8
+P_NULL_TX_NEED = 16
+P_MAX_RETRAIN = 4  # SPEC §9 NUM_PHY_REINIT_THRESHOLD (draft / recommended)
+P_PROBE_MAX_RETRY = 8  # stub; SPEC §13 Probe
 
-# LTB Type encodings are NOT in this repo (UB-PHY §3.4.1.1 / SPEC §3.3.4). Stubs.
-P_LTB_TYPE_DLTB = 1
-P_LTB_TYPE_CLTB = 2
-P_LTB_TYPE_RLTB = 3
-P_LTB_TYPE_ELTB = 4
-P_LTB_TYPE_NULL = 0
+# LTB Type bytes (SPEC §3.3.4 / UB-PHY §3.4.1.1; PR #9 @1277cce0).
+# Send_NullBlock has NO LTB Type — DLL Null Blocks, pattern=3.
+P_LTB_TYPE_DLTB_ACTIVE = 0xA0
+P_LTB_TYPE_DLTB_CONFIRM = 0xA1
+P_LTB_TYPE_RXEQ = 0xE0
+P_LTB_TYPE_CLTB_ACTIVE = 0xB0
+P_LTB_TYPE_CLTB_CHECK = 0xB1
+P_LTB_TYPE_CLTB_CONFIRM = 0xB2
+P_LTB_TYPE_RLTB_ACTIVE = 0xC0
+P_LTB_TYPE_RLTB_CONFIRM = 0xC1
+P_LTB_TYPE_RLTB_LP1 = 0xC2
+P_LTB_TYPE_RLTB_EQ_INIT = 0xC3
+P_LTB_TYPE_ELTB = 0xD0
 
-# Lane_ID NULL sentinel is in UB-PHY §3.4.1.1 (not copied). Stub.
+# LTB Lane_ID / Link_ID NULL (SPEC §3.3.4). Distinct from amctl_lid 8=NULL.
 P_LANE_ID_NULL = 0xFF
+P_LINK_ID_NULL = 0xFF
 
-# data_rate_support_2 Change_Speed bit: unknown (SPEC §3.3.4 / UB-PHY §3.4.1.1).
-P_CHG_SPD_BIT = 0
+# Change_Speed = data_rate_support_2[7]; M1 drives 0 (SPEC §3.3.4).
+P_CHG_SPD_BIT = 7
 
 # Top-level LMSM encoding (SPEC §10.3). tb_obs_lmsm_st is this only.
 ST_LINK_IDLE = 0
@@ -109,6 +129,8 @@ def _header(test_hooks: int) -> str:
 // pyc4.0 leaf ub_lmsm. TEST_HOOKS={test_hooks} (Python generation-time).
 // Registers: pyc_reg semantics (sync, rst_pyc active-high, core_clk).
 // SPEC: §2.5, §3.2.5, §3.3.3, §3.3.4, §4.2, §6.1, §9, §10, §11.
+// LTB Type / official timeouts / NullBlock pattern: SPEC §3.3.4 / §6.1
+// per PR #9 @1277cce0 (pending merge). Do not merge that docs branch here.
 // CRC / padding / per-lane Lane_ID fill: PCS, not this leaf.
 // PORT_RST 16-cycle pulse: ub_csr; this leaf sees port_rst as sync clear.
 """
@@ -129,27 +151,37 @@ def emit_verilog(test_hooks: bool) -> str:
     w(f"  parameter NUM_LANES_TX              = {ntx},      // SPEC §9 / REGMAP PARAM_PHY; binary 1/2/4/8")
     w(f"  parameter NUM_LANES_RX              = {nrx},      // SPEC §9; default equals TX")
     w(f"  parameter TMR_W                     = {TMR_W},     // core_clk counter width; F_CORE SPEC §4.1 / §9")
-    w(f"  parameter P_TMR_PROBE_WAIT          = {P_TMR_PROBE_WAIT},    // stub cycles; SPEC §13.2")
-    w(f"  parameter P_TMR_PROBE_CONFIRM       = {P_TMR_PROBE_CONFIRM},    // stub; SPEC §13.2")
-    w(f"  parameter P_TMR_RXEQ                = {P_TMR_RXEQ},  // stub; SPEC §6.1 / §13.2 EQ empty-spin")
-    w(f"  parameter P_TMR_DISC_ACTIVE         = {P_TMR_DISC_ACTIVE}, // stub; SPEC §13.2")
-    w(f"  parameter P_TMR_DISC_CONFIRM        = {P_TMR_DISC_CONFIRM}, // stub; SPEC §13.2")
-    w(f"  parameter P_TMR_CFG                 = {P_TMR_CFG},  // stub; SPEC §13.2")
-    w(f"  parameter P_TMR_NULL                = {P_TMR_NULL},  // stub; SPEC §6.1 Send_NullBlock / §13.2")
-    w(f"  parameter P_TMR_RETRAIN_ACTIVE      = {P_TMR_RETRAIN_ACTIVE}, // stub; SPEC §13.2")
-    w(f"  parameter P_TMR_RETRAIN_CONFIRM     = {P_TMR_RETRAIN_CONFIRM}, // stub; SPEC §13.2")
-    w(f"  parameter P_TMR_CHG_SPD             = {P_TMR_CHG_SPD},  // stub; SPEC §6.1 Change_Speed / §13.2")
-    w(f"  parameter P_TMR_EQ                  = {P_TMR_EQ}, // stub; SPEC §6.1 / §13.2")
-    w(f"  parameter P_NULL_BLK_NEED           = {P_NULL_BLK_NEED},      // stub cycles; SPEC §6.1 「连续空块」")
-    w(f"  parameter P_MAX_RETRAIN             = {P_MAX_RETRAIN},      // SPEC §9 NUM_PHY_REINIT_THRESHOLD (draft §13.1)")
-    w(f"  parameter P_PROBE_MAX_RETRY         = {P_PROBE_MAX_RETRY},      // stub; SPEC §13.2 / §13.3 Probe")
-    w(f"  parameter P_LTB_TYPE_DLTB           = {P_LTB_TYPE_DLTB},      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4")
-    w(f"  parameter P_LTB_TYPE_CLTB           = {P_LTB_TYPE_CLTB},      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4")
-    w(f"  parameter P_LTB_TYPE_RLTB           = {P_LTB_TYPE_RLTB},      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4")
-    w(f"  parameter P_LTB_TYPE_ELTB           = {P_LTB_TYPE_ELTB},      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4")
-    w(f"  parameter P_LTB_TYPE_NULL           = {P_LTB_TYPE_NULL},      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4")
-    w(f"  parameter P_LANE_ID_NULL            = {P_LANE_ID_NULL},   // stub; UB-PHY §3.4.1.1 NULL Lane_ID")
-    w(f"  parameter P_CHG_SPD_BIT             = {P_CHG_SPD_BIT}       // stub; SPEC §3.3.4 / UB-PHY §3.4.1.1")
+    w(f"  parameter P_TMR_PROBE_WAIT          = {P_TMR_PROBE_WAIT},    // OPEN stub; SPEC §13 Probe")
+    w(f"  parameter P_TMR_PROBE_CONFIRM       = {P_TMR_PROBE_CONFIRM},    // OPEN stub; SPEC §13 Probe")
+    w(f"  parameter P_TMR_RXEQ                = {P_TMR_RXEQ}, // 48 ms × F_CORE; SPEC §6.1 (PR #9 @1277cce0)")
+    w(f"  parameter P_TMR_DISC_ACTIVE         = {P_TMR_DISC_ACTIVE}, // 24 ms; SPEC §6.1 other-entry")
+    w(f"  parameter P_TMR_DISC_ACTIVE_RTR_CFG = {P_TMR_DISC_ACTIVE_RTR_CFG},    // 10 us; from Retrain/Config §6.1")
+    w(f"  parameter P_TMR_DISC_CONFIRM        = {P_TMR_DISC_CONFIRM}, // 48 ms; SPEC §6.1")
+    w(f"  parameter P_TMR_CFG                 = {P_TMR_CFG},  // 2 ms / Config substate; SPEC §6.1")
+    w(f"  parameter P_TMR_NULL                = {P_TMR_NULL},  // 2 ms; SPEC §6.1 Send_NullBlock")
+    w(f"  parameter P_TMR_RETRAIN_ACTIVE      = {P_TMR_RETRAIN_ACTIVE}, // 24 ms; SPEC §6.1")
+    w(f"  parameter P_TMR_RETRAIN_CONFIRM     = {P_TMR_RETRAIN_CONFIRM}, // 48 ms; SPEC §6.1")
+    w(f"  parameter P_TMR_CHG_SPD             = {P_TMR_CHG_SPD}, // 48 ms fail; SPEC §6.1")
+    w(f"  parameter P_TMR_EQ_PASSIVE          = {P_TMR_EQ_PASSIVE}, // 32 ms EQ.Passive; SPEC §6.1")
+    w(f"  parameter P_TMR_EQ_ACTIVE           = {P_TMR_EQ_ACTIVE}, // 24 ms EQ.Active; SPEC §6.1")
+    w(f"  parameter P_NULL_RX_NEED            = {P_NULL_RX_NEED},      // 8 RX Null Blocks; SPEC §6.1 (count IF §13-open)")
+    w(f"  parameter P_NULL_TX_NEED            = {P_NULL_TX_NEED},     // 16 TX after first RX; SPEC §6.1")
+    w(f"  parameter P_MAX_RETRAIN             = {P_MAX_RETRAIN},      // SPEC §9 NUM_PHY_REINIT_THRESHOLD (draft)")
+    w(f"  parameter P_PROBE_MAX_RETRY         = {P_PROBE_MAX_RETRY},      // OPEN stub; SPEC §13 Probe")
+    w(f"  parameter P_LTB_TYPE_DLTB_ACTIVE    = {P_LTB_TYPE_DLTB_ACTIVE},    // 0xA0 Discovery.Active; SPEC §3.3.4")
+    w(f"  parameter P_LTB_TYPE_DLTB_CONFIRM   = {P_LTB_TYPE_DLTB_CONFIRM},    // 0xA1 Discovery.Confirm; SPEC §3.3.4")
+    w(f"  parameter P_LTB_TYPE_RXEQ           = {P_LTB_TYPE_RXEQ},    // 0xE0 RXEQ_Optimize; SPEC §3.3.4")
+    w(f"  parameter P_LTB_TYPE_CLTB_ACTIVE    = {P_LTB_TYPE_CLTB_ACTIVE},    // 0xB0 Config.Active; SPEC §3.3.4")
+    w(f"  parameter P_LTB_TYPE_CLTB_CHECK     = {P_LTB_TYPE_CLTB_CHECK},    // 0xB1 Config.Check; SPEC §3.3.4")
+    w(f"  parameter P_LTB_TYPE_CLTB_CONFIRM   = {P_LTB_TYPE_CLTB_CONFIRM},    // 0xB2 Config.Confirm; SPEC §3.3.4")
+    w(f"  parameter P_LTB_TYPE_RLTB_ACTIVE    = {P_LTB_TYPE_RLTB_ACTIVE},    // 0xC0 Retrain.Active; SPEC §3.3.4")
+    w(f"  parameter P_LTB_TYPE_RLTB_CONFIRM   = {P_LTB_TYPE_RLTB_CONFIRM},    // 0xC1 Retrain.Confirm; SPEC §3.3.4")
+    w(f"  parameter P_LTB_TYPE_RLTB_LP1       = {P_LTB_TYPE_RLTB_LP1},    // 0xC2 Retrain.LP1_PHY_Up; SPEC §3.3.4")
+    w(f"  parameter P_LTB_TYPE_RLTB_EQ_INIT   = {P_LTB_TYPE_RLTB_EQ_INIT},    // 0xC3 Retrain.EQ_Initial; SPEC §3.3.4")
+    w(f"  parameter P_LTB_TYPE_ELTB           = {P_LTB_TYPE_ELTB},    // 0xD0 Equalization; SPEC §3.3.4")
+    w(f"  parameter P_LANE_ID_NULL            = {P_LANE_ID_NULL},   // 8'hFF LTB Lane_ID NULL; SPEC §3.3.4")
+    w(f"  parameter P_LINK_ID_NULL            = {P_LINK_ID_NULL},   // 8'hFF LTB Link_ID NULL; SPEC §3.3.4")
+    w(f"  parameter P_CHG_SPD_BIT             = {P_CHG_SPD_BIT}       // data_rate_support_2[7]; M1 drives 0; SPEC §3.3.4")
     w(") (")
     w("  input  wire                    core_clk,")
     w("  input  wire                    rst_pyc,")
@@ -364,15 +396,15 @@ def emit_verilog(test_hooks: bool) -> str:
     w("  wire term_any = |pma_term_detect;")
     w("  wire eidle_any = |pma_rx_eidle_exit;")
     w()
-    w("  // pyc_reg: st, sub, tmr, null_cnt, probe_try, retrain_left, rx holds,")
+    w("  // pyc_reg: st, sub, tmr, probe_try, retrain_left, disc_short, rx holds,")
     w("  //          saw_rx_ltb, train pulses.")
     w("  reg [4:0]      st;")
     w("  reg [1:0]      sub;")
     w("  reg [TMR_W-1:0] tmr;")
-    w("  reg [7:0]      null_cnt;")
     w("  reg [7:0]      probe_try;")
     w("  reg [7:0]      retrain_left;")
     w("  reg            saw_rx_ltb;")
+    w("  reg            disc_short; // 1 if Discovery entered from Retrain/Config (§6.1 10 us)")
     w("  reg            train_fail_q;")
     w("  reg            train_to_q;")
     w("  reg [7:0]      rx_type_q;")
@@ -414,9 +446,16 @@ def emit_verilog(test_hooks: bool) -> str:
     w("  wire unused_tie = unused_rx_aux & 1'b0;")
     w()
     w("  // Handshake quality used by Discovery/Config/Retrain.")
-    w("  wire rx_type_dltb = (rx_type_q == P_LTB_TYPE_DLTB[7:0]) || (P_LTB_TYPE_DLTB == 0);")
-    w("  wire rx_type_cltb = (rx_type_q == P_LTB_TYPE_CLTB[7:0]) || (P_LTB_TYPE_CLTB == 0);")
-    w("  wire rx_type_rltb = (rx_type_q == P_LTB_TYPE_RLTB[7:0]) || (P_LTB_TYPE_RLTB == 0);")
+    w("  // Type families: SPEC §3.3.4 (PR #9 @1277cce0).")
+    w("  wire rx_type_dltb = (rx_type_q == P_LTB_TYPE_DLTB_ACTIVE[7:0])")
+    w("                   | (rx_type_q == P_LTB_TYPE_DLTB_CONFIRM[7:0]);")
+    w("  wire rx_type_cltb = (rx_type_q == P_LTB_TYPE_CLTB_ACTIVE[7:0])")
+    w("                   | (rx_type_q == P_LTB_TYPE_CLTB_CHECK[7:0])")
+    w("                   | (rx_type_q == P_LTB_TYPE_CLTB_CONFIRM[7:0]);")
+    w("  wire rx_type_rltb = (rx_type_q == P_LTB_TYPE_RLTB_ACTIVE[7:0])")
+    w("                   | (rx_type_q == P_LTB_TYPE_RLTB_CONFIRM[7:0])")
+    w("                   | (rx_type_q == P_LTB_TYPE_RLTB_LP1[7:0])")
+    w("                   | (rx_type_q == P_LTB_TYPE_RLTB_EQ_INIT[7:0]);")
     w("  wire disc_ok = am_all & ~lid_bad_u & pcs_deskew_ok & saw_rx_ltb & rx_type_dltb;")
     w("  wire cfg_ok  = am_all & ~lid_bad_u & saw_rx_ltb & rx_type_cltb;")
     w("  wire rtr_ok  = am_all & ~lid_bad_u & (saw_rx_ltb ? rx_type_rltb : 1'b1);")
@@ -424,7 +463,7 @@ def emit_verilog(test_hooks: bool) -> str:
     w("  wire rx_chg_spd = rx_drs2_q[P_CHG_SPD_BIT] | cfg_req_change_speed;")
     w("  wire rx_want_eq = rx_req_eq_q | cfg_req_equalization | cfg_request_equalization;")
     w()
-    w("  // Timer compare. Limits are parameters (implementation-defined, §13.2).")
+    w("  // Timer compare. Official limits SPEC §6.1 (PR #9 @1277cce0); Probe still §13.")
     w("  reg [TMR_W-1:0] tmr_lim;")
     w("  always @* begin")
     w("    tmr_lim = {TMR_W{1'b1}};")
@@ -434,7 +473,9 @@ def emit_verilog(test_hooks: bool) -> str:
     w("                         : P_TMR_PROBE_CONFIRM[TMR_W-1:0];")
     w("      ST_RXEQ_OPTIMIZE: tmr_lim = P_TMR_RXEQ[TMR_W-1:0];")
     w("      ST_DISCOVERY: tmr_lim = (sub == SUB_0)")
-    w("                            ? P_TMR_DISC_ACTIVE[TMR_W-1:0]")
+    w("                            ? (disc_short")
+    w("                               ? P_TMR_DISC_ACTIVE_RTR_CFG[TMR_W-1:0]")
+    w("                               : P_TMR_DISC_ACTIVE[TMR_W-1:0])")
     w("                            : P_TMR_DISC_CONFIRM[TMR_W-1:0];")
     w("      ST_CONFIG: tmr_lim = P_TMR_CFG[TMR_W-1:0];")
     w("      ST_SEND_NULLBLOCK: tmr_lim = P_TMR_NULL[TMR_W-1:0];")
@@ -442,7 +483,9 @@ def emit_verilog(test_hooks: bool) -> str:
     w("                           ? P_TMR_RETRAIN_ACTIVE[TMR_W-1:0]")
     w("                           : P_TMR_RETRAIN_CONFIRM[TMR_W-1:0];")
     w("      ST_CHANGE_SPEED: tmr_lim = P_TMR_CHG_SPD[TMR_W-1:0];")
-    w("      ST_EQUALIZATION: tmr_lim = P_TMR_EQ[TMR_W-1:0];")
+    w("      ST_EQUALIZATION: tmr_lim = (sub == SUB_0)")
+    w("                               ? P_TMR_EQ_PASSIVE[TMR_W-1:0]")
+    w("                               : P_TMR_EQ_ACTIVE[TMR_W-1:0];")
     w("      ST_LINK_IDLE,")
     w("      ST_LINK_ACTIVE: tmr_lim = {TMR_W{1'b1}};")
     w("      default: tmr_lim = {TMR_W{1'b1}}; // WAIVER_LMSM_FSM_DEFAULT")
@@ -514,7 +557,7 @@ def emit_verilog(test_hooks: bool) -> str:
     w("      end")
     w()
     w("      ST_RXEQ_OPTIMIZE: begin")
-    w("        // M1 stub: empty-spin then Discovery (SPEC §6.1 / §13.2).")
+    w("        // Official 48 ms then Discovery.Active (SPEC §6.1 / §3.4.3.3).")
     w("        if (tmr_to) begin")
     w("          st_n  = ST_DISCOVERY;")
     w("          sub_n = SUB_0;")
@@ -580,7 +623,15 @@ def emit_verilog(test_hooks: bool) -> str:
     w("      end")
     w()
     w("      ST_SEND_NULLBLOCK: begin")
-    w("        if (null_cnt >= P_NULL_BLK_NEED[7:0]) begin")
+    w("        // Official exit (SPEC §6.1 / §3.4.3.6): 8 consecutive RX Null")
+    w("        // Blocks on all configured lanes AND >=16 TX Null Blocks after")
+    w("        // first RX, after AMCTL with SDF, deskew done.")
+    w("        // OPEN (SPEC §13 @1277cce0): pcs2lmsm_null_blk is a recommendation,")
+    w("        // not a §3.3.4 port. Do not count core_clk beats as blocks.")
+    w("        // Active is unreachable until Xia adds the strobe.")
+    w("        if (1'b0 && pcs_deskew_ok")
+    w("            && (P_NULL_RX_NEED[7:0] == 8'd0)")
+    w("            && (P_NULL_TX_NEED[7:0] == 8'd0)) begin")
     w("          st_n  = ST_LINK_ACTIVE;")
     w("          sub_n = SUB_0;")
     w("        end else if (cfg_null_need_rediscovery) begin")
@@ -641,18 +692,28 @@ def emit_verilog(test_hooks: bool) -> str:
     w("      end")
     w()
     w("      ST_CHANGE_SPEED: begin")
-    w("        // M1: state exists; Data Rate stays 0 (SPEC §6.1).")
+    w("        // Official fail timeout 48 ms → Idle (SPEC §6.1 / §3.4.3.9).")
+    w("        // M1 does not change rate. Electrical-idle stay still §13-open.")
     w("        if (tmr_to) begin")
-    w("          st_n  = ST_RETRAIN;")
-    w("          sub_n = SUB_0;")
+    w("          st_n            = ST_LINK_IDLE;")
+    w("          sub_n           = SUB_0;")
+    w("          to_idle_fail    = 1'b1;")
+    w("          to_idle_timeout = 1'b1;")
     w("        end")
     w("      end")
     w()
     w("      ST_EQUALIZATION: begin")
-    w("        // M1 stub: empty-spin then Retrain (SPEC §6.1 / §13.2).")
-    w("        if (tmr_to) begin")
-    w("          st_n  = ST_RETRAIN;")
-    w("          sub_n = SUB_0;")
+    w("        // Official ≤DR4: EQ.Passive 32 ms then EQ.Active 24 ms → Retrain")
+    w("        // (SPEC §6.1 / §3.4.2.9 / §3.4.3.10; PR #9 @1277cce0).")
+    w("        if (sub == SUB_0) begin")
+    w("          if (tmr_to) begin")
+    w("            sub_n = SUB_1;")
+    w("          end")
+    w("        end else begin")
+    w("          if (tmr_to) begin")
+    w("            st_n  = ST_RETRAIN;")
+    w("            sub_n = SUB_0;")
+    w("          end")
     w("        end")
     w("      end")
     w()
@@ -671,10 +732,10 @@ def emit_verilog(test_hooks: bool) -> str:
     w("      st            <= ST_LINK_IDLE;")
     w("      sub           <= SUB_0;")
     w("      tmr           <= {TMR_W{1'b0}};")
-    w("      null_cnt      <= 8'd0;")
     w("      probe_try     <= 8'd0;")
     w("      retrain_left  <= P_MAX_RETRAIN[7:0];")
     w("      saw_rx_ltb    <= 1'b0;")
+    w("      disc_short    <= 1'b0;")
     w("      train_fail_q  <= 1'b0;")
     w("      train_to_q    <= 1'b0;")
     w("      rx_type_q     <= 8'd0;")
@@ -694,8 +755,8 @@ def emit_verilog(test_hooks: bool) -> str:
     w("      if (st_enter) begin")
     w("        tmr        <= {TMR_W{1'b0}};")
     w("        saw_rx_ltb <= 1'b0;")
-    w("        if (st_n == ST_SEND_NULLBLOCK)")
-    w("          null_cnt <= 8'd0;")
+    w("        if (st_n == ST_DISCOVERY)")
+    w("          disc_short <= (st == ST_RETRAIN) || (st == ST_CONFIG);")
     w("        if (st_n == ST_PROBE && sub_n == SUB_0 && st == ST_PROBE)")
     w("          probe_try <= (probe_try == 8'hFF) ? probe_try : (probe_try + 8'd1);")
     w("        if (st_n == ST_PROBE && st == ST_LINK_IDLE)")
@@ -708,8 +769,6 @@ def emit_verilog(test_hooks: bool) -> str:
     w("          retrain_left <= P_MAX_RETRAIN[7:0];")
     w("      end else begin")
     w("        tmr <= tmr_inc;")
-    w("        if (st == ST_SEND_NULLBLOCK && null_cnt != 8'hFF)")
-    w("          null_cnt <= null_cnt + 8'd1;")
     w("      end")
     w()
     w("      if (pcs2lmsm_ltb_valid) begin")
@@ -727,22 +786,25 @@ def emit_verilog(test_hooks: bool) -> str:
     w("  end")
     w()
     w("  // Keep latched RX fields that do not steer the SM in the cone.")
-    w("  wire unused_rx_hold = ^{rx_link_q, rx_lane_q, rx_tlw_q, rx_rlw_q, rx_fec_ctrl_q};")
+    w("  wire link_id_is_null = (rx_link_q == P_LINK_ID_NULL[7:0]);")
+    w("  wire unused_rx_hold = ^{rx_link_q, rx_lane_q, rx_tlw_q, rx_rlw_q, rx_fec_ctrl_q,")
+    w("                          link_id_is_null};")
     w("  wire unused_hold_tie = unused_rx_hold & 1'b0;")
     w()
     w("  // ------------------------------------------------------------------")
     w("  // Outputs")
     w("  // ------------------------------------------------------------------")
     w("  assign lmsm_st   = st;")
+    w("  // LinkUp/LinkReady assignment points SPEC §6.1 (PR #9 @1277cce0).")
+    w("  // Retrain-period LinkUp still §13-open: keep Null|Active (current).")
     w("  assign link_up   = (st == ST_SEND_NULLBLOCK) | (st == ST_LINK_ACTIVE);")
     w("  assign link_ready = (st == ST_LINK_ACTIVE);")
     w("  assign lmsm_retrain_ack = (st == ST_RETRAIN);")
     w("  assign train_fail   = train_fail_q;")
     w("  assign train_to_inc = train_to_q;")
     w()
-    w("  // PMA sideband. pma_*_width encoding table still 待定 (SPEC §3.2.5 / §13.2).")
-    w("  // CSR PARAM_PHY.NUM_LANES_* is now binary 1/2/4/8 (SPEC §9 / REGMAP);")
-    w("  // drive the same legal set here so reserved 0/3/5/6/7 are never produced.")
+    w("  // PMA width encoding = PARAM_PHY.NUM_LANES_* binary 1/2/4/8")
+    w("  // (SPEC §13 / §9 per PR #9 @1277cce0). Never produce reserved values.")
     w("  assign pma_data_rate_sel   = 4'd0; // SPEC §9 DATA_RATE = 0")
     w("  assign pma_tx_width =")
     w("      (NUM_LANES_TX == 8) ? 4'd8 :")
@@ -757,19 +819,20 @@ def emit_verilog(test_hooks: bool) -> str:
     w("  assign pma_polarity_inv    = cfg_polarity_inv;")
     w("  assign pma_probe_pulse_en  = (st == ST_PROBE) && (sub == SUB_0);")
     w()
-    w("  // Pattern (SPEC §3.3.4). PCS latches at each LMB start.")
+    w("  // Pattern (SPEC §3.3.4). Send_NullBlock = DLL Null Blocks (pattern=3),")
+    w("  // not a Type=0 LTB (PR #9 @1277cce0). RXEQ uses LTB Type 0xE0.")
     w("  assign lmsm2pcs_pattern =")
-    w("      (st == ST_LINK_IDLE)                        ? PAT_IDLE :")
-    w("      ((st == ST_PROBE) || (st == ST_RXEQ_OPTIMIZE)) ? PAT_EEIB :")
-    w("      (st == ST_LINK_ACTIVE)                      ? PAT_DLL  :")
+    w("      (st == ST_LINK_IDLE)      ? PAT_IDLE :")
+    w("      (st == ST_PROBE)          ? PAT_EEIB :")
+    w("      ((st == ST_SEND_NULLBLOCK) || (st == ST_LINK_ACTIVE)) ? PAT_DLL :")
     w("                                                    PAT_LTB;")
     w()
+    w("  wire use_rxeq = (st == ST_RXEQ_OPTIMIZE);")
     w("  wire use_dltb = (st == ST_DISCOVERY);")
     w("  wire use_cltb = (st == ST_CONFIG);")
     w("  wire use_rltb = (st == ST_RETRAIN) || (st == ST_CHANGE_SPEED);")
     w("  wire use_eltb = (st == ST_EQUALIZATION);")
-    w("  wire use_nltb = (st == ST_SEND_NULLBLOCK);")
-    w("  assign lmsm2pcs_ltb_valid = use_dltb | use_cltb | use_rltb | use_eltb | use_nltb;")
+    w("  assign lmsm2pcs_ltb_valid = use_rxeq | use_dltb | use_cltb | use_rltb | use_eltb;")
     w()
     w("  // Structural 3-way mux: only PHYS / ASCEND / NULL. Default NULL (2).")
     w("  // Encoding 3 is RESERVED (SPEC §3.3.4). No path assigns 2'd3 / 2'b11.")
@@ -792,19 +855,22 @@ def emit_verilog(test_hooks: bool) -> str:
     w("    end")
     w("  endgenerate")
     w(f"  wire map_is_zero = (cfg_lane_id_map == {map_w}'d0);")
-    w("  // PHYS/NULL: PCS ignores map (SPEC §3.3.4). Drive NULL sentinel so the")
-    w("  // open §3.4.1.1 value is a named parameter, not a magic number.")
+    w("  // PHYS/NULL: PCS ignores map (SPEC §3.3.4). Drive Lane_ID NULL = 8'hFF.")
     w("  assign lmsm2pcs_lane_id_map = sel_ascend")
     w("      ? (map_is_zero ? auto_ascend : cfg_lane_id_map)")
     w("      : null_map;")
     w()
-    w("  // TX LTB fields: live for the type this state sends; else 0 (§3.3.4).")
+    w("  // TX LTB Type per substate (SPEC §3.3.4). No NullBlock Type.")
     w("  assign lmsm2pcs_ltb_type =")
-    w("      use_dltb ? P_LTB_TYPE_DLTB[7:0] :")
-    w("      use_cltb ? P_LTB_TYPE_CLTB[7:0] :")
-    w("      use_rltb ? P_LTB_TYPE_RLTB[7:0] :")
-    w("      use_eltb ? P_LTB_TYPE_ELTB[7:0] :")
-    w("      use_nltb ? P_LTB_TYPE_NULL[7:0] : 8'd0;")
+    w("      use_rxeq ? P_LTB_TYPE_RXEQ[7:0] :")
+    w("      use_dltb ? ((sub == SUB_0) ? P_LTB_TYPE_DLTB_ACTIVE[7:0]")
+    w("                                : P_LTB_TYPE_DLTB_CONFIRM[7:0]) :")
+    w("      use_cltb ? ((sub == SUB_0) ? P_LTB_TYPE_CLTB_ACTIVE[7:0] :")
+    w("                  (sub == SUB_1) ? P_LTB_TYPE_CLTB_CHECK[7:0] :")
+    w("                                  P_LTB_TYPE_CLTB_CONFIRM[7:0]) :")
+    w("      use_rltb ? ((sub == SUB_0) ? P_LTB_TYPE_RLTB_ACTIVE[7:0]")
+    w("                                : P_LTB_TYPE_RLTB_CONFIRM[7:0]) :")
+    w("      use_eltb ? P_LTB_TYPE_ELTB[7:0] : 8'd0;")
     w()
     w("  wire use_dltb_cltb = use_dltb | use_cltb;")
     w("  assign lmsm2pcs_link_id = use_dltb_cltb ? cfg_link_id : 8'd0;")
@@ -813,7 +879,9 @@ def emit_verilog(test_hooks: bool) -> str:
     w()
     w("  wire use_dltb_rltb = use_dltb | use_rltb;")
     w("  assign lmsm2pcs_data_rate_support_1 = use_dltb_rltb ? cfg_data_rate_support_1 : 8'd0;")
-    w("  assign lmsm2pcs_data_rate_support_2 = use_dltb_rltb ? cfg_data_rate_support_2 : 8'd0;")
+    w("  // Change_Speed = data_rate_support_2[7]; M1 drives 0 (SPEC §3.3.4).")
+    w("  assign lmsm2pcs_data_rate_support_2 = use_dltb_rltb")
+    w("      ? (cfg_data_rate_support_2 & 8'h7F) : 8'd0;")
     w()
     w("  assign lmsm2pcs_fec_mode_support        = use_dltb ? cfg_fec_mode_support        : 8'd0;")
     w("  assign lmsm2pcs_port_type               = use_dltb ? cfg_port_type               : 1'b0;")

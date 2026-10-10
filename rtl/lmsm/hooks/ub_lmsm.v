@@ -2,6 +2,8 @@
 // pyc4.0 leaf ub_lmsm. TEST_HOOKS=1 (Python generation-time).
 // Registers: pyc_reg semantics (sync, rst_pyc active-high, core_clk).
 // SPEC: §2.5, §3.2.5, §3.3.3, §3.3.4, §4.2, §6.1, §9, §10, §11.
+// LTB Type / official timeouts / NullBlock pattern: SPEC §3.3.4 / §6.1
+// per PR #9 @1277cce0 (pending merge). Do not merge that docs branch here.
 // CRC / padding / per-lane Lane_ID fill: PCS, not this leaf.
 // PORT_RST 16-cycle pulse: ub_csr; this leaf sees port_rst as sync clear.
 
@@ -9,27 +11,37 @@ module ub_lmsm #(
   parameter NUM_LANES_TX              = 1,      // SPEC §9 / REGMAP PARAM_PHY; binary 1/2/4/8
   parameter NUM_LANES_RX              = 1,      // SPEC §9; default equals TX
   parameter TMR_W                     = 32,     // core_clk counter width; F_CORE SPEC §4.1 / §9
-  parameter P_TMR_PROBE_WAIT          = 806,    // stub cycles; SPEC §13.2
-  parameter P_TMR_PROBE_CONFIRM       = 806,    // stub; SPEC §13.2
-  parameter P_TMR_RXEQ                = 80570,  // stub; SPEC §6.1 / §13.2 EQ empty-spin
-  parameter P_TMR_DISC_ACTIVE         = 1933680, // stub; SPEC §13.2
-  parameter P_TMR_DISC_CONFIRM        = 3867360, // stub; SPEC §13.2
-  parameter P_TMR_CFG                 = 161140,  // stub; SPEC §13.2
-  parameter P_TMR_NULL                = 161140,  // stub; SPEC §6.1 Send_NullBlock / §13.2
-  parameter P_TMR_RETRAIN_ACTIVE      = 1933680, // stub; SPEC §13.2
-  parameter P_TMR_RETRAIN_CONFIRM     = 3867360, // stub; SPEC §13.2
-  parameter P_TMR_CHG_SPD             = 80570,  // stub; SPEC §6.1 Change_Speed / §13.2
-  parameter P_TMR_EQ                  = 5156480, // stub; SPEC §6.1 / §13.2
-  parameter P_NULL_BLK_NEED           = 8,      // stub cycles; SPEC §6.1 「连续空块」
-  parameter P_MAX_RETRAIN             = 4,      // SPEC §9 NUM_PHY_REINIT_THRESHOLD (draft §13.1)
-  parameter P_PROBE_MAX_RETRY         = 8,      // stub; SPEC §13.2 / §13.3 Probe
-  parameter P_LTB_TYPE_DLTB           = 1,      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4
-  parameter P_LTB_TYPE_CLTB           = 2,      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4
-  parameter P_LTB_TYPE_RLTB           = 3,      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4
-  parameter P_LTB_TYPE_ELTB           = 4,      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4
-  parameter P_LTB_TYPE_NULL           = 0,      // stub; UB-PHY §3.4.1.1 / SPEC §3.3.4
-  parameter P_LANE_ID_NULL            = 255,   // stub; UB-PHY §3.4.1.1 NULL Lane_ID
-  parameter P_CHG_SPD_BIT             = 0       // stub; SPEC §3.3.4 / UB-PHY §3.4.1.1
+  parameter P_TMR_PROBE_WAIT          = 806,    // OPEN stub; SPEC §13 Probe
+  parameter P_TMR_PROBE_CONFIRM       = 806,    // OPEN stub; SPEC §13 Probe
+  parameter P_TMR_RXEQ                = 3867188, // 48 ms × F_CORE; SPEC §6.1 (PR #9 @1277cce0)
+  parameter P_TMR_DISC_ACTIVE         = 1933594, // 24 ms; SPEC §6.1 other-entry
+  parameter P_TMR_DISC_ACTIVE_RTR_CFG = 806,    // 10 us; from Retrain/Config §6.1
+  parameter P_TMR_DISC_CONFIRM        = 3867188, // 48 ms; SPEC §6.1
+  parameter P_TMR_CFG                 = 161133,  // 2 ms / Config substate; SPEC §6.1
+  parameter P_TMR_NULL                = 161133,  // 2 ms; SPEC §6.1 Send_NullBlock
+  parameter P_TMR_RETRAIN_ACTIVE      = 1933594, // 24 ms; SPEC §6.1
+  parameter P_TMR_RETRAIN_CONFIRM     = 3867188, // 48 ms; SPEC §6.1
+  parameter P_TMR_CHG_SPD             = 3867188, // 48 ms fail; SPEC §6.1
+  parameter P_TMR_EQ_PASSIVE          = 2578125, // 32 ms EQ.Passive; SPEC §6.1
+  parameter P_TMR_EQ_ACTIVE           = 1933594, // 24 ms EQ.Active; SPEC §6.1
+  parameter P_NULL_RX_NEED            = 8,      // 8 RX Null Blocks; SPEC §6.1 (count IF §13-open)
+  parameter P_NULL_TX_NEED            = 16,     // 16 TX after first RX; SPEC §6.1
+  parameter P_MAX_RETRAIN             = 4,      // SPEC §9 NUM_PHY_REINIT_THRESHOLD (draft)
+  parameter P_PROBE_MAX_RETRY         = 8,      // OPEN stub; SPEC §13 Probe
+  parameter P_LTB_TYPE_DLTB_ACTIVE    = 160,    // 0xA0 Discovery.Active; SPEC §3.3.4
+  parameter P_LTB_TYPE_DLTB_CONFIRM   = 161,    // 0xA1 Discovery.Confirm; SPEC §3.3.4
+  parameter P_LTB_TYPE_RXEQ           = 224,    // 0xE0 RXEQ_Optimize; SPEC §3.3.4
+  parameter P_LTB_TYPE_CLTB_ACTIVE    = 176,    // 0xB0 Config.Active; SPEC §3.3.4
+  parameter P_LTB_TYPE_CLTB_CHECK     = 177,    // 0xB1 Config.Check; SPEC §3.3.4
+  parameter P_LTB_TYPE_CLTB_CONFIRM   = 178,    // 0xB2 Config.Confirm; SPEC §3.3.4
+  parameter P_LTB_TYPE_RLTB_ACTIVE    = 192,    // 0xC0 Retrain.Active; SPEC §3.3.4
+  parameter P_LTB_TYPE_RLTB_CONFIRM   = 193,    // 0xC1 Retrain.Confirm; SPEC §3.3.4
+  parameter P_LTB_TYPE_RLTB_LP1       = 194,    // 0xC2 Retrain.LP1_PHY_Up; SPEC §3.3.4
+  parameter P_LTB_TYPE_RLTB_EQ_INIT   = 195,    // 0xC3 Retrain.EQ_Initial; SPEC §3.3.4
+  parameter P_LTB_TYPE_ELTB           = 208,    // 0xD0 Equalization; SPEC §3.3.4
+  parameter P_LANE_ID_NULL            = 255,   // 8'hFF LTB Lane_ID NULL; SPEC §3.3.4
+  parameter P_LINK_ID_NULL            = 255,   // 8'hFF LTB Link_ID NULL; SPEC §3.3.4
+  parameter P_CHG_SPD_BIT             = 7       // data_rate_support_2[7]; M1 drives 0; SPEC §3.3.4
 ) (
   input  wire                    core_clk,
   input  wire                    rst_pyc,
@@ -238,15 +250,15 @@ module ub_lmsm #(
   wire term_any = |pma_term_detect;
   wire eidle_any = |pma_rx_eidle_exit;
 
-  // pyc_reg: st, sub, tmr, null_cnt, probe_try, retrain_left, rx holds,
+  // pyc_reg: st, sub, tmr, probe_try, retrain_left, disc_short, rx holds,
   //          saw_rx_ltb, train pulses.
   reg [4:0]      st;
   reg [1:0]      sub;
   reg [TMR_W-1:0] tmr;
-  reg [7:0]      null_cnt;
   reg [7:0]      probe_try;
   reg [7:0]      retrain_left;
   reg            saw_rx_ltb;
+  reg            disc_short; // 1 if Discovery entered from Retrain/Config (§6.1 10 us)
   reg            train_fail_q;
   reg            train_to_q;
   reg [7:0]      rx_type_q;
@@ -288,9 +300,16 @@ module ub_lmsm #(
   wire unused_tie = unused_rx_aux & 1'b0;
 
   // Handshake quality used by Discovery/Config/Retrain.
-  wire rx_type_dltb = (rx_type_q == P_LTB_TYPE_DLTB[7:0]) || (P_LTB_TYPE_DLTB == 0);
-  wire rx_type_cltb = (rx_type_q == P_LTB_TYPE_CLTB[7:0]) || (P_LTB_TYPE_CLTB == 0);
-  wire rx_type_rltb = (rx_type_q == P_LTB_TYPE_RLTB[7:0]) || (P_LTB_TYPE_RLTB == 0);
+  // Type families: SPEC §3.3.4 (PR #9 @1277cce0).
+  wire rx_type_dltb = (rx_type_q == P_LTB_TYPE_DLTB_ACTIVE[7:0])
+                   | (rx_type_q == P_LTB_TYPE_DLTB_CONFIRM[7:0]);
+  wire rx_type_cltb = (rx_type_q == P_LTB_TYPE_CLTB_ACTIVE[7:0])
+                   | (rx_type_q == P_LTB_TYPE_CLTB_CHECK[7:0])
+                   | (rx_type_q == P_LTB_TYPE_CLTB_CONFIRM[7:0]);
+  wire rx_type_rltb = (rx_type_q == P_LTB_TYPE_RLTB_ACTIVE[7:0])
+                   | (rx_type_q == P_LTB_TYPE_RLTB_CONFIRM[7:0])
+                   | (rx_type_q == P_LTB_TYPE_RLTB_LP1[7:0])
+                   | (rx_type_q == P_LTB_TYPE_RLTB_EQ_INIT[7:0]);
   wire disc_ok = am_all & ~lid_bad_u & pcs_deskew_ok & saw_rx_ltb & rx_type_dltb;
   wire cfg_ok  = am_all & ~lid_bad_u & saw_rx_ltb & rx_type_cltb;
   wire rtr_ok  = am_all & ~lid_bad_u & (saw_rx_ltb ? rx_type_rltb : 1'b1);
@@ -298,7 +317,7 @@ module ub_lmsm #(
   wire rx_chg_spd = rx_drs2_q[P_CHG_SPD_BIT] | cfg_req_change_speed;
   wire rx_want_eq = rx_req_eq_q | cfg_req_equalization | cfg_request_equalization;
 
-  // Timer compare. Limits are parameters (implementation-defined, §13.2).
+  // Timer compare. Official limits SPEC §6.1 (PR #9 @1277cce0); Probe still §13.
   reg [TMR_W-1:0] tmr_lim;
   always @* begin
     tmr_lim = {TMR_W{1'b1}};
@@ -308,7 +327,9 @@ module ub_lmsm #(
                          : P_TMR_PROBE_CONFIRM[TMR_W-1:0];
       ST_RXEQ_OPTIMIZE: tmr_lim = P_TMR_RXEQ[TMR_W-1:0];
       ST_DISCOVERY: tmr_lim = (sub == SUB_0)
-                            ? P_TMR_DISC_ACTIVE[TMR_W-1:0]
+                            ? (disc_short
+                               ? P_TMR_DISC_ACTIVE_RTR_CFG[TMR_W-1:0]
+                               : P_TMR_DISC_ACTIVE[TMR_W-1:0])
                             : P_TMR_DISC_CONFIRM[TMR_W-1:0];
       ST_CONFIG: tmr_lim = P_TMR_CFG[TMR_W-1:0];
       ST_SEND_NULLBLOCK: tmr_lim = P_TMR_NULL[TMR_W-1:0];
@@ -316,7 +337,9 @@ module ub_lmsm #(
                            ? P_TMR_RETRAIN_ACTIVE[TMR_W-1:0]
                            : P_TMR_RETRAIN_CONFIRM[TMR_W-1:0];
       ST_CHANGE_SPEED: tmr_lim = P_TMR_CHG_SPD[TMR_W-1:0];
-      ST_EQUALIZATION: tmr_lim = P_TMR_EQ[TMR_W-1:0];
+      ST_EQUALIZATION: tmr_lim = (sub == SUB_0)
+                               ? P_TMR_EQ_PASSIVE[TMR_W-1:0]
+                               : P_TMR_EQ_ACTIVE[TMR_W-1:0];
       ST_LINK_IDLE,
       ST_LINK_ACTIVE: tmr_lim = {TMR_W{1'b1}};
       default: tmr_lim = {TMR_W{1'b1}}; // WAIVER_LMSM_FSM_DEFAULT
@@ -388,7 +411,7 @@ module ub_lmsm #(
       end
 
       ST_RXEQ_OPTIMIZE: begin
-        // M1 stub: empty-spin then Discovery (SPEC §6.1 / §13.2).
+        // Official 48 ms then Discovery.Active (SPEC §6.1 / §3.4.3.3).
         if (tmr_to) begin
           st_n  = ST_DISCOVERY;
           sub_n = SUB_0;
@@ -454,7 +477,15 @@ module ub_lmsm #(
       end
 
       ST_SEND_NULLBLOCK: begin
-        if (null_cnt >= P_NULL_BLK_NEED[7:0]) begin
+        // Official exit (SPEC §6.1 / §3.4.3.6): 8 consecutive RX Null
+        // Blocks on all configured lanes AND >=16 TX Null Blocks after
+        // first RX, after AMCTL with SDF, deskew done.
+        // OPEN (SPEC §13 @1277cce0): pcs2lmsm_null_blk is a recommendation,
+        // not a §3.3.4 port. Do not count core_clk beats as blocks.
+        // Active is unreachable until Xia adds the strobe.
+        if (1'b0 && pcs_deskew_ok
+            && (P_NULL_RX_NEED[7:0] == 8'd0)
+            && (P_NULL_TX_NEED[7:0] == 8'd0)) begin
           st_n  = ST_LINK_ACTIVE;
           sub_n = SUB_0;
         end else if (cfg_null_need_rediscovery) begin
@@ -515,18 +546,28 @@ module ub_lmsm #(
       end
 
       ST_CHANGE_SPEED: begin
-        // M1: state exists; Data Rate stays 0 (SPEC §6.1).
+        // Official fail timeout 48 ms → Idle (SPEC §6.1 / §3.4.3.9).
+        // M1 does not change rate. Electrical-idle stay still §13-open.
         if (tmr_to) begin
-          st_n  = ST_RETRAIN;
-          sub_n = SUB_0;
+          st_n            = ST_LINK_IDLE;
+          sub_n           = SUB_0;
+          to_idle_fail    = 1'b1;
+          to_idle_timeout = 1'b1;
         end
       end
 
       ST_EQUALIZATION: begin
-        // M1 stub: empty-spin then Retrain (SPEC §6.1 / §13.2).
-        if (tmr_to) begin
-          st_n  = ST_RETRAIN;
-          sub_n = SUB_0;
+        // Official ≤DR4: EQ.Passive 32 ms then EQ.Active 24 ms → Retrain
+        // (SPEC §6.1 / §3.4.2.9 / §3.4.3.10; PR #9 @1277cce0).
+        if (sub == SUB_0) begin
+          if (tmr_to) begin
+            sub_n = SUB_1;
+          end
+        end else begin
+          if (tmr_to) begin
+            st_n  = ST_RETRAIN;
+            sub_n = SUB_0;
+          end
         end
       end
 
@@ -545,10 +586,10 @@ module ub_lmsm #(
       st            <= ST_LINK_IDLE;
       sub           <= SUB_0;
       tmr           <= {TMR_W{1'b0}};
-      null_cnt      <= 8'd0;
       probe_try     <= 8'd0;
       retrain_left  <= P_MAX_RETRAIN[7:0];
       saw_rx_ltb    <= 1'b0;
+      disc_short    <= 1'b0;
       train_fail_q  <= 1'b0;
       train_to_q    <= 1'b0;
       rx_type_q     <= 8'd0;
@@ -568,8 +609,8 @@ module ub_lmsm #(
       if (st_enter) begin
         tmr        <= {TMR_W{1'b0}};
         saw_rx_ltb <= 1'b0;
-        if (st_n == ST_SEND_NULLBLOCK)
-          null_cnt <= 8'd0;
+        if (st_n == ST_DISCOVERY)
+          disc_short <= (st == ST_RETRAIN) || (st == ST_CONFIG);
         if (st_n == ST_PROBE && sub_n == SUB_0 && st == ST_PROBE)
           probe_try <= (probe_try == 8'hFF) ? probe_try : (probe_try + 8'd1);
         if (st_n == ST_PROBE && st == ST_LINK_IDLE)
@@ -582,8 +623,6 @@ module ub_lmsm #(
           retrain_left <= P_MAX_RETRAIN[7:0];
       end else begin
         tmr <= tmr_inc;
-        if (st == ST_SEND_NULLBLOCK && null_cnt != 8'hFF)
-          null_cnt <= null_cnt + 8'd1;
       end
 
       if (pcs2lmsm_ltb_valid) begin
@@ -601,22 +640,25 @@ module ub_lmsm #(
   end
 
   // Keep latched RX fields that do not steer the SM in the cone.
-  wire unused_rx_hold = ^{rx_link_q, rx_lane_q, rx_tlw_q, rx_rlw_q, rx_fec_ctrl_q};
+  wire link_id_is_null = (rx_link_q == P_LINK_ID_NULL[7:0]);
+  wire unused_rx_hold = ^{rx_link_q, rx_lane_q, rx_tlw_q, rx_rlw_q, rx_fec_ctrl_q,
+                          link_id_is_null};
   wire unused_hold_tie = unused_rx_hold & 1'b0;
 
   // ------------------------------------------------------------------
   // Outputs
   // ------------------------------------------------------------------
   assign lmsm_st   = st;
+  // LinkUp/LinkReady assignment points SPEC §6.1 (PR #9 @1277cce0).
+  // Retrain-period LinkUp still §13-open: keep Null|Active (current).
   assign link_up   = (st == ST_SEND_NULLBLOCK) | (st == ST_LINK_ACTIVE);
   assign link_ready = (st == ST_LINK_ACTIVE);
   assign lmsm_retrain_ack = (st == ST_RETRAIN);
   assign train_fail   = train_fail_q;
   assign train_to_inc = train_to_q;
 
-  // PMA sideband. pma_*_width encoding table still 待定 (SPEC §3.2.5 / §13.2).
-  // CSR PARAM_PHY.NUM_LANES_* is now binary 1/2/4/8 (SPEC §9 / REGMAP);
-  // drive the same legal set here so reserved 0/3/5/6/7 are never produced.
+  // PMA width encoding = PARAM_PHY.NUM_LANES_* binary 1/2/4/8
+  // (SPEC §13 / §9 per PR #9 @1277cce0). Never produce reserved values.
   assign pma_data_rate_sel   = 4'd0; // SPEC §9 DATA_RATE = 0
   assign pma_tx_width =
       (NUM_LANES_TX == 8) ? 4'd8 :
@@ -631,19 +673,20 @@ module ub_lmsm #(
   assign pma_polarity_inv    = cfg_polarity_inv;
   assign pma_probe_pulse_en  = (st == ST_PROBE) && (sub == SUB_0);
 
-  // Pattern (SPEC §3.3.4). PCS latches at each LMB start.
+  // Pattern (SPEC §3.3.4). Send_NullBlock = DLL Null Blocks (pattern=3),
+  // not a Type=0 LTB (PR #9 @1277cce0). RXEQ uses LTB Type 0xE0.
   assign lmsm2pcs_pattern =
-      (st == ST_LINK_IDLE)                        ? PAT_IDLE :
-      ((st == ST_PROBE) || (st == ST_RXEQ_OPTIMIZE)) ? PAT_EEIB :
-      (st == ST_LINK_ACTIVE)                      ? PAT_DLL  :
+      (st == ST_LINK_IDLE)      ? PAT_IDLE :
+      (st == ST_PROBE)          ? PAT_EEIB :
+      ((st == ST_SEND_NULLBLOCK) || (st == ST_LINK_ACTIVE)) ? PAT_DLL :
                                                     PAT_LTB;
 
+  wire use_rxeq = (st == ST_RXEQ_OPTIMIZE);
   wire use_dltb = (st == ST_DISCOVERY);
   wire use_cltb = (st == ST_CONFIG);
   wire use_rltb = (st == ST_RETRAIN) || (st == ST_CHANGE_SPEED);
   wire use_eltb = (st == ST_EQUALIZATION);
-  wire use_nltb = (st == ST_SEND_NULLBLOCK);
-  assign lmsm2pcs_ltb_valid = use_dltb | use_cltb | use_rltb | use_eltb | use_nltb;
+  assign lmsm2pcs_ltb_valid = use_rxeq | use_dltb | use_cltb | use_rltb | use_eltb;
 
   // Structural 3-way mux: only PHYS / ASCEND / NULL. Default NULL (2).
   // Encoding 3 is RESERVED (SPEC §3.3.4). No path assigns 2'd3 / 2'b11.
@@ -666,19 +709,22 @@ module ub_lmsm #(
     end
   endgenerate
   wire map_is_zero = (cfg_lane_id_map == 8'd0);
-  // PHYS/NULL: PCS ignores map (SPEC §3.3.4). Drive NULL sentinel so the
-  // open §3.4.1.1 value is a named parameter, not a magic number.
+  // PHYS/NULL: PCS ignores map (SPEC §3.3.4). Drive Lane_ID NULL = 8'hFF.
   assign lmsm2pcs_lane_id_map = sel_ascend
       ? (map_is_zero ? auto_ascend : cfg_lane_id_map)
       : null_map;
 
-  // TX LTB fields: live for the type this state sends; else 0 (§3.3.4).
+  // TX LTB Type per substate (SPEC §3.3.4). No NullBlock Type.
   assign lmsm2pcs_ltb_type =
-      use_dltb ? P_LTB_TYPE_DLTB[7:0] :
-      use_cltb ? P_LTB_TYPE_CLTB[7:0] :
-      use_rltb ? P_LTB_TYPE_RLTB[7:0] :
-      use_eltb ? P_LTB_TYPE_ELTB[7:0] :
-      use_nltb ? P_LTB_TYPE_NULL[7:0] : 8'd0;
+      use_rxeq ? P_LTB_TYPE_RXEQ[7:0] :
+      use_dltb ? ((sub == SUB_0) ? P_LTB_TYPE_DLTB_ACTIVE[7:0]
+                                : P_LTB_TYPE_DLTB_CONFIRM[7:0]) :
+      use_cltb ? ((sub == SUB_0) ? P_LTB_TYPE_CLTB_ACTIVE[7:0] :
+                  (sub == SUB_1) ? P_LTB_TYPE_CLTB_CHECK[7:0] :
+                                  P_LTB_TYPE_CLTB_CONFIRM[7:0]) :
+      use_rltb ? ((sub == SUB_0) ? P_LTB_TYPE_RLTB_ACTIVE[7:0]
+                                : P_LTB_TYPE_RLTB_CONFIRM[7:0]) :
+      use_eltb ? P_LTB_TYPE_ELTB[7:0] : 8'd0;
 
   wire use_dltb_cltb = use_dltb | use_cltb;
   assign lmsm2pcs_link_id = use_dltb_cltb ? cfg_link_id : 8'd0;
@@ -687,7 +733,9 @@ module ub_lmsm #(
 
   wire use_dltb_rltb = use_dltb | use_rltb;
   assign lmsm2pcs_data_rate_support_1 = use_dltb_rltb ? cfg_data_rate_support_1 : 8'd0;
-  assign lmsm2pcs_data_rate_support_2 = use_dltb_rltb ? cfg_data_rate_support_2 : 8'd0;
+  // Change_Speed = data_rate_support_2[7]; M1 drives 0 (SPEC §3.3.4).
+  assign lmsm2pcs_data_rate_support_2 = use_dltb_rltb
+      ? (cfg_data_rate_support_2 & 8'h7F) : 8'd0;
 
   assign lmsm2pcs_fec_mode_support        = use_dltb ? cfg_fec_mode_support        : 8'd0;
   assign lmsm2pcs_port_type               = use_dltb ? cfg_port_type               : 1'b0;

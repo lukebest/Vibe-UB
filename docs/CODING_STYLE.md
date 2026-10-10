@@ -149,3 +149,16 @@
 其它标 SRAM / 行为 stub 的大缓冲（如线 A `ub_dll_retry`）**应当**用同一原语，避免第二套 stub 口。
 
 HOOKS 上的 backdoor 只允许 SPEC §10 点名的阵列，口名 `tb_<inst>_bd_*`（阵列口 + `tb_<inst>_bd_vld_*`）与门控见 SPEC §10.5 与上文 §4。PRODUCT 无 `tb_*`。
+
+---
+
+## 11. 寄存器表单一来源
+
+`docs/regmap/regmap.yaml` 是 CSR 的唯一可编辑源。`docs/REGMAP.md` 与
+`pycircuit/csr/ub_csr.py` / `tb/ral/ub_regmodel.py` /
+固件头 / `model/regs.py` 均由 `python3 scripts/gen_regmap.py` 生成，禁止手改。
+Verilog 由 `scripts/emit_rtl.py` 写入 `rtl/csr/ub_csr_<tag>.v`（PRODUCT）与
+`rtl/csr/hooks/ub_csr_<tag>.v`（HOOKS）。叶名是 `ub_csr`（SPEC §2.2
+`<leaf>_<tag>`）。网表 `` `include "pyc_reg.v" ``，lint / 综合 / 门禁用
+`-I rtl/pyc_lib`（SPEC §2.2 单副本；`rtl/pyc_lib/` 尚未合入 main）。
+约定与端口拆分见 [regmap/README.md](regmap/README.md)。

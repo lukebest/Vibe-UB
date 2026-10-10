@@ -1,0 +1,462 @@
+#!/usr/bin/env python3
+"""Load and validate docs/regmap/regmap.yaml (stdlib + PyYAML).
+
+This is the documented Python validator for the register map. A JSON Schema
+lives at docs/regmap/schema.json; this module enforces the semantic rules
+that schema cannot express (overlap, uniqueness, reset fit, enum width).
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+from typing import Any, Iterable
+
+try:
+    import yaml
+except ImportError as exc:  # pragma: no cover
+    raise SystemExit("PyYAML is required: pip install pyyaml") from exc
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_YAML = REPO_ROOT / "docs" / "regmap" / "regmap.yaml"
+DEFAULT_SCHEMA = REPO_ROOT / "docs" / "regmap" / "schema.json"
+
+ACCESS_TYPES = frozenset({"RW", "RO", "WO", "W1C", "MIX"})
+WORD_BITS = 32
+WORD_ALIGN = 4
+
+
+class RegmapError(ValueError):
+    """Semantic or structural register-map error."""
+
+
+def parse_int(value: Any, *, allow_na: bool = False) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise RegmapError(f"boolean is not a numeric value: {value!r}")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if allow_na and text == "NA":
+            return None
+        if text.startswith(("0x", "0X")):
+            return int(text, 16)
+        return int(text, 0)
+    raise RegmapError(f"cannot parse integer from {value!r}")
+
+
+def field_width(field: dict[str, Any]) -> int:
+    return int(field["msb"]) - int(field["lsb"]) + 1
+
+
+def field_mask(field: dict[str, Any]) -> int:
+    width = field_width(field)
+    return ((1 << width) - 1) << int(field["lsb"])
+
+
+def reset_int(field: dict[str, Any]) -> int | None:
+    return parse_int(field.get("reset"), allow_na=True)
+
+
+VARIANT_KEYS = ("NUM_LANES", "NUM_VL", "SCR_PLACEHOLDER")
+NUM_LANES_LEGAL = frozenset({1, 2, 4, 8})
+VARIANT_GEOM_RE = re.compile(r"x(\d+)_vl(\d+)")
+
+
+def parse_variant_geom(tag: str) -> tuple[int, int] | None:
+    match = VARIANT_GEOM_RE.search(tag)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def is_product_variant(tag: str) -> bool:
+    return tag.startswith("product_")
+
+
+def is_placeholder_variant(tag: str) -> bool:
+    return tag.endswith("_placeholder")
+
+
+def variant_reset_word(params: dict[str, int]) -> int:
+    return (int(params["NUM_VL"]) & 0xF) | ((int(params["SCR_PLACEHOLDER"]) & 1) << 4)
+
+
+def variant_tags(data: dict[str, Any]) -> dict[str, dict[str, int]]:
+    raw = data.get("variants") or {}
+    tags: dict[str, dict[str, int]] = {}
+    for key, val in raw.items():
+        if key == "default" or not isinstance(val, dict):
+            continue
+        tags[str(key)] = {str(k): int(parse_int(v) or 0) for k, v in val.items()}
+    return tags
+
+
+def default_variant(data: dict[str, Any]) -> str:
+    raw = data.get("variants") or {}
+    listed = raw.get("default")
+    tags = variant_tags(data)
+    if isinstance(listed, str) and listed in tags:
+        return listed
+    if not tags:
+        raise RegmapError("variants: table is empty")
+    return next(iter(tags))
+
+
+def csr_module_name(tag: str) -> str:
+    """SPEC §2.2: <leaf>_<tag> when more than one parameter set exists."""
+    return f"ub_csr_{tag}"
+
+
+def reset_key_of(field: dict[str, Any]) -> str | None:
+    if field.get("reset_from") != "variant":
+        return None
+    return str(field.get("reset_key") or field["name"])
+
+
+def resolve_reset(field: dict[str, Any], params: dict[str, int]) -> int | None:
+    key = reset_key_of(field)
+    if key is not None:
+        if key not in params:
+            raise RegmapError(f"reset_from variant missing key {key!r}")
+        return int(params[key])
+    return reset_int(field)
+
+
+def is_window_reg(reg: dict[str, Any]) -> bool:
+    if reg.get("kind") == "window":
+        return True
+    fields = reg.get("fields") or []
+    return any(f.get("kind") == "window" or f.get("name") == "WINDOW" for f in fields)
+
+
+def load_regmap(path: Path | None = None) -> dict[str, Any]:
+    src = Path(path) if path is not None else DEFAULT_YAML
+    with src.open(encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+    if not isinstance(data, dict):
+        raise RegmapError(f"{src}: root must be a mapping")
+    return data
+
+
+def load_schema(path: Path | None = None) -> dict[str, Any]:
+    src = Path(path) if path is not None else DEFAULT_SCHEMA
+    return json.loads(src.read_text(encoding="utf-8"))
+
+
+def _require(obj: dict[str, Any], keys: Iterable[str], where: str) -> None:
+    missing = [k for k in keys if k not in obj]
+    if missing:
+        raise RegmapError(f"{where}: missing keys {missing}")
+
+
+def validate_schema_lite(data: dict[str, Any]) -> list[str]:
+    """Structural checks mirroring docs/regmap/schema.json (no jsonschema dep)."""
+    errors: list[str] = []
+    for key in ("meta", "global_rules", "windows", "registers", "variants"):
+        if key not in data:
+            errors.append(f"root missing {key}")
+    meta = data.get("meta") or {}
+    for key in (
+        "title",
+        "companion_spec",
+        "spec_baseline",
+        "bus",
+        "byte_order",
+        "machine_readable_columns",
+        "access_types",
+    ):
+        if key not in meta:
+            errors.append(f"meta missing {key}")
+    bus = meta.get("bus") or {}
+    for key in (
+        "data_width_bits",
+        "addr_width_bits",
+        "alignment_bytes",
+        "full_word_writes_only",
+        "wstrb",
+        "read_latency_cycles",
+        "unmapped",
+    ):
+        if key not in bus:
+            errors.append(f"meta.bus missing {key}")
+    if bus.get("data_width_bits") != 32:
+        errors.append("bus.data_width_bits must be 32")
+    if bus.get("addr_width_bits") != 16:
+        errors.append("bus.addr_width_bits must be 16")
+    if bus.get("alignment_bytes") != 4:
+        errors.append("bus.alignment_bytes must be 4")
+    if bus.get("full_word_writes_only") is not True:
+        errors.append("bus.full_word_writes_only must be true")
+    if bus.get("wstrb") is not False:
+        errors.append("bus.wstrb must be false")
+    if bus.get("read_latency_cycles") != 1:
+        errors.append("bus.read_latency_cycles must be 1")
+    if bus.get("write_rvalid", 0) != 0:
+        errors.append("bus.write_rvalid must be 0 (SPEC §3.2.3 write next-cycle)")
+    if bus.get("write_latency_cycles", 1) != 1:
+        errors.append("bus.write_latency_cycles must be 1")
+    unmapped = bus.get("unmapped") or {}
+    if unmapped.get("read_data") != 0 or unmapped.get("read_csr_err") != 1:
+        errors.append("unmapped read must be data=0 csr_err=1")
+    if unmapped.get("write") != "ignore" or unmapped.get("write_csr_err") != 1:
+        errors.append("unmapped write must be ignore / csr_err=1")
+    rules = data.get("global_rules") or {}
+    if rules.get("full_word_writes_only") is not True:
+        errors.append("global_rules.full_word_writes_only must be true")
+    if rules.get("read_latency_cycles") != 1:
+        errors.append("global_rules.read_latency_cycles must be 1")
+    if rules.get("write_rvalid_next_cycle", 0) != 0:
+        errors.append("global_rules.write_rvalid_next_cycle must be 0")
+    if rules.get("unmapped_csr_err") is not True:
+        errors.append("global_rules.unmapped_csr_err must be true")
+    return errors
+
+
+def validate_semantics(data: dict[str, Any]) -> list[str]:
+    """Field overlap, 32-bit fit, unique aligned addresses, enum/reset widths."""
+    errors: list[str] = []
+    windows = {w["id"]: w for w in data.get("windows") or [] if "id" in w}
+    seen_offsets: dict[int, str] = {}
+    seen_names: dict[str, int] = {}
+
+    for reg in data.get("registers") or []:
+        name = reg.get("name", "<unnamed>")
+        where = f"register {name}"
+        try:
+            _require(reg, ("name", "offset", "window", "fields"), where)
+            offset = parse_int(reg["offset"])
+            if offset is None:
+                raise RegmapError("offset is required")
+        except RegmapError as exc:
+            errors.append(str(exc))
+            continue
+
+        if offset in seen_offsets:
+            errors.append(
+                f"{where} offset 0x{offset:04X} duplicates {seen_offsets[offset]}"
+            )
+        seen_offsets[offset] = name
+        if name in seen_names:
+            errors.append(f"{where} name duplicates offset 0x{seen_names[name]:04X}")
+        seen_names[name] = offset
+
+        if offset % WORD_ALIGN != 0:
+            errors.append(f"{where} offset 0x{offset:04X} is not word-aligned")
+        if offset < 0 or offset > 0xFFFF:
+            errors.append(f"{where} offset 0x{offset:04X} outside 16-bit address")
+
+        win_id = reg.get("window")
+        if win_id not in windows:
+            errors.append(f"{where} window {win_id!r} is not defined")
+        else:
+            start = parse_int(windows[win_id]["start"]) or 0
+            end = parse_int(windows[win_id]["end"]) or 0
+            if not (start <= offset <= end):
+                errors.append(
+                    f"{where} offset 0x{offset:04X} outside window "
+                    f"{win_id} 0x{start:04X}-0x{end:04X}"
+                )
+
+        occupied = 0
+        field_names: set[str] = set()
+        for field in reg.get("fields") or []:
+            fname = field.get("name", "<field>")
+            fwhere = f"{where}.{fname}"
+            try:
+                _require(
+                    field,
+                    ("name", "msb", "lsb", "access", "description", "spec_ref"),
+                    fwhere,
+                )
+                if field.get("reset_from") != "variant" and "reset" not in field:
+                    raise RegmapError("missing reset (or reset_from: variant)")
+                if field.get("reset_from") == "variant" and "reset" in field:
+                    raise RegmapError("reset must not be hand-written when reset_from: variant")
+                msb = int(field["msb"])
+                lsb = int(field["lsb"])
+            except (RegmapError, TypeError, ValueError) as exc:
+                errors.append(f"{fwhere}: {exc}")
+                continue
+
+            if fname in field_names:
+                errors.append(f"{fwhere}: duplicate field name")
+            field_names.add(fname)
+
+            if not (0 <= lsb <= msb <= 31):
+                errors.append(f"{fwhere}: bits [{msb}:{lsb}] not within 31:0")
+                continue
+            width = msb - lsb + 1
+            mask = (1 << width) - 1
+            bits = mask << lsb
+            if occupied & bits:
+                errors.append(f"{fwhere}: overlaps another field")
+            occupied |= bits
+
+            access = field.get("access")
+            if access not in ACCESS_TYPES:
+                errors.append(f"{fwhere}: invalid access {access!r}")
+
+            rst = reset_int(field)
+            if rst is not None and rst != (rst & mask):
+                errors.append(
+                    f"{fwhere}: reset {field.get('reset')!r} does not fit width {width}"
+                )
+            if field.get("reset_from") == "variant":
+                key = reset_key_of(field)
+                if key not in VARIANT_KEYS:
+                    errors.append(f"{fwhere}: reset_key {key!r} not in {VARIANT_KEYS}")
+
+            for enum in field.get("enums") or []:
+                val = parse_int(enum.get("value"))
+                if val is None:
+                    errors.append(f"{fwhere}: enum missing value")
+                    continue
+                if val != (val & mask):
+                    errors.append(
+                        f"{fwhere}: enum {enum.get('name')}={val} does not fit width {width}"
+                    )
+
+            for val in field.get("legal_values") or []:
+                ival = parse_int(val)
+                if ival is None or ival != (ival & mask):
+                    errors.append(f"{fwhere}: legal value {val!r} does not fit width {width}")
+
+            for val in field.get("reserved_values") or []:
+                ival = parse_int(val)
+                if ival is None or ival != (ival & mask):
+                    errors.append(
+                        f"{fwhere}: reserved value {val!r} does not fit width {width}"
+                    )
+
+            if field.get("pulse_cycles") is not None:
+                cycles = parse_int(field["pulse_cycles"])
+                if cycles is None or cycles < 1:
+                    errors.append(f"{fwhere}: pulse_cycles must be >= 1")
+
+        if not is_window_reg(reg) and occupied != (1 << WORD_BITS) - 1:
+            missing = ((1 << WORD_BITS) - 1) ^ occupied
+            errors.append(
+                f"{where}: bits not fully specified (uncovered mask 0x{missing:08X}); "
+                "add RSVD or document a hole"
+            )
+
+    return errors
+
+
+def validate_variants(data: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    tags = variant_tags(data)
+    if not tags:
+        errors.append("variants: table required (SPEC §2.2 per-tag netlists)")
+        return errors
+    try:
+        default = default_variant(data)
+    except RegmapError as exc:
+        errors.append(str(exc))
+        return errors
+    if default not in tags:
+        errors.append(f"variants.default {default!r} is not a tag")
+    for tag, params in tags.items():
+        missing = [k for k in VARIANT_KEYS if k not in params]
+        if missing:
+            errors.append(f"variants.{tag}: missing {missing}")
+            continue
+        lanes = params["NUM_LANES"]
+        if lanes not in NUM_LANES_LEGAL:
+            errors.append(f"variants.{tag}: NUM_LANES={lanes} not in {sorted(NUM_LANES_LEGAL)}")
+        nvl = params["NUM_VL"]
+        if nvl < 1 or nvl > 15:
+            errors.append(f"variants.{tag}: NUM_VL={nvl} does not fit PARAM_VARIANT[3:0]")
+        scr = params["SCR_PLACEHOLDER"]
+        if scr not in (0, 1):
+            errors.append(f"variants.{tag}: SCR_PLACEHOLDER={scr} must be 0 or 1")
+        extra = [k for k in params if k not in VARIANT_KEYS]
+        if extra:
+            errors.append(f"variants.{tag}: unknown keys {extra}")
+        geom = parse_variant_geom(tag)
+        if geom is None:
+            errors.append(f"variants.{tag}: name must contain xN_vlM")
+        else:
+            want_lanes, want_vl = geom
+            if lanes != want_lanes:
+                errors.append(
+                    f"variants.{tag}: NUM_LANES={lanes} does not match x{want_lanes} in the name"
+                )
+            if nvl != want_vl:
+                errors.append(
+                    f"variants.{tag}: NUM_VL={nvl} does not match vl{want_vl} in the name"
+                )
+        if is_product_variant(tag) and scr != 0:
+            errors.append(
+                f"variants.{tag}: product_ variants must have SCR_PLACEHOLDER=0 "
+                "(PRODUCT never instantiates _placeholder scrambler)"
+            )
+        if scr == 1 and not is_placeholder_variant(tag):
+            errors.append(
+                f"variants.{tag}: SCR_PLACEHOLDER=1 only allowed when the name ends with _placeholder"
+            )
+        if is_placeholder_variant(tag) and scr != 1:
+            errors.append(
+                f"variants.{tag}: _placeholder variants must have SCR_PLACEHOLDER=1"
+            )
+        if is_product_variant(tag) and is_placeholder_variant(tag):
+            errors.append(f"variants.{tag}: product_ tag cannot also end with _placeholder")
+    if default in tags and not is_product_variant(default):
+        errors.append(f"variants.default {default!r} must be a product_ tag")
+
+    phy_has_lanes = any(
+        r.get("name") == "PARAM_PHY" and f.get("name") in ("NUM_LANES_TX", "NUM_LANES_RX")
+        for r, f in iter_fields(data)
+    )
+    for reg, field in iter_fields(data):
+        if reset_key_of(field) is None:
+            continue
+        for tag, params in tags.items():
+            try:
+                rst = resolve_reset(field, params)
+            except RegmapError as exc:
+                errors.append(f"{reg['name']}.{field['name']}/{tag}: {exc}")
+                continue
+            width = field_width(field)
+            mask = (1 << width) - 1
+            if rst is not None and rst != (rst & mask):
+                errors.append(
+                    f"{reg['name']}.{field['name']}/{tag}: reset {rst} does not fit width {width}"
+                )
+        if (
+            reg.get("name") == "PARAM_VARIANT"
+            and field.get("name") == "NUM_LANES"
+            and phy_has_lanes
+        ):
+            errors.append(
+                "PARAM_VARIANT.NUM_LANES duplicates PARAM_PHY.NUM_LANES_*; reuse the existing field"
+            )
+    return errors
+
+
+def validate_regmap(data: dict[str, Any]) -> list[str]:
+    return validate_schema_lite(data) + validate_semantics(data) + validate_variants(data)
+
+
+def assert_valid(data: dict[str, Any]) -> None:
+    errors = validate_regmap(data)
+    if errors:
+        joined = "\n".join(f"  - {e}" for e in errors)
+        raise RegmapError(f"regmap validation failed:\n{joined}")
+
+
+def iter_fields(data: dict[str, Any]):
+    for reg in data.get("registers") or []:
+        for field in reg.get("fields") or []:
+            yield reg, field
+
+
+def window_by_id(data: dict[str, Any], win_id: str) -> dict[str, Any]:
+    for win in data.get("windows") or []:
+        if win.get("id") == win_id:
+            return win
+    raise KeyError(win_id)

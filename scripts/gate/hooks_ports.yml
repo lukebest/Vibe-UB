@@ -77,3 +77,33 @@ entries:
     approver: lukebest
     approved_date: 2026-10-10
     review_when: SPEC §10 top-level hook list changes
+
+  # CSR TEST window (SPEC §3.2.3 / §10 / §11). HOOKS adds only tb_test_mode.
+  # Variant module names are listed because hooks_extra_for rsplit-once
+  # cannot reduce ub_csr_product_x4_vl2 → ub_csr.
+  - id: HOOKS-UB-CSR
+    module: ub_csr
+    extra_ports:
+      - tb_test_mode
+    reason: SPEC §3.2.3 / §10 / §11 — TEST window gated by tb_test_mode
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 TEST window hook list for ub_csr changes
+
+  - id: HOOKS-UB-CSR-PRODUCT-X4-VL2
+    module: ub_csr_product_x4_vl2
+    extra_ports:
+      - tb_test_mode
+    reason: SPEC §3.2.3 / §10 / §11 — TEST window gated by tb_test_mode
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 TEST window hook list for ub_csr changes
+
+  - id: HOOKS-UB-CSR-PRODUCT-X8-VL2
+    module: ub_csr_product_x8_vl2
+    extra_ports:
+      - tb_test_mode
+    reason: SPEC §3.2.3 / §10 / §11 — TEST window gated by tb_test_mode
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 TEST window hook list for ub_csr changes

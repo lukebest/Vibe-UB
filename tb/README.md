@@ -20,6 +20,7 @@ tb/
     ub_dll_bcrc.py          CRC30 per SPEC §2.6
     config.py               remaining §13 knobs
     tests/                  pytest
+  ral/                      generated uvm-python register model (from docs/regmap/regmap.yaml)
   vibe_uvm/                 uvm-python skeleton (named so it does not shadow the `uvm` package)
     ub_csr_map.py           REGMAP offsets (CNT_CLR 0x0224, APPD 0x1E00/0x1F00)
     clk_rst.py              core_clk ≈ 80.57 MHz; rst_n async assert / sync deassert

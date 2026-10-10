@@ -1,0 +1,235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/lukebest/Vibe-UB/docs/regmap/schema.json",
+  "title": "Vibe-UB M1 register map",
+  "type": "object",
+  "required": ["meta", "global_rules", "windows", "registers", "variants"],
+  "additionalProperties": false,
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": [
+        "title",
+        "companion_spec",
+        "spec_baseline",
+        "bus",
+        "byte_order",
+        "machine_readable_columns",
+        "access_types"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string" },
+        "companion_spec": { "type": "string" },
+        "spec_baseline": { "type": "string" },
+        "bus": { "$ref": "#/$defs/bus" },
+        "byte_order": { "type": "string" },
+        "machine_readable_columns": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "access_types": {
+          "type": "array",
+          "items": { "enum": ["RW", "RO", "WO", "W1C", "MIX"] }
+        },
+        "citation_note": { "type": "string" },
+        "column_notes": { "type": "object" },
+        "test_window_rule": { "type": "string" },
+        "team_process_note": { "type": "string" }
+      }
+    },
+    "global_rules": { "$ref": "#/$defs/global_rules" },
+    "windows": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/window" }
+    },
+    "unimplemented": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "reserved_policy": { "type": "string" },
+    "prose": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "registers": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/register" }
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "irq": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "variants": {
+      "type": "object",
+      "description": "SPEC §2.2 parameter sets. Tag keys map to NUM_LANES / NUM_VL / SCR_PLACEHOLDER. Optional default: tag name. Drives reset_from: variant and ub_csr_<tag> module names.",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "hex_or_na": {
+      "oneOf": [
+        { "type": "integer", "minimum": 0 },
+        { "type": "string", "pattern": "^(NA|0x[0-9A-Fa-f]+)$" }
+      ]
+    },
+    "bus": {
+      "type": "object",
+      "required": [
+        "data_width_bits",
+        "addr_width_bits",
+        "alignment_bytes",
+        "full_word_writes_only",
+        "wstrb",
+        "read_latency_cycles",
+        "unmapped"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "data_width_bits": { "type": "integer", "const": 32 },
+        "addr_width_bits": { "type": "integer", "const": 16 },
+        "alignment_bytes": { "type": "integer", "const": 4 },
+        "full_word_writes_only": { "type": "boolean", "const": true },
+        "wstrb": { "type": "boolean", "const": false },
+        "read_latency_cycles": { "type": "integer", "const": 1 },
+        "write_latency_cycles": { "type": "integer", "const": 1 },
+        "write_rvalid": { "type": "integer", "const": 0 },
+        "write_err_valid": { "type": "boolean", "const": true },
+        "spec_ref": { "type": "string" },
+        "unmapped": {
+          "type": "object",
+          "required": ["read_data", "read_csr_err", "write", "write_csr_err"],
+          "additionalProperties": false,
+          "properties": {
+            "read_data": { "type": "integer" },
+            "read_csr_err": { "type": "integer" },
+            "write": { "enum": ["ignore"] },
+            "write_csr_err": { "type": "integer" }
+          }
+        }
+      }
+    },
+    "global_rules": {
+      "type": "object",
+      "required": [
+        "full_word_writes_only",
+        "read_latency_cycles",
+        "unmapped_csr_err",
+        "no_read_clear",
+        "no_rw_write_clear",
+        "sticky_access",
+        "counter_access"
+      ],
+      "properties": {
+        "full_word_writes_only": { "type": "boolean" },
+        "read_latency_cycles": { "type": "integer" },
+        "write_rvalid_next_cycle": { "type": "integer", "const": 0 },
+        "write_err_valid_next_cycle": { "type": "boolean" },
+        "unmapped_csr_err": { "type": "boolean" },
+        "no_read_clear": { "type": "boolean" },
+        "no_rw_write_clear": { "type": "boolean" },
+        "sticky_access": { "type": "string" },
+        "counter_access": { "type": "string" },
+        "reserved_bits": { "type": "string" },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "window": {
+      "type": "object",
+      "required": ["id", "name", "start", "end", "contents"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "start": { "type": "integer", "minimum": 0 },
+        "end": { "type": "integer", "minimum": 0 },
+        "contents": { "type": "string" },
+        "section": { "type": "string" },
+        "test_gated": { "type": "boolean" },
+        "entire_range_mapped": { "type": "boolean" },
+        "when_inactive": {
+          "type": "object",
+          "properties": {
+            "mapped": { "type": "boolean" },
+            "read_data": { "type": "integer" },
+            "write": { "enum": ["ignore"] },
+            "csr_err": { "type": "integer" },
+            "note": { "type": "string" }
+          }
+        },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "enum_entry": {
+      "type": "object",
+      "required": ["value", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "integer", "minimum": 0 },
+        "name": { "type": "string" },
+        "reserved": { "type": "boolean" }
+      }
+    },
+    "field": {
+      "type": "object",
+      "required": ["name", "msb", "lsb", "access", "description", "spec_ref"],
+      "properties": {
+        "name": { "type": "string" },
+        "msb": { "type": "integer", "minimum": 0, "maximum": 31 },
+        "lsb": { "type": "integer", "minimum": 0, "maximum": 31 },
+        "access": { "enum": ["RW", "RO", "WO", "W1C", "MIX"] },
+        "reset": { "$ref": "#/$defs/hex_or_na" },
+        "reset_from": { "enum": ["variant"] },
+        "reset_key": { "type": "string" },
+        "description": { "type": "string" },
+        "spec_ref": { "type": "string" },
+        "self_clearing": { "type": "boolean" },
+        "saturating": { "type": "boolean" },
+        "kind": { "enum": ["field", "window"] },
+        "pulse_cycles": { "type": "integer", "minimum": 1 },
+        "pulse_clock": { "type": "string" },
+        "reset_scope": { "type": "object" },
+        "enums": { "type": "array", "items": { "$ref": "#/$defs/enum_entry" } },
+        "legal_values": { "type": "array", "items": { "type": "integer" } },
+        "reserved_values": { "type": "array", "items": { "type": "integer" } },
+        "rtl_never_produces_reserved": { "type": "boolean" },
+        "tb_assert_reserved": { "type": "boolean" },
+        "clear_target": { "type": "string" },
+        "source": { "enum": ["hw", "csr", "const"] },
+        "hw_port": { "type": "string" },
+        "event_port": { "type": "string" },
+        "increment_port": { "type": "string" },
+        "increment_gate": { "type": "object" },
+        "config_output": { "type": "string" },
+        "pulse_output": { "type": "string" },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "register": {
+      "type": "object",
+      "required": ["name", "offset", "window", "fields"],
+      "properties": {
+        "name": { "type": "string" },
+        "offset": { "type": "integer", "minimum": 0 },
+        "window": { "type": "string" },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/field" }
+        },
+        "notes": { "type": "array", "items": { "type": "string" } },
+        "kind": { "enum": ["register", "window"] }
+      },
+      "additionalProperties": false
+    }
+  }
+}

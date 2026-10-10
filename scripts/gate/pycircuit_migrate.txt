@@ -28,7 +28,8 @@ pycircuit/pcs/ub_pcs_scrambler.py
 # PR #7
 pycircuit/lmsm/ub_lmsm.py
 
-# PR #11 — 已迁
+# PR #11 — 已迁 (leaf is ub_csr.py so SPEC §2.2 names match rtl/csr/ub_csr_<tag>.v)
+pycircuit/csr/ub_csr.py
 pycircuit/csr/ub_csr_regs.py
 
 # PR #12

@@ -20,6 +20,9 @@
 - `docs/DECISIONS.md` D17：团队分工与流程（Luke Liu via Firstmate，2026-10-10 16:48 Asia/Shanghai）。
 - `docs/DECISIONS.md` D18：全层级范围，作为完整 UB 控制器（Luke Liu via Firstmate，2026-10-10 17:04 Asia/Shanghai）；D18 取代 D2 的分阶段范围。
 - `docs/DECISIONS.md` D19：三线并行与新增角色（Luke Liu via Firstmate，2026-10-10 17:22 Asia/Shanghai）。
+- 寄存器表单一来源 `docs/regmap/regmap.yaml` + `scripts/gen_regmap.py`：生成 `docs/REGMAP.md`、`pycircuit/csr/ub_csr.py`、`tb/ral/ub_regmodel.py`、`sw/include/ub_regs.h`、`sw/hal/ub_regs_access.{h,c}`、`model/regs.py`。检查：`python3 scripts/gen_regmap.py --check`（含 pycc `.v` 逐字节比对）。CSR Python 在 `pycircuit/csr/`（叶名 `ub_csr`，与 SPEC §2.2 `<leaf>_<tag>` / 已提交 `rtl/csr/ub_csr_<tag>.v` 对齐）。`scripts/emit_rtl.py` 写入 8 份 `rtl/csr/ub_csr_<tag>.v`（PRODUCT + HOOKS）。RAL 在 `tb/ral/`。写响应下一拍 `csr_rvalid=0` 写入 YAML 总线规则（SPEC §3.2.3）。`TOOLCHAIN.lock` 仅仓库根一份（已合并并删除 `pycircuit/TOOLCHAIN.lock`）。regmap 一致性改由门禁 `regmap-consistency`（`scripts/gate/regmap_consistency.sh` → `--check`）覆盖，已删 `.github/workflows/regmap.yml`。
+- D5：`pycircuit/csr/ub_csr.py` 用 pyc4.0 Circuit API（`Circuit` / `compile` / `module` / `u`，lukebest/pyCircuit @43cc5918）描述 CSR；Verilog 由 `pycc --emit=verilog`（LLVM 19）降低，不再字符串拼接。`elaborate(0/1)` 走 frontend；lint 在有 pycc 时对 pycc `.v` 跑 verilator。
+- SPEC §2.2 变体：`docs/regmap/regmap.yaml` 增加 `variants:` 表。PRODUCT `product_x4_vl2` / `product_x8_vl2` 的 `SCR_PLACEHOLDER=0`（`PARAM_VARIANT` 复位 `0x02`；Xia：PRODUCT 永不例化 `_placeholder` 扰码）。lint/TB `x4_vl2_placeholder` / `x8_vl2_placeholder`（`ub_csr_*_placeholder`，`SCR_PLACEHOLDER=1`，复位 `0x12`）；SPEC §13 闭合后删除。只读能力寄存器 `PARAM_VARIANT` @ `0x011C`（`NUM_VL[3:0]`、`SCR_PLACEHOLDER[4]`、`RSVD[31:5]`）；`NUM_LANES` 复用 `PARAM_PHY.NUM_LANES_TX/RX`。`reset_from: variant` 字段禁止手写复位。`--check` / pytest：`product_*` 必须 `SCR=0`，`SCR=1` 仅 `*_placeholder`，`NUM_LANES`/`NUM_VL` 须匹配名字里的 `xN_vlM`。
 - `docs/arch/mem/UARCH.md`：线 C 第 9 章内存管理微架构草案（UMMU + 译码器结构；解码叶子与结构叶子分开；不冻结端口）。
 
 ### Changed
@@ -30,7 +33,7 @@
 - `docs/rules/verif_gate.md` v0.3：§8.0.1 / §11 增补 GATE-TB-SB-001（记分板须统计实际比对次数，结束时断言次数 `> 0` 且等于预期；审查清单，不自动拦截）。
 - `docs/TEAM.md` §4、`docs/PROCESS.md` §2：豁免清单从 `docs/WAIVERS.md` 改为 `waivers/`。
 - `scripts/impl/quick_synth.*` + `docs/rules/impl_quick_synth.md` v0.3：Yosys 默认 `-I rtl/pyc_lib`（pycc `pyc_reg.v` 等；未落地时回退 `rtl/common` 并 WARN）；`--incdir` / `QS_INCDIRS` 为额外路径；`pyc_*` 不作报告 top；`ub_dll_crc32` / `ub_dll_crc_check` / `ub_controller_tx` / `ub_controller_rx` 只报「待删除 / to be deleted」，不进合计、不对 baseline。
-- SPEC §2.2 + CODING_STYLE §1 / §5：pycc 运行库原语（`pyc_reg.v` 等运行时发出的 `pyc_*`）只放 `rtl/pyc_lib/`，从 `TOOLCHAIN.lock` 钉死版本原样拷贝、不得改；其它 `rtl/<layer>/` 与 `hooks/` 不得含 `pyc_*`；filelist 引用该目录；`` `include `` 用 `-I rtl/pyc_lib`。门禁细则见 `docs/rules/verif_gate.md`。
+- SPEC §2.2 + CODING_STYLE §1 / §5：pycc 运行库原语（`pyc_reg.v` 等运行时发出的 `pyc_*`）只放 `rtl/pyc_lib/`，从 `TOOLCHAIN.lock` 钉死版本原样拷贝、不得改；其它 `rtl/<layer>/` 与 `hooks/` 不得含 `pyc_*`；filelist 引用该目录；`` `include `` 用 `-I rtl/pyc_lib`。门禁细则见 `docs/rules/verif_gate.md`。`rtl/pyc_lib/` 由 PR #21 落地（含 `handwritten.yml` HW-PYC-REG）；本 PR 不自带一份。
 - `docs/VERIF_PLAN.md`：公共 §8.7 / §13 / §14 / §15 并入轨道 C 内存管理计数与追溯（§8.8 正文不动）。
 - `scripts/impl/quick_synth.*` + `docs/rules/impl_quick_synth.md` v0.2：按 SPEC §2.2 每文件一个 top（无必经 `chparam`）；`_placeholder` 单独表且不计入 PRODUCT 面积；`--baseline-map` / `--baseline-report` 对照旧模块+参数；QoR（cells / area / depth / slack）相对 baseline 超 10% 标旗；`ub_cmn_mem_1r1w`（及 `scripts/gate/blackbox.yml`）超过可配 4096-bit 阈值作黑盒并报 SRAM 估算列，小实例仍综合为 flop；STA 按 1 拍 registered read。
 - `docs/SPEC.md` §2.2：pycc 按参数集展开固定网表（`<leaf>_<tag>` 命名；占位变体 `_placeholder`）。

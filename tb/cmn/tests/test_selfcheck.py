@@ -12,6 +12,7 @@ from tb.cmn.driver import Mem1r1wDriver
 from tb.cmn.handle import AddrAliasFakeHandle, BitSwapFakeHandle, FakeMemHandle
 from tb.cmn.items import MemCycle
 from tb.cmn.run_cycle import run_cycles, step_fake
+from tb.cmn.ports import CLK_PORT, RST_PORT
 from tb.cmn.scoreboard import Mem1r1wScoreboard
 from tb.cmn.sequences import (
     NEGATIVE_CASES,
@@ -38,7 +39,12 @@ def test_positive_cases_match_model(depth, width, anur, case):
     )
     assert handle.trace == [c.as_tuple() for c in cycles]
     assert sb.n_mismatch == 0
-    assert sb.n_compare >= 1 or not any(c.re for c in cycles)
+    # anur=0 random may end on an uninit read (rdata=None). Directed
+    # sequences and anur=1 traffic always leave a defined rdata after a read.
+    if any(c.re for c in cycles) and (anur or case != "random"):
+        assert sb.n_compare > 0
+        assert sb.rdata_valid is True
+        assert sb.is_defined is True
 
 
 def test_conflict_read_old_is_model_old_not_new_write():
@@ -225,6 +231,84 @@ def test_functional_cover_points():
         cov.require_param(depth, width, anur)
 
 
+def test_skip_compare_before_first_read():
+    sb = Mem1r1wScoreboard(4, 8)
+    handle = FakeMemHandle(4, 8)
+    driver = Mem1r1wDriver()
+    cov = Mem1r1wCoverage()
+    assert sb.ref.rdata is None
+    assert sb.rdata_valid is False
+    assert sb.is_defined is False
+    step_fake(handle, sb, driver, cov, MemCycle(we=1, waddr=0, wdata=0x11))
+    assert sb.ref.rdata is None
+    assert sb.n_compare == 0
+    assert sb.n_skip >= 1
+    sb.assert_clean()
+
+
+def test_skip_compare_after_reset_unwritten_read():
+    """reset_written() leaves the rdata register; the next unwritten read is None."""
+    sb = Mem1r1wScoreboard(4, 8, assert_no_uninit_read=False)
+    handle = FakeMemHandle(4, 8, assert_no_uninit_read=False)
+    driver = Mem1r1wDriver()
+    cov = Mem1r1wCoverage()
+    step_fake(handle, sb, driver, cov, MemCycle(we=1, waddr=0, wdata=0x55))
+    step_fake(handle, sb, driver, cov, MemCycle(re=1, raddr=0))
+    assert sb.is_defined is True
+    defined_compares = sb.n_compare
+    assert defined_compares == 1
+    sb.ref.reset_written()
+    handle.inner.reset_written()
+    assert sb.ref.rdata == 0x55
+    assert sb.is_defined is True
+    skips_before = sb.n_skip
+    step_fake(handle, sb, driver, cov, MemCycle(re=1, raddr=0))
+    assert sb.ref.rdata is None
+    assert sb.rdata_valid is False
+    assert sb.is_defined is False
+    assert sb.n_compare == defined_compares
+    assert sb.n_skip == skips_before + 1
+    sb.assert_clean()
+
+
+def test_skip_compare_uninit_read_when_anur_off():
+    handle, sb, _ = run_cycles(
+        4,
+        8,
+        [MemCycle(re=1, raddr=0)],
+        assert_no_uninit_read=False,
+    )
+    assert not sb.saw("uninit")
+    assert sb.ref.rdata is None
+    assert sb.rdata_valid is False
+    assert sb.is_defined is False
+    assert sb.n_compare == 0
+    assert sb.n_skip >= 1
+
+
+def test_defined_flag_forces_compare():
+    """Reverse check: a defined beat must increment n_compare (no false-green skip)."""
+    sb = Mem1r1wScoreboard(4, 8)
+    handle = FakeMemHandle(4, 8)
+    driver = Mem1r1wDriver()
+    cov = Mem1r1wCoverage()
+    step_fake(handle, sb, driver, cov, MemCycle(we=1, waddr=1, wdata=0xA5))
+    assert sb.n_compare == 0
+    step_fake(handle, sb, driver, cov, MemCycle(re=1, raddr=1))
+    assert sb.rdata_valid is True
+    assert sb.is_defined is True
+    assert sb.ref.rdata == 0xA5
+    assert sb.n_compare == 1
+    assert sb.n_mismatch == 0
+    assert sb.compare_rdata(0xA5) is True
+    assert sb.n_compare == 2
+    assert sb.compare_rdata(0x5A) is False
+    assert sb.n_compare == 3
+    assert sb.n_mismatch == 1
+    with pytest.raises(AssertionError, match="mismatch"):
+        sb.assert_clean()
+
+
 def test_driver_records_exact_ports():
     handle, _sb, _ = run_cycles(
         8,
@@ -235,3 +319,30 @@ def test_driver_records_exact_ports():
         ],
     )
     assert handle.trace == [(1, 3, 0xA5A5, 0, 0), (0, 0, 0, 1, 3)]
+    assert hasattr(handle, CLK_PORT)
+    assert hasattr(handle, RST_PORT)
+    assert not hasattr(handle, "clk") or CLK_PORT == "clk"
+    assert int(handle.rst_n.value) == 1
+
+
+def test_tb_reset_undefines_array_not_rdata():
+    """rst_n marks the array undefined; the rdata register is not cleared."""
+    handle = FakeMemHandle(4, 8, assert_no_uninit_read=False)
+    sb = Mem1r1wScoreboard(4, 8, assert_no_uninit_read=False)
+    driver = Mem1r1wDriver()
+    cov = Mem1r1wCoverage()
+    step_fake(handle, sb, driver, cov, MemCycle(we=1, waddr=0, wdata=0x55))
+    step_fake(handle, sb, driver, cov, MemCycle(re=1, raddr=0))
+    assert sb.ref.rdata == 0x55
+    compares = sb.n_compare
+    handle.apply_reset()
+    sb.ref.reset_written()
+    assert handle.rst_n.value == 1
+    assert sb.ref.rdata == 0x55
+    assert sb.is_defined is True
+    skips = sb.n_skip
+    step_fake(handle, sb, driver, cov, MemCycle(re=1, raddr=0))
+    assert sb.ref.rdata is None
+    assert sb.n_compare == compares
+    assert sb.n_skip == skips + 1
+    sb.assert_clean()

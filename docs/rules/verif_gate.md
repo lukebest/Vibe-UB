@@ -159,7 +159,7 @@ PRODUCT 与 HOOKS 两套网表（SPEC §11）只要落在上述目录，都会�
 | GATE-SYN-003 | 不得出现多驱动 | 综合结构 | 2026-10-10 |
 | GATE-SYN-004 | 不得出现组合环（Yosys `scc` / loop 报告） | 综合结构 | 2026-10-10 |
 | GATE-SYN-005 | 打印 `stat`；**不做**面积 / 时序 / QoR 对比 | TEAM §1；实现侧 quick_synth | 2026-10-10 |
-| GATE-SYN-006 | `ltp -noff` 报告每个叶子最大组合逻辑级数（**只数逻辑门**）；只报告。与实现快速综合对照时用其「逻辑级数」列（等于 `--no-buffer` 级数）；slack / 面积用带缓冲器版本（PR #31） | PM | 2026-10-10 |
+| GATE-SYN-006 | `ltp -noff` 报告每个叶子最大组合逻辑级数（**只数逻辑门**）；只报告。与实现快速综合对照时用 #31 已合入的 `logic depth` 列（等于 `--no-buffer` 级数；`depth incl. buf` 是含缓冲级数）；slack / 面积用带缓冲器版本 | PM | 2026-10-10 |
 | GATE-SYN-007 | `blackbox.yml` 模块用 `read_verilog -lib` | §1.2 | 2026-10-10 |
 | GATE-SYN-008 | `ub_cmn_mem_1r1w_d<DEPTH>w<WIDTH>[m<WMASK_W>]`：DEPTH×WIDTH 超阈值则上层 `-lib`；原语完整综合只跑 ≤4096 bit（含 `d64w64m16`） | 实现对齐 | 2026-10-10 |
 
@@ -167,7 +167,7 @@ HOOKS 网表不做本检查（CODING_STYLE §1：实现只认 PRODUCT）。已�
 
 `ub_cmn_mem_1r1w`：变体名 `ub_cmn_mem_1r1w_d<DEPTH>w<WIDTH>[m<WMASK_W>]`，按 §2.2 自动发现。黑盒看 **DEPTH×WIDTH** 与 `docs/rules/impl_quick_synth.md` 阈值（文件不存在时 **4096**）。超过则上层 `read_verilog -lib`（两边同一份）。原语完整综合 / 等价只跑 **≤4096 bit** 的变体（含 `d64w64m16`，覆盖 wmask 路径）；更大的 PRODUCT 与 HOOKS **不跑完整 equiv**，改为除模块名外逐字节一致 + 端口检查。
 
-`COMBO_DEPTH` 是 Yosys `ltp -noff` 的门级数，**不含缓冲器插层**。实现 `scripts/impl/quick_synth.sh` 对照：逻辑深度看报告「逻辑级数」（`--no-buffer`）；slack / 面积看带缓冲器那一版。
+`COMBO_DEPTH` 是 Yosys `ltp -noff` 的门级数，**不含缓冲器插层**。实现 `scripts/impl/quick_synth.sh`（#31 已合入）对照：逻辑深度看报告的 **`logic depth`** 列（与 `--no-buffer` 同一口径）；**`depth incl. buf`** 是含缓冲级数，不用来对 COMBO_DEPTH。slack / 面积看带缓冲器那一版。
 
 每模块 Yosys 超时 180s；job `timeout-minutes: 25`（当前 main 实测约 8.5–12.5 分钟）。结束时打印最慢 3 个模块。
 

@@ -27,6 +27,8 @@ Usage: scripts/impl/quick_synth.sh [--ref GIT_REF | --work-tree DIR] [options]
   --baseline-map NEW=OLD    map a §2.2 tagged leaf to a legacy module[:VARIANT]
   --sram-bit-threshold N    blackbox mem instances with depth×width > N bits (default 4096)
   --incdir DIR              extra Yosys -I (repeatable; default is rtl/pyc_lib)
+  --no-buffer               skip post-map fanout buffering (default: ON, max fanout 16)
+  --max-fanout N            max sinks per driver after buffering (default 16)
   --self-check              parser / mapping / include-read checks (no design synth)
   --help                    this text
 
@@ -35,6 +37,8 @@ Env:
   SKY130_HD_LIB_COMMIT    OpenROAD-flow-scripts commit used to fetch liberty
   QS_SRAM_BIT_THRESHOLD   default for --sram-bit-threshold
   QS_INCDIRS              extra Yosys -I dirs (colon / comma / space separated)
+  QS_NO_BUFFER=1          same as --no-buffer
+  QS_MAX_FANOUT           default for --max-fanout
   YOSYS / STA             tool binaries (default: yosys, sta)
 
 Default clock: core_clk at F_CORE from docs/SPEC.md (§4.1 / §9, ≈80.57 MHz).
@@ -57,6 +61,8 @@ BASELINE_MAPS=()
 SRAM_THRESH=""
 INCDIRS=()
 SELF_CHECK=0
+NO_BUFFER=0
+MAX_FANOUT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -71,6 +77,8 @@ while [[ $# -gt 0 ]]; do
     --baseline-map) BASELINE_MAPS+=("${2:-}"); shift 2 ;;
     --sram-bit-threshold) SRAM_THRESH="${2:-}"; shift 2 ;;
     --incdir) INCDIRS+=("${2:-}"); shift 2 ;;
+    --no-buffer) NO_BUFFER=1; shift ;;
+    --max-fanout) MAX_FANOUT="${2:-}"; shift 2 ;;
     --self-check) SELF_CHECK=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown arg: $1" >&2; usage >&2; exit 2 ;;
@@ -161,6 +169,12 @@ fi
 for d in "${INCDIRS[@]+"${INCDIRS[@]}"}"; do
   py+=(--incdir "$d")
 done
+if [[ "$NO_BUFFER" -eq 1 || "${QS_NO_BUFFER:-}" == "1" ]]; then
+  py+=(--no-buffer)
+fi
+if [[ -n "$MAX_FANOUT" ]]; then
+  py+=(--max-fanout "$MAX_FANOUT")
+fi
 py+=(--liberty "$SKY130_HD_LIB")
 
 exec "${py[@]}"

@@ -4,6 +4,7 @@
 
 ### Added
 
+- `scripts/impl/buffer_fanout.py`：Yosys JSON 上确定性 `buf_4`/`buf_8` 扇出树（quick-synth 默认在 abc 之后调用）。
 - 工具守门 CI：`.github/workflows/gate.yml` + `scripts/gate/` + `make gate`（emit / 端口一致性 / lint / CDC / formal / synth-check / regmap `--check` / tb-selfcheck）。名单在 `gate/`（legacy / handwritten / stubs / hooks_ports），豁免在 `waivers/`，批准规则相同。等价主工具 eqy（`TOOLCHAIN.lock` `eqy_lock`），不可用则回退 Yosys `equiv_*` 并注明工具。规则分册 `docs/rules/verif_gate.md`。CODEOWNERS 将 `waivers/`、`gate/`、gate workflow 指给 `lukebest`。不改 `rtl/`、`tb/models/`、`model/`。SPEC §11 仅补 Xia 端口裁定 (f)。
 - `docs/VERIF_PLAN.md` §8.8：轨道 C 内存管理（UMMU + 译码器）测试点（docs-only；公共 §8.7 / §13 / §14 / §15 另 PR 并入）。
 - `scripts/impl/quick_synth.sh`：合入前叶子快速综合（Yosys flatten + Sky130 hd tt proxy + OpenSTA 最差建立路径）。Informational；不进验证门禁。规则见 `docs/rules/impl_quick_synth.md`。
@@ -23,7 +24,9 @@
 
 ### Changed
 
-- `docs/rules/verif_gate.md` v0.5：`COMBO_DEPTH` 只数逻辑门；与实现快速综合对照时用其「逻辑级数」列（等于 `--no-buffer` 级数），slack / 面积用带缓冲器版本（PR #31）。emit 按 `TOOLCHAIN.lock` 装 pycc，装不上或无 `emit_rtl.py` 则跳过并写原因。大网表 `rtl/<层>/manifest.yml`。`rtl/pyc_lib/` 有则逐字节、无则跳过（等 #21）。`tb_<inst>_obs_*` 与 `ub_mem_tlb` §10 口。sby bind 信号必须存在。D10/迁移名册缺文件标「已删除」并扣总数，不删文件。synth-check 模块超时 180s、job 25 min，报告最慢 3 个模块。
+- `docs/rules/verif_gate.md` v0.5：`COMBO_DEPTH` 只数逻辑门；与实现快速综合对照时用 #31 已合入的 `logic depth` 列（等于 `--no-buffer` 级数；`depth incl. buf` 是含缓冲级数），slack / 面积用带缓冲器版本。emit 按 `TOOLCHAIN.lock` 装 pycc，装不上或无 `emit_rtl.py` 则跳过并写原因。大网表 `rtl/<层>/manifest.yml`。`rtl/pyc_lib/` 有则逐字节、无则跳过（等 #21）。`tb_<inst>_obs_*` 与 `ub_mem_tlb` §10 口。sby bind 信号必须存在。D10/迁移名册缺文件标「已删除」并扣总数，不删文件。synth-check 模块超时 180s、job 25 min，报告最慢 3 个模块。
+- `scripts/impl/quick_synth.*` + `docs/rules/impl_quick_synth.md` v0.5：每叶子拆两列深度——`logic depth` 不计 `buf_*`/`clkbuf_*`/`qs_fbuf_*`（与 `--no-buffer`、COMBO_DEPTH、日后 pycc `--logic-depth` 同口径）；`depth incl. buf` 为含缓冲级数。slack/area 仍来自缓冲后网表。
+- `scripts/impl/quick_synth.*` + `docs/rules/impl_quick_synth.md` v0.4：abc 映射后默认插确定性 Sky130 `buf_4`/`buf_8` 扇出树（max fanout 16；`--no-buffer` / `--max-fanout`；每叶子报 max fanout）。OpenROAD `repair_design` 未作为本 proxy 路径（VM 无 OpenROAD、且无 floorplan）。`sta -version` 探测版本，避免 `sta -no_init -exit` 无脚本挂起。
 - `docs/rules/verif_gate.md` v0.4：后门命名 `tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`（HOOKS only，§10 登记，eqy 拉低）；`ub_cmn_mem_1r1w` 时钟口 `core_clk`；存储变体 `d<DEPTH>w<WIDTH>[m<WMASK_W>]`；大变体 PRODUCT/HOOKS 除模块名外逐字节 + 端口，不跑完整 equiv。emit 只调用 `scripts/emit_rtl.py` 重生成到临时目录后逐字节比对（脚本不在则 skip）。`TOOLCHAIN.lock` 只认仓库根，第二份报冲突。regmap `variants:`（PR #11 格式）`product_` 的 `SCR_PLACEHOLDER` 必须为 0，`=1` 非 PRODUCT 只 lint/TB，`NUM_VL`/`NUM_LANES` 与变体名一致。GATE-TB-SB-001：分段比对按段计次数。
 - `docs/rules/verif_gate.md` v0.3：§8.0.1 / §11 增补 GATE-TB-SB-001（记分板须统计实际比对次数，结束时断言次数 `> 0` 且等于预期；审查清单，不自动拦截）。
 - `docs/TEAM.md` §4、`docs/PROCESS.md` §2：豁免清单从 `docs/WAIVERS.md` 改为 `waivers/`。

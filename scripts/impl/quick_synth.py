@@ -21,6 +21,14 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from buffer_fanout import (
+    DEFAULT_MAX_FANOUT,
+    analyze_design,
+    buffer_design,
+    buffer_module,
+    choose_buf,
+)
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_DEFAULT = SCRIPT_DIR.parents[1]
 
@@ -35,6 +43,7 @@ PLACEHOLDER_PERIOD_NS = 2.0  # 500 MHz, only if SPEC states no frequency
 # fixed netlist named <leaf>_<tag>. Placeholder tags are lint/TB only.
 PLACEHOLDER_TAG = "_placeholder"
 QOR_DELTA_THRESHOLD = 0.10  # flag |Δ| / |baseline| > 10%
+# logic_depth is buffer-excluded (COMBO_DEPTH / future pycc --logic-depth).
 QOR_COMPARE_FIELDS = ("cells_mapped", "area_um2", "logic_depth", "slack_ns")
 QOR_FIELD_SHORT = {
     "cells_mapped": "cells",
@@ -455,6 +464,17 @@ def parse_select_list(text: str) -> list[str]:
 _SEQ_CELL_RE = re.compile(
     r"sky130_fd_sc_hd__(?:edf|sdf|df)[a-z0-9_]+", re.IGNORECASE
 )
+# Fanout / clock buffers: not COMBO_DEPTH. Matches buf_1..16, clkbuf_*, qs_fbuf_*.
+_BUF_CELL_RE = re.compile(
+    r"sky130_fd_sc_hd__(?:clk)?buf[0-9]*_", re.IGNORECASE
+)
+
+
+def is_fanout_buf_cell(cell: str, inst: str = "") -> bool:
+    """True for liberty buf/clkbuf and inserted qs_fbuf_* instances."""
+    if inst.startswith("qs_fbuf_"):
+        return True
+    return bool(_BUF_CELL_RE.search(cell or ""))
 
 
 def _parse_sta_block(block: str) -> dict[str, Any] | None:
@@ -470,6 +490,7 @@ def _parse_sta_block(block: str) -> dict[str, Any] | None:
     slack = float(slacks[0][0]) if slacks else None
     data = block.split("data arrival time")[0]
     combo: list[str] = []
+    combo_logic: list[str] = []
     for line in data.splitlines():
         m = re.search(r"\((sky130_fd_sc_hd__[A-Za-z0-9_]+)\)", line)
         if not m:
@@ -481,12 +502,16 @@ def _parse_sta_block(block: str) -> dict[str, Any] | None:
         key = pin.group(1) if pin else cell
         if key not in combo:
             combo.append(key)
+            if not is_fanout_buf_cell(cell, key):
+                combo_logic.append(key)
     return {
         "group": group,
         "arrival_ns": arrival,
         "slack_ns": slack,
-        "logic_depth": len(combo),
+        "logic_depth": len(combo_logic),
+        "logic_depth_incl_buf": len(combo),
         "path_cells": combo,
+        "path_cells_logic": combo_logic,
     }
 
 
@@ -511,7 +536,9 @@ def parse_sta(text: str) -> dict[str, Any]:
             "arrival_ns": None,
             "slack_ns": None,
             "logic_depth": None,
+            "logic_depth_incl_buf": None,
             "path_cells": [],
+            "path_cells_logic": [],
             "raw": text,
         }
     return {**chosen, "raw": text}
@@ -520,12 +547,8 @@ def parse_sta(text: str) -> dict[str, Any]:
 def tool_versions(liberty: Path, liberty_meta: dict[str, str]) -> dict[str, str]:
     y = run(["yosys", "-V"])
     yver = (y.stdout or "").strip().splitlines()[0] if y.stdout else "unknown"
-    sta = run(["sta", "-no_init", "-exit"])
-    sta_ver = "unknown"
-    for line in (sta.stdout or "").splitlines():
-        if "OpenSTA" in line:
-            sta_ver = line.strip()
-            break
+    sta = run(["sta", "-version"], timeout=15)
+    sta_ver = (sta.stdout or "").strip().splitlines()[0] if sta.stdout else "unknown"
     return {
         "yosys": yver,
         "opensta": sta_ver,
@@ -646,9 +669,10 @@ def parse_baseline_markdown(text: str) -> list[dict[str, Any]]:
                 ),
                 "flops": _parse_num(col("flops") or (cols[4] if len(cols) > 4 else "")),
                 "logic_depth": _parse_num(
-                    col("max comb logic depth", "logic depth")
+                    col("logic depth", "max comb logic depth")
                     or (cols[5] if len(cols) > 5 else "")
                 ),
+                "logic_depth_incl_buf": _parse_num(col("depth incl. buf")),
                 "arrival_ns": _parse_num(
                     col("arrival ns") or (cols[6] if len(cols) > 6 else "")
                 ),
@@ -1095,6 +1119,26 @@ def classify_mem_in_src(
     }
 
 
+def emit_buffered_mapped(
+    *,
+    json_in: Path,
+    json_out: Path,
+    verilog_out: Path,
+    stat_out: Path,
+    liberty: Path,
+    top: str,
+) -> subprocess.CompletedProcess[str]:
+    """read_json the buffered netlist and write mapped.v + liberty stat."""
+    cmd = (
+        f"read_liberty -lib {liberty}; "
+        f"read_json {json_in}; "
+        f"hierarchy -top {top}; "
+        f"tee -o {stat_out} stat -liberty {liberty}; "
+        f"write_verilog -noattr -noexpr {verilog_out}"
+    )
+    return run(["yosys", "-p", cmd], timeout=300)
+
+
 def synthesize_one(
     *,
     top: str,
@@ -1108,6 +1152,8 @@ def synthesize_one(
     mem_catalog: dict[str, dict[str, Any]],
     sram_bit_threshold: int,
     extra_incdirs: list[Path] | None = None,
+    buffer: bool = True,
+    max_fanout_limit: int = DEFAULT_MAX_FANOUT,
 ) -> dict[str, Any]:
     outdir.mkdir(parents=True, exist_ok=True)
     files = [src]
@@ -1222,6 +1268,92 @@ def synthesize_one(
         result["anomalies"] = ["yosys_failed"]
         return result
 
+    fanout_rep: dict[str, Any] = {
+        "enabled": bool(buffer),
+        "method": "none",
+        "max_fanout_limit": max_fanout_limit,
+        "max_fanout_before": None,
+        "max_fanout_after": None,
+        "n_bufs": 0,
+        "n_nets_buffered": 0,
+    }
+    prebuf_json = outdir / "mapped_prebuf.json"
+    if prebuf_json.is_file():
+        pre_data = json.loads(prebuf_json.read_text(encoding="utf-8"))
+        if buffer:
+            buf_data, fanout_rep = buffer_design(pre_data, max_fanout_limit)
+            fanout_rep["enabled"] = True
+            buf_json = outdir / "mapped_buf.json"
+            buf_json.write_text(
+                json.dumps(buf_data, indent=2) + "\n", encoding="utf-8"
+            )
+            if int(fanout_rep.get("n_bufs") or 0) > 0:
+                y2 = emit_buffered_mapped(
+                    json_in=buf_json,
+                    json_out=buf_json,
+                    verilog_out=outdir / "mapped.v",
+                    stat_out=outdir / "mapped_stat.txt",
+                    liberty=liberty,
+                    top=top,
+                )
+                (outdir / "yosys_buffer.log").write_text(
+                    y2.stdout or "", encoding="utf-8"
+                )
+                if y2.returncode != 0:
+                    result["error"] = "fanout buffer yosys emit failed"
+                    result["log_excerpt"] = _excerpt(y2.stdout or "")
+                    result["anomalies"] = ["yosys_failed"]
+                    result["ok"] = False
+                    result["fanout"] = fanout_rep
+                    return result
+                notes.append(
+                    f"fanout buffer {fanout_rep['method']}: "
+                    f"max {fanout_rep['max_fanout_before']}→"
+                    f"{fanout_rep['max_fanout_after']} "
+                    f"(+{fanout_rep['n_bufs']} buf, "
+                    f"{fanout_rep['n_nets_buffered']} nets, "
+                    f"limit {max_fanout_limit})"
+                )
+            else:
+                notes.append(
+                    f"fanout buffer {fanout_rep['method']}: "
+                    f"no net above {max_fanout_limit} "
+                    f"(max {fanout_rep['max_fanout_before']})"
+                )
+        else:
+            fanout_rep = analyze_design(pre_data)
+            fanout_rep["enabled"] = False
+            fanout_rep["max_fanout_limit"] = max_fanout_limit
+            notes.append(
+                f"fanout buffer off (--no-buffer); "
+                f"max fanout {fanout_rep['max_fanout_before']}"
+            )
+        modrep = (fanout_rep.get("modules") or {}).get(top)
+        if isinstance(modrep, dict):
+            for k in (
+                "max_fanout_before",
+                "max_fanout_after",
+                "max_fanout_clock",
+                "n_bufs",
+                "n_nets_buffered",
+            ):
+                if k in modrep:
+                    fanout_rep[k] = modrep[k]
+        clk_fo = fanout_rep.get("max_fanout_clock")
+        if clk_fo:
+            notes.append(f"clock fanout {clk_fo} (unbuffered; ideal clock)")
+        (outdir / "fanout_report.json").write_text(
+            json.dumps(fanout_rep, indent=2) + "\n", encoding="utf-8"
+        )
+    else:
+        notes.append("mapped_prebuf.json missing; fanout not measured")
+
+    result["fanout"] = fanout_rep
+    result["max_fanout"] = fanout_rep.get("max_fanout_after")
+    result["max_fanout_before"] = fanout_rep.get("max_fanout_before")
+    result["buffer_method"] = fanout_rep.get("method")
+    result["n_bufs"] = fanout_rep.get("n_bufs")
+
     designer = parse_stat((outdir / "designer_stat.txt").read_text(errors="replace"))
     generic = parse_stat(
         (outdir / "generic_synth_stat.txt").read_text(errors="replace")
@@ -1274,7 +1406,12 @@ def synthesize_one(
     result["sta_rc"] = s.returncode
     setup_rpt = outdir / "sta_worst_setup.rpt"
     unc_rpt = outdir / "sta_unconstrained.rpt"
-    sta_parsed = {"arrival_ns": None, "slack_ns": None, "logic_depth": None}
+    sta_parsed = {
+        "arrival_ns": None,
+        "slack_ns": None,
+        "logic_depth": None,
+        "logic_depth_incl_buf": None,
+    }
     if setup_rpt.is_file():
         sta_parsed = parse_sta(setup_rpt.read_text(errors="replace"))
     if sta_parsed.get("arrival_ns") is None and unc_rpt.is_file():
@@ -1289,6 +1426,12 @@ def synthesize_one(
     result["arrival_ns"] = sta_parsed.get("arrival_ns")
     result["slack_ns"] = sta_parsed.get("slack_ns")
     result["logic_depth"] = sta_parsed.get("logic_depth")
+    result["logic_depth_incl_buf"] = sta_parsed.get("logic_depth_incl_buf")
+    if (
+        result.get("logic_depth_incl_buf") is None
+        and result.get("logic_depth") is not None
+    ):
+        result["logic_depth_incl_buf"] = result["logic_depth"]
     if clk is None:
         notes.append("no clock port; virtual core_clk used for I/O delay")
     elif clk != "core_clk":
@@ -1355,11 +1498,11 @@ def fmt_num(v: Any, digits: int = 3) -> str:
 def write_markdown_table(rows: list[dict[str, Any]]) -> str:
     hdr = (
         "| module | variant | cells (mapped) | area um^2 | SRAM est um^2 | flops | "
-        "max comb logic depth | arrival ns | slack @ period | vs baseline | "
-        "QoR >10% | notes |"
+        "max fanout | logic depth | depth incl. buf | arrival ns | slack @ period | "
+        "vs baseline | QoR >10% | notes |"
     )
     sep = (
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |"
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |"
     )
     lines = [hdr, sep]
     for r in rows:
@@ -1373,15 +1516,17 @@ def write_markdown_table(rows: list[dict[str, Any]]) -> str:
         flag_s = ",".join(flags) if flags else "—"
         delta = r.get("delta_vs_baseline") or r.get("delta_vs_main") or "new"
         lines.append(
-            "| {mod} | {var} | {cells} | {area} | {sram} | {flops} | {depth} | "
-            "{arr} | {sl} | {delta} | {flag} | {notes} |".format(
+            "| {mod} | {var} | {cells} | {area} | {sram} | {flops} | {fo} | "
+            "{depth} | {dbuf} | {arr} | {sl} | {delta} | {flag} | {notes} |".format(
                 mod=r.get("top", ""),
                 var=r.get("variant", ""),
                 cells=fmt_num(r.get("cells_mapped"), 0),
                 area=fmt_num(r.get("area_um2"), 1),
                 sram=fmt_num(r.get("sram_est_um2"), 1),
                 flops=fmt_num(r.get("flops"), 0),
+                fo=fmt_num(r.get("max_fanout"), 0),
                 depth=fmt_num(r.get("logic_depth"), 0),
+                dbuf=fmt_num(r.get("logic_depth_incl_buf"), 0),
                 arr=fmt_num(r.get("arrival_ns"), 3),
                 sl=fmt_num(r.get("slack_ns"), 3),
                 delta=str(delta).replace("|", "/"),
@@ -1635,6 +1780,129 @@ def self_check() -> int:
                 cp.returncode == 0,
                 f"yosys include read failed:\n{(cp.stdout or '')[-400:]}",
             )
+
+    expect(is_fanout_buf_cell("sky130_fd_sc_hd__buf_8", "_x"), "buf_8 is buf")
+    expect(is_fanout_buf_cell("sky130_fd_sc_hd__clkbuf_4", "_x"), "clkbuf is buf")
+    expect(
+        is_fanout_buf_cell("sky130_fd_sc_hd__inv_2", "qs_fbuf_hot_L0_0"),
+        "qs_fbuf instance is buf",
+    )
+    expect(
+        not is_fanout_buf_cell("sky130_fd_sc_hd__a2111oi_0", "_05266_"),
+        "logic cell is not buf",
+    )
+    sta_fix = """
+Startpoint: ff0 (rising edge-triggered flip-flop clocked by core_clk)
+Endpoint: ff1 (rising edge-triggered flip-flop clocked by core_clk)
+Path Group: core_clk
+Path Type: max
+                   0.0000    0.0000    0.0000 ^ ff0/CLK (sky130_fd_sc_hd__dfxtp_1)
+                   0.1000    0.2000    0.2000 ^ ff0/Q (sky130_fd_sc_hd__dfxtp_1)
+                   0.0100    0.0500    0.2500 ^ qs_fbuf_n_L0_0/A (sky130_fd_sc_hd__buf_8)
+                   0.0500    0.1500    0.4000 ^ qs_fbuf_n_L0_0/X (sky130_fd_sc_hd__buf_8)
+                   0.0100    0.1000    0.5000 ^ g0/A (sky130_fd_sc_hd__nor2_1)
+                   0.0500    0.2000    0.7000 ^ g0/Y (sky130_fd_sc_hd__nor2_1)
+                   0.0100    0.0500    0.7500 ^ qs_fbuf_n_L0_1/A (sky130_fd_sc_hd__buf_4)
+                   0.0500    0.1000    0.8500 ^ qs_fbuf_n_L0_1/X (sky130_fd_sc_hd__buf_4)
+                   0.0100    0.1000    0.9500 ^ g1/A (sky130_fd_sc_hd__nand2_1)
+                   0.0500    0.1500    1.1000 ^ g1/Y (sky130_fd_sc_hd__nand2_1)
+                   0.0100    0.0500    1.1500 v ff1/D (sky130_fd_sc_hd__dfxtp_1)
+                                       1.1500   data arrival time
+                                       10.0000   slack (MET)
+"""
+    sta_p = parse_sta(sta_fix)
+    expect(sta_p.get("logic_depth") == 2, f"logic depth excl buf {sta_p}")
+    expect(sta_p.get("logic_depth_incl_buf") == 4, f"depth incl buf {sta_p}")
+
+    expect(choose_buf(1) == "sky130_fd_sc_hd__buf_4", "buf_4 for small group")
+    expect(choose_buf(4) == "sky130_fd_sc_hd__buf_4", "buf_4 at 4")
+    expect(choose_buf(5) == "sky130_fd_sc_hd__buf_8", "buf_8 above 4")
+
+    def _toy(n_sinks: int, *, clk: bool = False) -> dict[str, Any]:
+        cells: dict[str, Any] = {
+            "drv": {
+                "hide_name": 0,
+                "type": "sky130_fd_sc_hd__inv_2",
+                "connections": {"A": [2], "Y": [3]},
+            }
+        }
+        ports = {
+            "a": {"direction": "input", "bits": [2]},
+            "y": {"direction": "output", "bits": list(range(4, 4 + n_sinks))},
+        }
+        if clk:
+            ports["core_clk"] = {"direction": "input", "bits": [3]}
+            cells["drv"]["connections"]["Y"] = [99]
+        for i in range(n_sinks):
+            src = 3 if not clk else 3  # clock port bit when clk
+            if clk:
+                src = 3
+            cells[f"s{i}"] = {
+                "hide_name": 0,
+                "type": "sky130_fd_sc_hd__inv_2",
+                "connections": {"A": [src], "Y": [4 + i]},
+            }
+        nets = {p: {"hide_name": 0, "bits": ports[p]["bits"]} for p in ports}
+        if not clk:
+            nets["n_hot"] = {"hide_name": 1, "bits": [3]}
+        return {
+            "ports": ports,
+            "cells": cells,
+            "netnames": nets,
+        }
+
+    toy = _toy(20)
+    before = analyze_design({"modules": {"t": json.loads(json.dumps(toy))}})
+    expect(before["max_fanout_before"] >= 20, f"toy fanout {before}")
+    t1 = json.loads(json.dumps(toy))
+    t2 = json.loads(json.dumps(toy))
+    r1 = buffer_module(t1, 16)
+    r2 = buffer_module(t2, 16)
+    expect(r1["n_bufs"] > 0, f"inserted bufs {r1}")
+    expect(r1["max_fanout_after"] <= 16, f"after {r1}")
+    expect(t1 == t2 and r1 == r2, "buffer_module is deterministic")
+    clk_mod = _toy(20, clk=True)
+    rclk = buffer_module(clk_mod, 16)
+    expect(rclk["n_bufs"] == 0, f"clock net not buffered {rclk}")
+    expect(
+        int(rclk.get("max_fanout_clock") or 0) >= 20,
+        f"clock fanout still high {rclk}",
+    )
+    if shutil.which("yosys"):
+        with tempfile.TemporaryDirectory() as td:
+            jp = Path(td) / "t.json"
+            outp = Path(td) / "t2.json"
+            jp.write_text(
+                json.dumps({"creator": "qs-self-check", "modules": {"t": t1}}),
+                encoding="utf-8",
+            )
+            outp.write_text(
+                json.dumps({"creator": "qs-self-check", "modules": {"t": t1}}),
+                encoding="utf-8",
+            )
+            cp = run(
+                [
+                    "yosys",
+                    "-p",
+                    f"read_json {outp}; hierarchy -top t; "
+                    f"write_verilog -noattr -noexpr {Path(td) / 't.v'}",
+                ]
+            )
+            expect(
+                cp.returncode == 0,
+                f"buffered json not readable by yosys:\n"
+                f"{(cp.stdout or '')[-300:]}",
+            )
+            tv = Path(td) / "t.v"
+            if tv.is_file():
+                body = tv.read_text(encoding="utf-8")
+                expect(
+                    "sky130_fd_sc_hd__buf_" in body,
+                    "emitted verilog has buf cells",
+                )
+            else:
+                expect(False, "yosys did not write buffered verilog")
+
     with tempfile.TemporaryDirectory() as td:
         tree = Path(td)
         (tree / "rtl" / "common").mkdir(parents=True)
@@ -1699,6 +1967,18 @@ def main(argv: list[str] | None = None) -> int:
         action="append",
         default=[],
         help="extra Yosys -I directory (repeatable; default is rtl/pyc_lib)",
+    )
+    ap.add_argument(
+        "--no-buffer",
+        action="store_true",
+        default=os.environ.get("QS_NO_BUFFER") == "1",
+        help="skip post-map fanout buffering (default: buffer ON)",
+    )
+    ap.add_argument(
+        "--max-fanout",
+        type=int,
+        default=int(os.environ.get("QS_MAX_FANOUT", DEFAULT_MAX_FANOUT)),
+        help=f"max sinks per driver after buffering (default {DEFAULT_MAX_FANOUT})",
     )
     ap.add_argument(
         "--json",
@@ -1868,6 +2148,8 @@ def main(argv: list[str] | None = None) -> int:
                 mem_catalog=mem_catalog,
                 sram_bit_threshold=args.sram_bit_threshold,
                 extra_incdirs=extra_incdirs,
+                buffer=not args.no_buffer,
+                max_fanout_limit=args.max_fanout,
             )
             results.append(r)
 
@@ -1913,6 +2195,11 @@ def main(argv: list[str] | None = None) -> int:
             "tools": versions,
             "incdirs": [str(p) for p in incdirs],
             "incdir_warn": inc_warn,
+            "buffer": not args.no_buffer,
+            "max_fanout_limit": args.max_fanout,
+            "buffer_method": (
+                "yosys_buf_tree" if not args.no_buffer else "none"
+            ),
             "product_totals": product_area_totals(results),
             "results": results,
         }

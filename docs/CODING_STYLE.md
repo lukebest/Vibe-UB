@@ -13,7 +13,7 @@
   - **PRODUCT**（`TEST_HOOKS=0`）：无 `tb_*` 端口；lint / CDC / 综合 / 实现 / FPGA **只认这一套**。
   - **HOOKS**（`TEST_HOOKS=1`）：须过 lint 与 CDC，**不得**实现。回归与行覆盖率在此网上跑（`tb_test_mode` 为 0 与 1）；覆盖率分母含钩子 mux，钩子代码不另开 waiver。
   - PRODUCT 另跑与钩子无关的 smoke。
-  - 形式等价（Yosys eqy 或同等开源工具）：PRODUCT vs HOOKS（`tb_test_mode=0`，全部 `tb_inj_*` 接复位值，§10 点名存储的 `tb_<inst>_bd_*` 输入接低）必须等价，否则阻断交付。
+  - 形式等价（Yosys eqy 或同等开源工具）：PRODUCT vs HOOKS（`tb_test_mode=0`，全部 `tb_inj_*` 接复位值，§10 点名存储的 `tb_<inst>_bd_*` 含 `tb_<inst>_bd_vld_*` 输入接低）必须等价，否则阻断交付。
 - 禁止在生成 Verilog 里再用 `` `ifdef TEST_HOOKS `` 做第二套分叉。
 
 ---
@@ -51,7 +51,7 @@
   1. 顶层功能端口；
   2. [SPEC.md](SPEC.md) §10 列出的 `tb_inj_*` / `tb_obs_*`（且 `TEST_HOOKS=1` 与 `tb_test_mode` 门控）；
   3. [REGMAP.md](REGMAP.md) 寄存器（测试窗仅 `tb_test_mode=1` 生效）；
-  4. **例外：** SPEC §10 **点名**的存储阵列，HOOKS 网表上的 backdoor 预载/回读口 `tb_<inst>_bd_we` / `tb_<inst>_bd_addr` / `tb_<inst>_bd_wdata` 与 `tb_<inst>_bd_re` / `tb_<inst>_bd_rdata`（`tb_test_mode` 门控）。PRODUCT 无这些口。eqy：`tb_test_mode=0` 且 backdoor 输入接低。
+  4. **例外：** SPEC §10 **点名**的存储阵列，HOOKS 网表上的 backdoor 口 `tb_<inst>_bd_*`：阵列 `tb_<inst>_bd_we` / `tb_<inst>_bd_addr` / `tb_<inst>_bd_wdata` / `tb_<inst>_bd_re` / `tb_<inst>_bd_rdata`，以及原语外 valid flop 的伴随口 `tb_<inst>_bd_vld_*`（`tb_test_mode` 门控；与阵列口一样列入 SPEC §10）。PRODUCT 无这些口。eqy：`tb_test_mode=0` 且全部 `tb_<inst>_bd_*` 输入接低。
 - 禁止 force / deposit FSM 当前态或非法态。默认分支用 **具名 waiver** 覆盖（见 §7）。到达 `Link_Active` 必须走真实转移，用 `LMSM_TMR_SCALE` 缩短超时。
 - 叶子内部（CRC / FEC / deskew / 缓冲）走叶子端口或 wrapper 共仿真，不加产品钩子。**除此例外外，不得**再给叶子内部缓冲加钩子。
 - PCS RX unpack `n==0 && have`：**待定**（验证确认端口可达性，否则删分支或 waiver）。
@@ -67,7 +67,7 @@
 | 时钟 | `core_clk`（M1 唯一时钟） |
 | 复位 | 顶层 `rst_n`（低有效，异步置位）；`rst_n_sync`；业务 `rst_pyc`（`pyc_reg` 原生极性，见 SPEC §4.2） |
 | 数据流 | `valid` / `ready`；源到宿前缀如 `dll2pcs_*`、`pcs2dll_*` |
-| 测试钩子 | `tb_inj_*`、`tb_obs_*`、`tb_test_mode`；§10 点名存储另加 `tb_<inst>_bd_*`（仅 HOOKS） |
+| 测试钩子 | `tb_inj_*`、`tb_obs_*`、`tb_test_mode`；§10 点名存储另加 `tb_<inst>_bd_*`（含 `tb_<inst>_bd_vld_*`，仅 HOOKS） |
 | 参数 | `UPPER_SNAKE`，与 SPEC §9 标识符一致 |
 | 常量 / 枚举 | `UPPER_SNAKE` |
 | 禁止 | 与验证旧名 `vibe_*` 混用产品模块名（映射见 SPEC §10） |
@@ -127,8 +127,8 @@
 | 项 | 约定 |
 | --- | --- |
 | 参数 | `DEPTH`、`WIDTH`（`UPPER_SNAKE`） |
-| 时钟 | `clk`（M1 接 `core_clk`） |
-| 复位 | **阵列无 `rst_n` / `rst_pyc`**；内容上电后保持，不清零 |
+| 时钟 | `core_clk`（与现有叶子同名；**不是** `clk`） |
+| 复位 | **阵列无复位口**（无 `rst_n` / `rst_pyc`）；内容上电后保持，不清零。有效位在原语外，用 `rst_pyc` 同步复位 flop（与现有叶子业务寄存器相同） |
 | 写口 | `we`、`waddr`、`wdata` |
 | 读口 | `re`、`raddr`、`rdata` |
 | 读时序 | `rdata` **寄存输出**，读延迟 **1 拍** |
@@ -142,8 +142,8 @@
 | 线 | 阵列 |
 | --- | --- |
 | B | RTP 重传缓冲、重排（reorder）缓冲、TA 未决表 |
-| C | UMMU / decoder 大表（配置表、TCT、MATT、MAPT、解码表） |
+| C | UMMU TLB way `mem_tlb_w0`…`mem_tlb_w3`；decoder bank `mem_dec_b0`…`mem_dec_b7`；`mem_dec_tlb`。页表与 MAPT 在系统内存，不例化本原语；PLB 为 FF，不列 |
 
 其它标 SRAM / 行为 stub 的大缓冲（如线 A `ub_dll_retry`）**应当**用同一原语，避免第二套 stub 口。
 
-HOOKS 上的 backdoor 只允许 SPEC §10 点名的阵列，口名与门控见 SPEC §10.5 与上文 §4。PRODUCT 无 `tb_*`。
+HOOKS 上的 backdoor 只允许 SPEC §10 点名的阵列，口名 `tb_<inst>_bd_*`（阵列口 + `tb_<inst>_bd_vld_*`）与门控见 SPEC §10.5 与上文 §4。PRODUCT 无 `tb_*`。

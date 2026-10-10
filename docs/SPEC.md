@@ -248,6 +248,7 @@ flowchart TB
 - `start`、`valid_in`、`last` 同拍：单 flit 块，只算该拍末尾 4 字节 BCRC 之前的 16 字节，按本节 1 拍延迟给出 `crc_word`。
 - `start==1 && valid_in==0`：只把寄存器置回全 1，不折数据。
 - 上一块未见 `last` 又来 `start`：以新的 `start` 为准，从初值重新算。
+- `last` 拍给出 `crc_word` 后，CRC 寄存器回到初值全 1。因此块首 flit 未带 `start`（上一块已 `last`，或复位撤销后的第一块）而来 `valid_in` 时，按全 1 初值计入该拍，结果与带 `start` 相同。块中间未带 `start` 的 `valid_in` 接着当前 CRC 折入。上游仍应在每块首 flit 给 `start`。
 
 以上与 `tb/models/ub_dll_bcrc.py` 的 `start()` / `eat()` 一致。结论由架构 Xia 于 2026-10-10 裁定。
 

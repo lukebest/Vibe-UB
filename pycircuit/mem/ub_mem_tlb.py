@@ -7,7 +7,10 @@ Storage: four named instances of ``ub_cmn_mem_1r1w_d64w109`` (PR #21 port
 list). Valid (256) and tree PLRU (64x3) live in ``rst_pyc`` flops.
 
 Timing (实现 guidance): 4-way hit vector is one-hot AND-OR select; PLRU
-and valid write-back are the cycle after compare/select.
+and valid write-back are the cycle after compare/select. Fill FSM is
+registered one-hot (idle / FILL_CMP / FILL_WB); consumers use the flop
+outputs directly (no post-flop decode). Lookup hit and §10 obs stay at
+request+1.
 
 Fill reuses a way whose tag (ENT_IDX + TokenID + page) is already valid
 in the set. PLRU update is one cycle late — back-to-back hits in the same
@@ -50,19 +53,12 @@ from mem.params import (
     PAGE_W,
     PFN_W,
     SET_W,
-    ST_FILL_CMP,
-    ST_FILL_WB,
-    ST_IDLE,
     TAG_W,
     TLB_SETS,
     TLB_WAYS,
     TOKEN_W,
     WORD_W,
 )
-
-
-def _eq_st(m: Circuit, st, val: int):
-    return st == u(2, val)
 
 
 def _tlb_body(m: Circuit, *, test_hooks: int) -> None:
@@ -121,7 +117,10 @@ def _tlb_body(m: Circuit, *, test_hooks: int) -> None:
             bd_vld_we.append(_z1)
             bd_vld_wd.append(_z1)
 
-    st = m.out("st", clk=clk, rst=rst, width=2, init=u(2, ST_IDLE), en=1)
+    # One-hot fill FSM, registered from next-state. No post-flop decode.
+    st_idle = m.out("st_idle", clk=clk, rst=rst, width=1, init=u(1, 1), en=1)
+    st_fill_cmp = m.out("st_fill_cmp", clk=clk, rst=rst, width=1, init=u(1, 0), en=1)
+    st_fill_wb = m.out("st_fill_wb", clk=clk, rst=rst, width=1, init=u(1, 0), en=1)
     lk_pend = m.out("lk_pend", clk=clk, rst=rst, width=1, init=u(1, 0), en=1)
     lk_set_q = m.out("lk_set_q", clk=clk, rst=rst, width=SET_W, init=u(SET_W, 0), en=1)
     lk_tag_q = m.out("lk_tag_q", clk=clk, rst=rst, width=TAG_W, init=u(TAG_W, 0), en=1)
@@ -173,9 +172,9 @@ def _tlb_body(m: Circuit, *, test_hooks: int) -> None:
     byp_d2 = m.out("byp_d2", clk=clk, rst=rst, width=WORD_W, init=u(WORD_W, 0), en=1)
     byp_d3 = m.out("byp_d3", clk=clk, rst=rst, width=WORD_W, init=u(WORD_W, 0), en=1)
 
-    idle = _eq_st(m, st.out(), ST_IDLE)
-    fill_cmp = _eq_st(m, st.out(), ST_FILL_CMP)
-    fill_wb = _eq_st(m, st.out(), ST_FILL_WB)
+    idle = st_idle.out()
+    fill_cmp = st_fill_cmp.out()
+    fill_wb = st_fill_wb.out()
     fill_busy = fill_cmp | fill_wb
     scan_busy = scan_pend.out() | scan_clr.out()
 
@@ -350,19 +349,13 @@ def _tlb_body(m: Circuit, *, test_hooks: int) -> None:
         tok_ok = ~scan_mt_q.out() | (tok_i == scan_tok_q.out())
         scan_hits.append(vis_v[i] & ent_ok & tok_ok)
 
-    # Next-state
-    st_next = mux(
-        m,
-        do_fill,
-        u(2, ST_FILL_CMP),
-        mux(
-            m,
-            fill_cmp,
-            u(2, ST_FILL_WB),
-            mux(m, fill_wb, u(2, ST_IDLE), st.out()),
-        ),
-    )
-    st.set(st_next)
+    # Next-state one-hot (same cycle map as the old encoded st).
+    nxt_fill_cmp = do_fill
+    nxt_fill_wb = ~do_fill & fill_cmp
+    nxt_idle = ~do_fill & ~fill_cmp
+    st_idle.set(nxt_idle)
+    st_fill_cmp.set(nxt_fill_cmp)
+    st_fill_wb.set(nxt_fill_wb)
 
     lk_pend.set(do_lk)
     lk_set_q.set(lk_set, when=do_lk)

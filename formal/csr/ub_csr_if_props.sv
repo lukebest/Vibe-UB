@@ -1,5 +1,5 @@
 // ub_csr_if_props — property-only CSR bus (SPEC §3.2.3, REGMAP bus / §2.4).
-// Bind on ub_csr / ub_controller. No RTL logic. No csr_wstrb port (full-word).
+// Bind on ub_csr / ub_controller. No RTL datapath. No csr_wstrb port (full-word).
 
 module ub_csr_if_props #(
   parameter TEST_HOOKS = 1
@@ -46,71 +46,57 @@ module ub_csr_if_props #(
   endfunction
 
   wire test_quiet = (TEST_HOOKS == 0) || !tb_test_mode;
+  wire mapped_now  = is_mapped(csr_addr);
+  wire test_now    = is_test_win(csr_addr);
+  wire aligned_now = is_aligned(csr_addr);
 
   // SPEC §3.2.3: csr_ready is 1 every cycle (M1, no wait).
-  a_csr_ready_hi: assert property (@(posedge core_clk) csr_ready == 1'b1);
+  always @(*) begin
+    a_csr_ready_hi: assert (csr_ready == 1'b1);
+  end
 
-  // SPEC §3.2.3 / §5: read response is the cycle after an accepted read.
-  a_csr_read_1cycle: assert property (
-    @(posedge core_clk) disable iff (!rst_n)
-    (csr_req && csr_ready && !csr_wr) |=> csr_rvalid
-  );
+  reg f_past_ok;
+  initial f_past_ok = 1'b0;
+  always @(posedge core_clk)
+    f_past_ok <= 1'b1;
 
-  // SPEC §3.2.3: write response has csr_rvalid=0 next cycle; csr_err is valid then.
-  a_csr_write_no_rvalid: assert property (
-    @(posedge core_clk) disable iff (!rst_n)
-    (csr_req && csr_ready && csr_wr) |=> !csr_rvalid
-  );
+  always @(posedge core_clk) begin
+    if (rst_n && f_past_ok) begin
+      // SPEC §3.2.3 / §5: read response is the cycle after an accepted read.
+      if ($past(rst_n && csr_req && csr_ready && !csr_wr))
+        a_csr_read_1cycle: assert (csr_rvalid);
 
-  // No request → no response the next cycle (fixed 1-cycle, no pipeline).
-  a_csr_idle_no_resp: assert property (
-    @(posedge core_clk) disable iff (!rst_n)
-    !(csr_req && csr_ready) |=> !csr_rvalid
-  );
+      // SPEC §3.2.3: write response has csr_rvalid=0 next cycle.
+      if ($past(rst_n && csr_req && csr_ready && csr_wr))
+        a_csr_write_no_rvalid: assert (!csr_rvalid);
 
-  // SPEC §3.2.3 / §7: unmapped (incl. unaligned) → csr_err next cycle.
-  // TEST window is mapped even when quiet (err=0).
-  a_csr_err_unmapped: assert property (
-    @(posedge core_clk) disable iff (!rst_n)
-    (csr_req && csr_ready && !is_mapped(csr_addr)) |=> csr_err
-  );
-  a_csr_err_mapped: assert property (
-    @(posedge core_clk) disable iff (!rst_n)
-    (csr_req && csr_ready && is_mapped(csr_addr)) |=> !csr_err
-  );
+      // No request → no response the next cycle (fixed 1-cycle, no pipeline).
+      if ($past(rst_n && !(csr_req && csr_ready)))
+        a_csr_idle_no_resp: assert (!csr_rvalid);
 
-  // SPEC §3.2.3: unmapped read returns 0.
-  a_csr_unmap_rdata0: assert property (
-    @(posedge core_clk) disable iff (!rst_n)
-    (csr_req && csr_ready && !csr_wr && !is_mapped(csr_addr)) |=> (csr_rdata == 32'h0)
-  );
+      // SPEC §3.2.3 / §7: unmapped (incl. unaligned) → csr_err next cycle.
+      if ($past(rst_n && csr_req && csr_ready && !mapped_now))
+        a_csr_err_unmapped: assert (csr_err);
+      if ($past(rst_n && csr_req && csr_ready && mapped_now))
+        a_csr_err_mapped: assert (!csr_err);
 
-  // SPEC §3.2.3 / §10.1 / §11 / REGMAP §2.4: TEST 0x0300–0x03FF is mapped.
-  // Quiet (PRODUCT or tb_test_mode=0): read 0, write ignore, csr_err=0.
-  a_csr_test_quiet_err0: assert property (
-    @(posedge core_clk) disable iff (!rst_n)
-    (csr_req && csr_ready && is_test_win(csr_addr) && test_quiet) |=> !csr_err
-  );
-  a_csr_test_quiet_rd0: assert property (
-    @(posedge core_clk) disable iff (!rst_n)
-    (csr_req && csr_ready && !csr_wr && is_test_win(csr_addr) && test_quiet)
-    |=> (csr_rdata == 32'h0)
-  );
+      // SPEC §3.2.3: unmapped read returns 0.
+      if ($past(rst_n && csr_req && csr_ready && !csr_wr && !mapped_now))
+        a_csr_unmap_rdata0: assert (csr_rdata == 32'h0);
 
-  c_csr_read_mapped: cover property (
-    @(posedge core_clk) rst_n && csr_req && !csr_wr && is_mapped(csr_addr)
-  );
-  c_csr_write_mapped: cover property (
-    @(posedge core_clk) rst_n && csr_req && csr_wr && is_mapped(csr_addr)
-  );
-  c_csr_unmapped: cover property (
-    @(posedge core_clk) rst_n && csr_req && !is_mapped(csr_addr)
-  );
-  c_csr_unaligned: cover property (
-    @(posedge core_clk) rst_n && csr_req && !is_aligned(csr_addr)
-  );
-  c_csr_test_quiet: cover property (
-    @(posedge core_clk) rst_n && csr_req && is_test_win(csr_addr) && test_quiet
-  );
+      // SPEC §3.2.3 / §10.1 / §11 / REGMAP §2.4: TEST window mapped; quiet ⇒
+      // read 0, write ignore, csr_err=0.
+      if ($past(rst_n && csr_req && csr_ready && test_now && test_quiet))
+        a_csr_test_quiet_err0: assert (!csr_err);
+      if ($past(rst_n && csr_req && csr_ready && !csr_wr && test_now && test_quiet))
+        a_csr_test_quiet_rd0: assert (csr_rdata == 32'h0);
+
+      c_csr_read_mapped:  cover (csr_req && !csr_wr && mapped_now);
+      c_csr_write_mapped: cover (csr_req && csr_wr && mapped_now);
+      c_csr_unmapped:     cover (csr_req && !mapped_now);
+      c_csr_unaligned:    cover (csr_req && !aligned_now);
+      c_csr_test_quiet:   cover (csr_req && test_now && test_quiet);
+    end
+  end
 
 endmodule

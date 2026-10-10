@@ -91,6 +91,7 @@ module ub_csr_harness (
   input wire [31:0] csr_wdata,
   input wire        tb_test_mode
 );
+  initial assume (rst_n == 1'b0);
   wire        csr_ready;
   wire        csr_rvalid;
   wire [31:0] csr_rdata;

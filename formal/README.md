@@ -4,7 +4,7 @@
 | --- | --- |
 | Owner | Architecture (Xia). See [docs/TEAM.md](../docs/TEAM.md) §2 |
 | Role | Interface contract, bindable by design self-checks and verification |
-| Tool | SymbiYosys (`.sby`) + Yosys-compatible SVA subset |
+| Tool | SymbiYosys (`.sby`) + Yosys-compatible SVA subset (clocked `assert`/`cover`; no Verific concurrent `assert property`) |
 | Companion | [model/](../model/) Python goldens |
 
 Property modules contain **asserts / assumes / covers only** — no RTL

@@ -43,6 +43,7 @@ module ub_irq_harness (
   input wire [6:0] mask_nxt,
   input wire [6:0] status_nxt
 );
+  initial assume (rst_n == 1'b0);
   wire       irq_en;
   wire [6:0] irq_mask;
   wire [6:0] irq_status;

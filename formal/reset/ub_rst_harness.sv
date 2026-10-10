@@ -26,6 +26,7 @@ module ub_rst_harness (
   input wire core_clk,
   input wire rst_n
 );
+  initial assume (rst_n == 1'b0);
   wire rst_n_sync;
 
   ub_rst_sync_stub u_dut (

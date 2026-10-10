@@ -3,13 +3,13 @@ bmc
 cover
 
 [options]
-depth 16
-
-[options bmc]
+depth 10
+bmc:
 mode bmc
-
-[options cover]
+--
+cover:
 mode cover
+--
 
 [engines]
 smtbmc z3

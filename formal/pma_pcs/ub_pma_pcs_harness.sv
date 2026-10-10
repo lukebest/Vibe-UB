@@ -59,6 +59,7 @@ module ub_pma_pcs_harness #(
   input wire                       rx_go,
   input wire [NUM_LANES_RX*PMA_W-1:0] rx_data_next
 );
+  initial assume (rst_n == 1'b0);
   wire [NUM_LANES_TX*PMA_W-1:0] pma_tx_data;
   wire                       pma_tx_valid;
   wire [NUM_LANES_TX-1:0]    pma_tx_elec_idle;

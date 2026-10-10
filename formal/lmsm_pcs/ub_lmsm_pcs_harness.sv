@@ -48,6 +48,7 @@ module ub_lmsm_pcs_harness (
   input wire       ltb_valid_in,
   input wire [7:0] ltb_type_in
 );
+  initial assume (rst_n == 1'b0);
   wire [1:0] lmsm2pcs_pattern;
   wire [1:0] lmsm2pcs_lane_id_mode;
   wire       lmsm2pcs_ltb_valid;

@@ -42,6 +42,7 @@ module ub_status_harness (
   input wire [3:0] ntx_in,
   input wire [3:0] nrx_in
 );
+  initial assume (rst_n == 1'b0);
   wire [2:0] retry_req_st;
   wire [1:0] retry_ack_st;
   wire [3:0] num_lanes_tx;

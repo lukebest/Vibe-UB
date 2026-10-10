@@ -9,7 +9,7 @@ IFACES := reset pma_pcs lmsm_pcs csr status irq
 all: $(IFACES)
 
 $(IFACES):
-	cd $@ && $(SBY) -f $@.sby
+	cd $@ && $(SBY) -f --sequential $@.sby
 
 clean:
 	@for d in $(IFACES); do \

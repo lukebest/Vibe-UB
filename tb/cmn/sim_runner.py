@@ -130,13 +130,13 @@ def _build_and_test(
         "--assert",
     ]
     includes = [str(p) for p in sim_include_dirs()]
-    # Single-token -I/-v: a spaced ``-I dir`` is parsed as a module name.
+    # ``-Ipath`` must be one token (a spaced ``-I dir`` is a module name).
+    # pyc_* stay on sim_verilog_sources() for the file list, but are compiled
+    # once via `` `include`` + this -I — do not also pass them as -v/sources.
     pyc_lib = pyc_lib_dir().resolve()
-    build_args.append(f"-I{pyc_lib}")
-    # ``-v`` so an `include of the same pyc_*.v does not compile the module twice.
-    for path in sources:
-        if path.name.startswith("pyc_") and path.suffix.lower() in {".v", ".sv"}:
-            build_args.append(f"-v{path}")
+    ival = f"-I{pyc_lib}"
+    if ival not in build_args:
+        build_args.append(ival)
 
     runner = get_runner("verilator")
     # Do not pass `parameters=` — that becomes Verilator -G (forbidden).
@@ -147,7 +147,6 @@ def _build_and_test(
         includes=includes,
         build_args=build_args,
     )
-    # Primary sources: wrapper + leaf + formal. pyc_* go through -I / -v only.
     srcs = [
         str(p)
         for p in sources

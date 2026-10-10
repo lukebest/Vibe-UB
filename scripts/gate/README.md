@@ -15,7 +15,7 @@ Lists live in this directory (`legacy.txt`, `handwritten.yml`, `blackbox.yml`,
 | `setup_pycircuit.sh` | Design spike recipe (clone pin, apt LLVM 19, `pyc build`, venv) |
 | `hooks_port_consistency.sh` | Independent HOOKS vs PRODUCT ports |
 | `lint.sh` | Verilator `--lint-only -Wall` + unlisted stub/macro |
-| `synth_check.sh` | Yosys synth, latch / multi-drive / combo-loop; `-lib` for blackbox.yml; combo depth report |
+| `synth_check.sh` | Yosys synth, latch / multi-drive / combo-loop; `-lib` for blackbox.yml; combo depth report; runs `synth_selftest.py` (async-FF vs latch / combo-loop fixtures) |
 | `cdc_rdc.sh` | Structural CDC / RDC (`cdc_rules.yml`; `valid_outside` for unreset arrays) |
 | `formal.sh` | `formal/<iface>/*.sby` (includes `formal/cmn/`) |
 | `regmap_consistency.sh` | `python3 scripts/gen_regmap.py --check` |

@@ -43,30 +43,61 @@ def is_product(path: Path) -> bool:
     return not (parts & HOOKS_DIR_PARTS)
 
 
+# Handwritten-list async-reset FFs (ub_rst_sync / $adff family). Not latches.
+_ASYNC_FF_CELL = re.compile(
+    r"\$(?:adff|adffe|dffsr|dffsre)\b|\$_DFF_(?:PN|NP)|_DFFSR_",
+    re.I,
+)
+# Real latches only. Do not match $adff / select-command text / $_DFF_PN0_.
+_LATCH_STAT = re.compile(
+    r"^\s+(\$(?:dlatch|adlatch|dlatchsr)\b|\$_DLATCH\S*)\s+\d+\s*$",
+    re.I,
+)
+_LATCH_INFERRED = re.compile(r"^Latch inferred for signal\b", re.I)
+_COMBO_LOOP_HIT = re.compile(
+    r"Warning:\s+found logic loop|"
+    r"combinational loop|"
+    r"Found an SCC:|"
+    r"Found [1-9]\d* SCCs\b",
+    re.I,
+)
+_MULTI_DRIVE = re.compile(r"multiple conflicting drivers|multiple drivers", re.I)
+
+
 def parse_yosys(text: str, module: str, file: str) -> list[Finding]:
+    """Parse Yosys synth-check log. Async-reset FFs are not LATCH / COMBO_LOOP.
+
+    Handwritten.yml cells ($adff / $adffe / $dffsr, mapped $_DFF_PN0_) stay
+    flops. Classify by cell type — do not skip the whole module. Ignore the
+    `select -list t:$dlatch …` command echo and the
+    `Executing SCC pass (detecting logic loops)` banner.
+    """
     findings: list[Finding] = []
-    latch_cells = []
+    latch_cells: list[str] = []
     for line in text.splitlines():
-        if re.search(r"\$dlatch|\$adlatch|\$dlatchsr", line, re.I):
-            latch_cells.append(line.strip())
-        if re.search(r"multiple conflicting drivers|multiple drivers", line, re.I):
+        stripped = line.strip()
+        if _ASYNC_FF_CELL.search(stripped) and not _LATCH_STAT.match(line):
+            continue
+        if _LATCH_STAT.match(line) or _LATCH_INFERRED.match(stripped):
+            latch_cells.append(stripped)
+        if _MULTI_DRIVE.search(line):
             findings.append(
                 Finding(
                     check="synth",
                     module=module,
                     file=file,
                     rule="MULTI_DRIVE",
-                    message=line.strip(),
+                    message=stripped,
                 )
             )
-        if re.search(r"logic loop|combinational loop|found loop", line, re.I):
+        if _COMBO_LOOP_HIT.search(line):
             findings.append(
                 Finding(
                     check="synth",
                     module=module,
                     file=file,
                     rule="COMBO_LOOP",
-                    message=line.strip(),
+                    message=stripped,
                 )
             )
         if re.search(r"ERROR:", line):
@@ -77,7 +108,7 @@ def parse_yosys(text: str, module: str, file: str) -> list[Finding]:
                         module=module,
                         file=file,
                         rule="YOSYS_ERROR",
-                        message=line.strip(),
+                        message=stripped,
                     )
                 )
     if latch_cells:

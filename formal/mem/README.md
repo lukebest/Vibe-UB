@@ -17,4 +17,4 @@ bash formal/mem/get_pyc_inc.sh
 sby -f formal/mem/ub_mem_tlb.sby
 ```
 
-Engine: `smtbmc z3` (same as `formal/cmn`).
+Engine: `smtbmc --nounroll boolector` (Yosys 0.33 + `--unroll` BrokenPipe). Run `sby -f --sequential` on 16 GB.

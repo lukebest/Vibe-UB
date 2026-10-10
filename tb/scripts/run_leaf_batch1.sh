@@ -14,7 +14,7 @@ if [[ -f "$ROOT/venv/bin/activate" ]]; then
   source "$ROOT/venv/bin/activate"
 fi
 
-mkdir -p "$TB/reports/regress/hooks0" "$TB/reports/regress/hooks1" \
+mkdir -p "$TB/reports/regress/$SIM/hooks0" "$TB/reports/regress/$SIM/hooks1" \
          "$TB/reports/cov_func" "$TB/reports/regress"
 
 PASS=0
@@ -34,7 +34,7 @@ run_one() {
       PYC_RST_ACTIVE_HIGH=*) pol="${i#PYC_RST_ACTIVE_HIGH=}"; tag="${tag}_pol${pol}" ;;
     esac
   done
-  local logdir="$TB/reports/regress/hooks${hooks}"
+  local logdir="$TB/reports/regress/$SIM/hooks${hooks}"
   local log="$logdir/${tag}.log"
   echo "=== $SIM $tag ==="
   rm -rf "$TB/sim_build"

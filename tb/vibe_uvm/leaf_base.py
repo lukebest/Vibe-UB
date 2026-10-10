@@ -100,11 +100,27 @@ class GatedClock:
         await wait_ps(self.period_ps)
 
 
+def run_tag() -> str:
+    """Keep per-param JSON distinct so x4 / polarity runs are not overwritten."""
+    leaf = os.environ.get("LEAF", "")
+    parts: list[str] = []
+    if leaf in ("ub_pcs_lane_dist", "ub_pcs_lane_dedist", "ub_pcs_lane_collect"):
+        parts.append(f"x{env_int('NUM_LANES', 4)}")
+    if leaf == "ub_pyc_rst_adapt":
+        parts.append(f"pol{env_int('PYC_RST_ACTIVE_HIGH', 1)}")
+    return "_".join(parts)
+
+
+def _sim_name() -> str:
+    return os.environ.get("SIM", "icarus")
+
+
 class CaseRecorder:
-    def __init__(self, tb_name: str, seed: int, hooks: int):
+    def __init__(self, tb_name: str, seed: int, hooks: int, tag: str = ""):
         self.tb_name = tb_name
         self.seed = seed
         self.hooks = hooks
+        self.tag = tag
         self.rows: list[dict] = []
 
     def pass_(self, name: str, tps: list[str], detail: str = "") -> None:
@@ -132,12 +148,17 @@ class CaseRecorder:
         uvm_info("LEAF", line, UVM_LOW)
 
     def write(self, cov_name: str) -> Path:
-        dest = REPORTS / "regress" / f"hooks{self.hooks}" / f"{self.tb_name}.json"
+        stem = self.tb_name if not self.tag else f"{self.tb_name}_{self.tag}"
+        dest = (
+            REPORTS / "regress" / _sim_name() / f"hooks{self.hooks}" / f"{stem}.json"
+        )
         dest.parent.mkdir(parents=True, exist_ok=True)
         n_pass = sum(1 for r in self.rows if r["status"] == "PASS")
         n_fail = sum(1 for r in self.rows if r["status"] == "FAIL")
         payload = {
             "tb": self.tb_name,
+            "tag": self.tag,
+            "sim": _sim_name(),
             "seed": self.seed,
             "test_hooks": self.hooks,
             "pass": n_pass,
@@ -177,7 +198,7 @@ class LeafUvmTest(UVMTest):
         else:
             self.seed = resolve_seed()
         self.hooks = hooks_netlist()
-        self.rec = CaseRecorder(self.TB_NAME, self.seed, self.hooks)
+        self.rec = CaseRecorder(self.TB_NAME, self.seed, self.hooks, tag=run_tag())
 
     async def run_phase(self, phase):
         phase.raise_objection(self)
@@ -185,7 +206,11 @@ class LeafUvmTest(UVMTest):
             await self._setup()
             await self.run_cases()
         finally:
-            cov_name = f"{self.COV_PREFIX}_hooks{self.hooks}.json"
+            tag = run_tag()
+            parts = [self.COV_PREFIX, _sim_name(), f"hooks{self.hooks}"]
+            if tag:
+                parts.append(tag)
+            cov_name = "_".join(parts) + ".json"
             export_functional(REPORTS / "cov_func" / cov_name)
             if self.rec is not None:
                 self.rec.write(cov_name)

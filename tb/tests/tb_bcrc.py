@@ -62,10 +62,8 @@ class BcrcLeafTest(LeafUvmTest):
         try:
             self.dut.rst_n.value = 0
             await RisingEdge(self.dut.core_clk)
-            if as_int(self.dut.done, "done") != 0:
-                raise AssertionError("done != 0 in reset")
-            if as_int(self.dut.crc_word, "crc_word") != 0:
-                raise AssertionError("crc_word != 0 in reset")
+            self.check(0, as_int(self.dut.done, "done"), "done in reset")
+            self.check(0, as_int(self.dut.crc_word, "crc_word"), "crc_word in reset")
             self.dut.rst_n.value = 1
             await RisingEdge(self.dut.core_clk)
             sample_bcrc("rst_quiet", 1, self.hooks)
@@ -86,12 +84,8 @@ class BcrcLeafTest(LeafUvmTest):
                 attached = attach(raw)
                 done, word = await self._feed(attached)
                 exp = pack_word(crc30_of(raw), 0, 0)
-                if done != 1:
-                    raise AssertionError(f"{kind}: done={done}")
-                if word != exp:
-                    raise AssertionError(
-                        f"{kind}: crc_word=0x{word:08x} expected 0x{exp:08x}"
-                    )
+                self.check(1, done, f"{kind} done")
+                self.check(exp, word, f"{kind} crc_word")
                 sample_bcrc(kind, 1, self.hooks)
                 self.rec.pass_(f"directed_{kind}", TP)
         except Exception as exc:
@@ -109,8 +103,8 @@ class BcrcLeafTest(LeafUvmTest):
             attached = attach(raw)
             done, word = await self._feed(attached)
             exp = pack_word(crc30_of(raw), 0, 0)
-            if done != 1 or word != exp:
-                raise AssertionError(f"done={done} word=0x{word:08x} exp=0x{exp:08x}")
+            self.check(1, done, "two_flit done")
+            self.check(exp, word, "two_flit crc_word")
             sample_bcrc("two_flit", 2, self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -126,10 +120,8 @@ class BcrcLeafTest(LeafUvmTest):
                 attached = attach(raw)
                 done, word = await self._feed(attached)
                 exp = pack_word(crc30_of(raw), 0, 0)
-                if done != 1 or word != exp:
-                    raise AssertionError(
-                        f"n={n_flit} done={done} word=0x{word:08x} exp=0x{exp:08x}"
-                    )
+                self.check(1, done, f"rand n={n_flit} done")
+                self.check(exp, word, f"rand n={n_flit} crc_word")
                 sample_bcrc("rand", n_flit, self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -141,14 +133,10 @@ class BcrcLeafTest(LeafUvmTest):
         try:
             raw = [payload_flit(list(range(16)))]
             done, word = await self._feed(attach(raw, error_flag=1))
-            if done != 1:
-                raise AssertionError("done=0")
-            if (word >> 30) & 1:
-                raise AssertionError(f"TX ERROR_FLAG set: 0x{word:08x}")
-            if (word >> 31) & 1:
-                raise AssertionError(f"TX rsvd set: 0x{word:08x}")
-            if (word & 0x3FFFFFFF) != crc30_of(raw):
-                raise AssertionError("CRC30 field mismatch")
+            self.check(1, done, "tx_flag0 done")
+            self.check(0, (word >> 30) & 1, "TX ERROR_FLAG")
+            self.check(0, (word >> 31) & 1, "TX rsvd")
+            self.check(crc30_of(raw), word & 0x3FFFFFFF, "CRC30 field")
             sample_bcrc("tx_flag0", 1, self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -163,8 +151,8 @@ class BcrcLeafTest(LeafUvmTest):
             await self._feed(a)
             done, word = await self._feed(b)
             exp = pack_word(crc30_of([payload_flit([0xFF] * 16)]), 0, 0)
-            if done != 1 or word != exp:
-                raise AssertionError("start did not re-init between blocks")
+            self.check(1, done, "reinit done")
+            self.check(exp, word, "reinit crc_word")
             sample_bcrc("start_reinit", 1, self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:

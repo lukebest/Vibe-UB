@@ -12,7 +12,7 @@ from uvm import UVMConfigDb, UVMTest, uvm_error, uvm_info, UVM_LOW
 
 from tb.vibe_uvm.clk_rst import CORE_CLK_PERIOD_PS
 from tb.vibe_uvm.coverage import export_functional
-from tb.vibe_uvm.scoreboard import ScoreboardBase
+from tb.vibe_uvm.scoreboard import ScoreboardBase, scoreboard_tally
 from tb.vibe_uvm.seed_log import log_seed, resolve_seed
 
 REPO = Path(__file__).resolve().parents[2]
@@ -200,11 +200,32 @@ class LeafUvmTest(UVMTest):
         self.hooks = hooks_netlist()
         self.rec = CaseRecorder(self.TB_NAME, self.seed, self.hooks, tag=run_tag())
 
+    def check(self, expected, actual, ctx: str) -> None:
+        if not self.sb.check(expected, actual, ctx):
+            raise AssertionError(f"{ctx}: expected={expected!r} actual={actual!r}")
+
+    def check_word(self, got: int, exp: int, num_lanes: int, ctx: str) -> None:
+        from tb.vibe_uvm.lane_util import PMA_W, mismatch_msg
+
+        width = num_lanes * PMA_W
+        self.sb.expect(width)
+        for pos in range(width):
+            self.sb.compare((exp >> pos) & 1, (got >> pos) & 1, f"{ctx}[{pos}]")
+        if got != exp:
+            raise AssertionError(mismatch_msg(got, exp, num_lanes, ctx))
+
     async def run_phase(self, phase):
         phase.raise_objection(self)
         try:
             await self._setup()
             await self.run_cases()
+            self.sb.finalize()
+        except Exception:
+            if self.rec is not None and not any(
+                r["status"] == "FAIL" for r in self.rec.rows
+            ):
+                self.rec.fail("scoreboard", [], "scoreboard tally or uncaught error")
+            raise
         finally:
             tag = run_tag()
             parts = [self.COV_PREFIX, _sim_name(), f"hooks{self.hooks}"]
@@ -215,9 +236,14 @@ class LeafUvmTest(UVMTest):
             if self.rec is not None:
                 self.rec.write(cov_name)
             n_fail = sum(1 for r in (self.rec.rows if self.rec else []) if r["status"] == "FAIL")
+            if self.sb.n_mismatch or scoreboard_tally(
+                self.sb.n_compare, self.sb.n_expect, self.sb.n_mismatch
+            ):
+                n_fail += 1
             tag = "FAIL" if n_fail else "PASS"
             print(
-                f"{tag} {self.TB_NAME}_suite TEST_HOOKS={self.hooks} SEED {self.seed}",
+                f"{tag} {self.TB_NAME}_suite TEST_HOOKS={self.hooks} SEED {self.seed} "
+                f"SB {self.sb.n_compare}/{self.sb.n_expect}",
                 flush=True,
             )
             phase.drop_objection(self)

@@ -42,11 +42,7 @@ class RstAdaptLeafTest(LeafUvmTest):
                 await self._drive(src)
                 got = as_int(self.dut.rst_pyc, "rst_pyc")
                 exp = self._expect(src)
-                if got != exp:
-                    raise AssertionError(
-                        f"PYC_RST_ACTIVE_HIGH={self.pol} rst_n_sync={src} "
-                        f"rst_pyc={got} expected {exp}"
-                    )
+                self.check(exp, got, f"polarity src={src}")
             sample_rst_adapt(self.pol, kind, self.hooks)
             self.rec.pass_(name, TP, f"PYC_RST_ACTIVE_HIGH={self.pol}")
         except Exception as exc:
@@ -60,10 +56,8 @@ class RstAdaptLeafTest(LeafUvmTest):
             t0 = as_int(self.dut.rst_pyc, "rst_pyc")
             await self._drive(1)
             t1 = as_int(self.dut.rst_pyc, "rst_pyc")
-            if t0 == t1:
-                raise AssertionError("output did not follow input in 0 cycles")
-            if t1 != self._expect(1) or t0 != self._expect(0):
-                raise AssertionError(f"combo values {t0}->{t1}")
+            self.check(self._expect(0), t0, "combo src0")
+            self.check(self._expect(1), t1, "combo src1")
             sample_rst_adapt(self.pol, "combo_0", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -77,11 +71,13 @@ class RstAdaptLeafTest(LeafUvmTest):
             await wait_ps(100)
             await self._drive(0)
             mid = as_int(self.dut.rst_pyc, "rst_pyc")
-            if mid != self._expect(0):
-                raise AssertionError("waits for next edge (registered)")
+            self.check(self._expect(0), mid, "not registered")
             await wait_ps(CORE_CLK_PERIOD_PS // 2)
-            if as_int(self.dut.rst_pyc, "rst_pyc") != self._expect(0):
-                raise AssertionError("changed without input")
+            self.check(
+                self._expect(0),
+                as_int(self.dut.rst_pyc, "rst_pyc"),
+                "held without input",
+            )
             sample_rst_adapt(self.pol, "not_registered", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:

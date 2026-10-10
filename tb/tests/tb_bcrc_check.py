@@ -74,8 +74,7 @@ class BcrcCheckLeafTest(LeafUvmTest):
             self.dut.rst_n.value = 0
             await RisingEdge(self.dut.core_clk)
             for sig in ("done", "crc_ok", "crc_fail", "error_flag_rx"):
-                if as_int(getattr(self.dut, sig), sig) != 0:
-                    raise AssertionError(f"{sig} != 0 in reset")
+                self.check(0, as_int(getattr(self.dut, sig), sig), f"{sig} in reset")
             self.dut.rst_n.value = 1
             await RisingEdge(self.dut.core_clk)
             sample_bcrc_check("rst_quiet", self.hooks)
@@ -89,10 +88,10 @@ class BcrcCheckLeafTest(LeafUvmTest):
         try:
             attached = attach([payload_flit(list(range(16)))])
             r = await self._feed(attached)
-            if r["done"] != 1 or r["ok"] != 1 or r["fail"] != 0:
-                raise AssertionError(f"good {r}")
-            if r["eflag"] != 0:
-                raise AssertionError(f"eflag {r['eflag']}")
+            self.check(1, r["done"], "good done")
+            self.check(1, r["ok"], "good crc_ok")
+            self.check(0, r["fail"], "good crc_fail")
+            self.check(0, r["eflag"], "good eflag")
             sample_bcrc_check("good", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -107,14 +106,12 @@ class BcrcCheckLeafTest(LeafUvmTest):
             b = attach(raw, error_flag=1)
             ra = await self._feed(a)
             rb = await self._feed(b)
-            if ra["ok"] != rb["ok"] or ra["fail"] != rb["fail"]:
-                raise AssertionError(f"CRC result changed: {ra} vs {rb}")
-            if ra["ok"] != 1 or ra["fail"] != 0:
-                raise AssertionError(f"good CRC failed: {ra}")
-            if ra["eflag"] != 0 or rb["eflag"] != 1:
-                raise AssertionError(
-                    f"error_flag_rx did not follow crc_recv[30]: {ra['eflag']}/{rb['eflag']}"
-                )
+            self.check(ra["ok"], rb["ok"], "flag flip crc_ok")
+            self.check(ra["fail"], rb["fail"], "flag flip crc_fail")
+            self.check(1, ra["ok"], "flag0 crc_ok")
+            self.check(0, ra["fail"], "flag0 crc_fail")
+            self.check(0, ra["eflag"], "flag0 eflag")
+            self.check(1, rb["eflag"], "flag1 eflag")
             sample_bcrc_check("flag_flip", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -131,12 +128,12 @@ class BcrcCheckLeafTest(LeafUvmTest):
             r0 = await self._feed(base)
             r1 = await self._feed(rsvd)
             r2 = await self._feed(both)
-            if r0["ok"] != 1 or r1["ok"] != 1 or r2["ok"] != 1:
-                raise AssertionError(f"rsvd affected CRC: {r0}/{r1}/{r2}")
-            if r0["eflag"] != 0 or r1["eflag"] != 0:
-                raise AssertionError("rsvd leaked into error_flag_rx")
-            if r2["eflag"] != 1:
-                raise AssertionError("flag lost when rsvd=1")
+            self.check(1, r0["ok"], "base crc_ok")
+            self.check(1, r1["ok"], "rsvd crc_ok")
+            self.check(1, r2["ok"], "both crc_ok")
+            self.check(0, r0["eflag"], "base eflag")
+            self.check(0, r1["eflag"], "rsvd eflag")
+            self.check(1, r2["eflag"], "both eflag")
             sample_bcrc_check("rsvd_flip", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -153,8 +150,8 @@ class BcrcCheckLeafTest(LeafUvmTest):
             for bit in bits:
                 mutated = [good[0] ^ (1 << bit)]
                 r = await self._feed(mutated)
-                if r["fail"] != 1 or r["ok"] != 0:
-                    raise AssertionError(f"bit {bit} not detected: {r}")
+                self.check(1, r["fail"], f"bit {bit} crc_fail")
+                self.check(0, r["ok"], f"bit {bit} crc_ok")
             sample_bcrc_check("bit_flip", self.hooks)
             self.rec.pass_(name, TP, f"flips={len(bits)}")
         except Exception as exc:
@@ -169,13 +166,13 @@ class BcrcCheckLeafTest(LeafUvmTest):
                 raw = [rng.randrange(1 << 160) for _ in range(n_flit)]
                 good = attach(raw)
                 r = await self._feed(good)
-                if r["ok"] != 1 or r["fail"] != 0:
-                    raise AssertionError(f"good n={n_flit} {r}")
+                self.check(1, r["ok"], f"good n={n_flit} crc_ok")
+                self.check(0, r["fail"], f"good n={n_flit} crc_fail")
                 bad = list(good)
                 bad[-1] ^= 1
                 r2 = await self._feed(bad)
-                if r2["fail"] != 1 or r2["ok"] != 0:
-                    raise AssertionError(f"rand flip missed n={n_flit} {r2}")
+                self.check(1, r2["fail"], f"rand flip n={n_flit} crc_fail")
+                self.check(0, r2["ok"], f"rand flip n={n_flit} crc_ok")
             sample_bcrc_check("rand", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -200,14 +197,14 @@ class BcrcCheckLeafTest(LeafUvmTest):
             pre_done = as_int(self.dut.done, "done")
             await RisingEdge(self.dut.core_clk)
             await wait_ps(1)
-            if pre_done != 0:
-                raise AssertionError("done on the last input beat (0-cycle, expected 1)")
-            if as_int(self.dut.done, "done") != 1:
-                raise AssertionError("done not 1 cycle after last")
-            if as_int(self.dut.error_flag_rx, "error_flag_rx") != 1:
-                raise AssertionError("error_flag_rx not aligned with done")
-            if as_int(self.dut.crc_ok, "crc_ok") != 1:
-                raise AssertionError("crc_ok not aligned with done")
+            self.check(0, pre_done, "done on last input beat")
+            self.check(1, as_int(self.dut.done, "done"), "done 1 cycle after last")
+            self.check(
+                1,
+                as_int(self.dut.error_flag_rx, "error_flag_rx"),
+                "error_flag_rx aligned",
+            )
+            self.check(1, as_int(self.dut.crc_ok, "crc_ok"), "crc_ok aligned")
             sample_bcrc_check("lat1", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:

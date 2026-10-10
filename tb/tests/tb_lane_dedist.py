@@ -11,7 +11,6 @@ from tb.vibe_uvm.leaf_base import LeafUvmTest, as_int, env_int, leaf_entry, wait
 from tb.vibe_uvm.leaf_cov import sample_lane
 from tb.vibe_uvm.lane_util import (
     PMA_W,
-    compare_word,
     expected_dedist,
     expected_window,
     incrementing_symbols,
@@ -59,8 +58,7 @@ class LaneDedistLeafTest(LeafUvmTest):
         name = "valid_out_0_in_reset"
         try:
             _, vout = await self._drive(1, 1)
-            if vout != 0:
-                raise AssertionError(f"valid_out={vout} in reset")
+            self.check(0, vout, "valid_out in reset")
             sample_lane(self.num_lanes, "valid_rst", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -75,9 +73,8 @@ class LaneDedistLeafTest(LeafUvmTest):
             striped = expected_window(symbols, self.num_lanes)
             got, vout = await self._drive(striped, 1)
             exp = pack_symbols(symbols)
-            if vout != 1:
-                raise AssertionError(f"valid={vout}")
-            compare_word(got, exp, self.num_lanes, "inverse")
+            self.check(1, vout, "inverse valid")
+            self.check_word(got, exp, self.num_lanes, "inverse")
             sample_lane(self.num_lanes, "window", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -90,7 +87,7 @@ class LaneDedistLeafTest(LeafUvmTest):
             for label, vec in (("zero", 0), ("one", (1 << self.width) - 1)):
                 exp = expected_dedist(vec, self.num_lanes)
                 got, _ = await self._drive(vec, 1)
-                compare_word(got, exp, self.num_lanes, label)
+                self.check_word(got, exp, self.num_lanes, label)
                 sample_lane(self.num_lanes, label, self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -103,7 +100,7 @@ class LaneDedistLeafTest(LeafUvmTest):
             for vec in walking_ones(self.width):
                 exp = expected_dedist(vec, self.num_lanes)
                 got, _ = await self._drive(vec, 1)
-                compare_word(got, exp, self.num_lanes, f"walk 0x{vec:x}")
+                self.check_word(got, exp, self.num_lanes, f"walk 0x{vec:x}")
             sample_lane(self.num_lanes, "walk", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -118,7 +115,7 @@ class LaneDedistLeafTest(LeafUvmTest):
                 vec = rng.randrange(1 << self.width)
                 exp = expected_dedist(vec, self.num_lanes)
                 got, _ = await self._drive(vec, 1)
-                compare_word(got, exp, self.num_lanes, "rand")
+                self.check_word(got, exp, self.num_lanes, "rand")
             sample_lane(self.num_lanes, "rand", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -132,8 +129,8 @@ class LaneDedistLeafTest(LeafUvmTest):
             b = expected_dedist(2, self.num_lanes)
             got_a, _ = await self._drive(1, 1)
             got_b, _ = await self._drive(2, 1)
-            compare_word(got_a, a, self.num_lanes, "lat0 a")
-            compare_word(got_b, b, self.num_lanes, "lat0 b")
+            self.check_word(got_a, a, self.num_lanes, "lat0 a")
+            self.check_word(got_b, b, self.num_lanes, "lat0 b")
             sample_lane(self.num_lanes, "lat0", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -146,9 +143,8 @@ class LaneDedistLeafTest(LeafUvmTest):
             symbols = incrementing_symbols(self.num_lanes)
             striped = expected_window(symbols, self.num_lanes)
             got, vout = await self._drive(striped, 1)
-            if vout != 1:
-                raise AssertionError(f"valid_out={vout}")
-            compare_word(got, pack_symbols(symbols), self.num_lanes, "inc_symbols")
+            self.check(1, vout, "inc valid")
+            self.check_word(got, pack_symbols(symbols), self.num_lanes, "inc_symbols")
             sample_lane(self.num_lanes, "inc", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -161,7 +157,7 @@ class LaneDedistLeafTest(LeafUvmTest):
             for idx, symbols in onehot_symbols(self.num_lanes):
                 striped = expected_window(symbols, self.num_lanes)
                 got, _ = await self._drive(striped, 1)
-                compare_word(got, pack_symbols(symbols), self.num_lanes, f"onehot ca[{idx}]")
+                self.check_word(got, pack_symbols(symbols), self.num_lanes, f"onehot ca[{idx}]")
             sample_lane(self.num_lanes, "onehot", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:

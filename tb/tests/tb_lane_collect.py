@@ -11,7 +11,6 @@ from tb.vibe_uvm.leaf_base import LeafUvmTest, as_int, env_int, leaf_entry, wait
 from tb.vibe_uvm.leaf_cov import sample_lane
 from tb.vibe_uvm.lane_util import (
     PMA_W,
-    compare_word,
     expected_dedist,
     expected_window,
     incrementing_symbols,
@@ -60,9 +59,9 @@ class LaneCollectLeafTest(LeafUvmTest):
 
     def _score_pair(self, mid: int, out: int, symbols: list[int], ctx: str) -> None:
         exp_mid = expected_window(symbols, self.num_lanes)
-        compare_word(mid, exp_mid, self.num_lanes, f"{ctx} dist")
-        compare_word(out, pack_symbols(symbols), self.num_lanes, f"{ctx} collect")
-        compare_word(
+        self.check_word(mid, exp_mid, self.num_lanes, f"{ctx} dist")
+        self.check_word(out, pack_symbols(symbols), self.num_lanes, f"{ctx} collect")
+        self.check_word(
             out, expected_dedist(mid, self.num_lanes), self.num_lanes, f"{ctx} dedist"
         )
 
@@ -70,8 +69,7 @@ class LaneCollectLeafTest(LeafUvmTest):
         name = "valid_out_0_in_reset"
         try:
             _, _, vout = await self._drive(1, 1)
-            if vout != 0:
-                raise AssertionError(f"valid_out={vout} in reset")
+            self.check(0, vout, "valid_out in reset")
             sample_lane(self.num_lanes, "valid_rst", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -83,8 +81,7 @@ class LaneCollectLeafTest(LeafUvmTest):
         try:
             symbols = incrementing_symbols(self.num_lanes)
             mid, out, vout = await self._drive(pack_symbols(symbols), 1)
-            if vout != 1:
-                raise AssertionError(f"valid_out={vout}")
+            self.check(1, vout, "inc valid")
             self._score_pair(mid, out, symbols, "inc_symbols")
             sample_lane(self.num_lanes, "inc", self.hooks)
             self.rec.pass_(name, TP)
@@ -115,8 +112,7 @@ class LaneCollectLeafTest(LeafUvmTest):
                 [(i * 17 + self.num_lanes) & 0xFF for i in range(ns)],
             ):
                 mid, out, vout = await self._drive(pack_symbols(symbols), 1)
-                if vout != 1:
-                    raise AssertionError(f"valid={vout}")
+                self.check(1, vout, "loopback valid")
                 self._score_pair(mid, out, symbols, "loopback")
             sample_lane(self.num_lanes, "loopback", self.hooks)
             self.rec.pass_(name, TP)

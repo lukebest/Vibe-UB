@@ -35,15 +35,12 @@ class RstSyncLeafTest(LeafUvmTest):
         self.dut.rst_n.value = 1
         for _ in range(4):
             await RisingEdge(self.dut.core_clk)
-        if as_int(self.dut.rst_n_sync, "rst_n_sync") != 1:
-            raise AssertionError("failed to leave reset")
+        self.check(1, as_int(self.dut.rst_n_sync, "rst_n_sync"), "leave reset")
 
     async def _assert_immediate(self, ctx: str) -> None:
         self.dut.rst_n.value = 0
         await wait_ps(20)
-        got = as_int(self.dut.rst_n_sync, "rst_n_sync")
-        if got != 0:
-            raise AssertionError(f"{ctx}: async assert not immediate, rst_n_sync={got}")
+        self.check(0, as_int(self.dut.rst_n_sync, "rst_n_sync"), f"{ctx} async assert")
 
     async def run_cases(self) -> None:
         await self.case_async_assert_any_phase()
@@ -76,16 +73,13 @@ class RstSyncLeafTest(LeafUvmTest):
             await wait_ps(100)
             self.dut.rst_n.value = 1
             await wait_ps(20)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 0:
-                raise AssertionError("deassert is combo, not synced")
+            self.check(0, as_int(self.dut.rst_n_sync, "rst_n_sync"), "deassert is combo, not synced")
             await RisingEdge(self.dut.core_clk)
             await wait_ps(20)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 0:
-                raise AssertionError("released after 1 edge (need 2)")
+            self.check(0, as_int(self.dut.rst_n_sync, "rst_n_sync"), "released after 1 edge (need 2)")
             await RisingEdge(self.dut.core_clk)
             await wait_ps(20)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 1:
-                raise AssertionError("not released after 2 edges")
+            self.check(1, as_int(self.dut.rst_n_sync, "rst_n_sync"), "not released after 2 edges")
             sample_rst_sync("after_posedge", "sync_deassert_2", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -103,22 +97,18 @@ class RstSyncLeafTest(LeafUvmTest):
             self.dut.rst_n.value = 1
             await RisingEdge(self.dut.core_clk)
             await wait_ps(100)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 0:
-                raise AssertionError("partial release already 1")
+            self.check(0, as_int(self.dut.rst_n_sync, "rst_n_sync"), "partial release already 1")
             self.dut.rst_n.value = 0
             await wait_ps(20)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 0:
-                raise AssertionError("glitch did not re-assert")
+            self.check(0, as_int(self.dut.rst_n_sync, "rst_n_sync"), "glitch did not re-assert")
             await wait_ps(CORE_CLK_PERIOD_PS // 4)
             self.dut.rst_n.value = 1
             await RisingEdge(self.dut.core_clk)
             await wait_ps(20)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 0:
-                raise AssertionError("glitch cleared in 1 edge")
+            self.check(0, as_int(self.dut.rst_n_sync, "rst_n_sync"), "glitch cleared in 1 edge")
             await RisingEdge(self.dut.core_clk)
             await wait_ps(20)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 1:
-                raise AssertionError("did not recover 2 edges after glitch")
+            self.check(1, as_int(self.dut.rst_n_sync, "rst_n_sync"), "did not recover 2 edges after glitch")
             sample_rst_sync("mid_high", "glitch", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -133,18 +123,15 @@ class RstSyncLeafTest(LeafUvmTest):
             await wait_ps(CORE_CLK_PERIOD_PS // 4)
             self.dut.rst_n.value = 0
             await wait_ps(20)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 0:
-                raise AssertionError("short pulse did not assert")
+            self.check(0, as_int(self.dut.rst_n_sync, "rst_n_sync"), "short pulse did not assert")
             await wait_ps(200)
             self.dut.rst_n.value = 1
             await RisingEdge(self.dut.core_clk)
             await wait_ps(20)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 0:
-                raise AssertionError("short pulse released in 1 edge")
+            self.check(0, as_int(self.dut.rst_n_sync, "rst_n_sync"), "short pulse released in 1 edge")
             await RisingEdge(self.dut.core_clk)
             await wait_ps(20)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 1:
-                raise AssertionError("short pulse did not recover in 2 edges")
+            self.check(1, as_int(self.dut.rst_n_sync, "rst_n_sync"), "short pulse did not recover in 2 edges")
             sample_rst_sync("mid_high", "short_pulse", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -156,28 +143,23 @@ class RstSyncLeafTest(LeafUvmTest):
         try:
             self.dut.rst_n.value = 0
             await wait_ps(20)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 0:
-                raise AssertionError("assert needs a clock (must be async)")
+            self.check(0, as_int(self.dut.rst_n_sync, "rst_n_sync"), "assert needs a clock (must be async)")
             await self.clkgen.stop()
             await wait_ps(CORE_CLK_PERIOD_PS * 5)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 0:
-                raise AssertionError("released while clock stopped in reset")
+            self.check(0, as_int(self.dut.rst_n_sync, "rst_n_sync"), "released while clock stopped in reset")
             await self.clkgen.resume()
             for _ in range(2):
                 await RisingEdge(self.dut.core_clk)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 0:
-                raise AssertionError("clock restart released while rst_n=0")
+            self.check(0, as_int(self.dut.rst_n_sync, "rst_n_sync"), "clock restart released while rst_n=0")
             await RisingEdge(self.dut.core_clk)
             await wait_ps(100)
             self.dut.rst_n.value = 1
             await RisingEdge(self.dut.core_clk)
             await wait_ps(20)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 0:
-                raise AssertionError("1 edge after clock-stop release")
+            self.check(0, as_int(self.dut.rst_n_sync, "rst_n_sync"), "1 edge after clock-stop release")
             await RisingEdge(self.dut.core_clk)
             await wait_ps(20)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 1:
-                raise AssertionError("need 2 edges after clock restart + release")
+            self.check(1, as_int(self.dut.rst_n_sync, "rst_n_sync"), "need 2 edges after clock restart + release")
             sample_rst_sync("after_posedge", "clk_stop_rst", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -195,17 +177,14 @@ class RstSyncLeafTest(LeafUvmTest):
             self.dut.rst_n.value = 1
             await RisingEdge(self.dut.core_clk)
             await wait_ps(20)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 0:
-                raise AssertionError("released after first edge")
+            self.check(0, as_int(self.dut.rst_n_sync, "rst_n_sync"), "released after first edge")
             await self.clkgen.stop()
             await wait_ps(CORE_CLK_PERIOD_PS * 4)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 0:
-                raise AssertionError("finished release with clock stopped")
+            self.check(0, as_int(self.dut.rst_n_sync, "rst_n_sync"), "finished release with clock stopped")
             await self.clkgen.resume()
             await RisingEdge(self.dut.core_clk)
             await wait_ps(20)
-            if as_int(self.dut.rst_n_sync, "rst_n_sync") != 1:
-                raise AssertionError("second edge after resume did not release")
+            self.check(1, as_int(self.dut.rst_n_sync, "rst_n_sync"), "second edge after resume did not release")
             sample_rst_sync("after_posedge", "clk_stop_rel", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:

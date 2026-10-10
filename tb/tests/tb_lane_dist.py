@@ -11,7 +11,6 @@ from tb.vibe_uvm.leaf_base import LeafUvmTest, as_int, env_int, leaf_entry, wait
 from tb.vibe_uvm.leaf_cov import sample_lane
 from tb.vibe_uvm.lane_util import (
     PMA_W,
-    compare_word,
     expected_window,
     incrementing_symbols,
     nsym,
@@ -73,8 +72,7 @@ class LaneDistLeafTest(LeafUvmTest):
         try:
             self.dut.rst_n.value = 0
             dout, vout = await self._drive(0xA5A5A5A5, valid=1)
-            if vout != 0:
-                raise AssertionError(f"valid_out={vout} in reset")
+            self.check(0, vout, "valid_out in reset")
             sample_lane(self.num_lanes, "valid_rst", self.hooks)
             self.rec.pass_(name, tps)
         except Exception as exc:
@@ -87,15 +85,13 @@ class LaneDistLeafTest(LeafUvmTest):
             rows = rs128_high_windows(4)
             window, exp = rows[0]
             got, vout = await self._drive(pack_symbols(window), 1)
-            if vout != 1:
-                raise AssertionError(f"valid_out={vout}")
+            self.check(1, vout, "valid_out first-on-wire")
             first = unpack_lane_first_symbols(got, 4)
-            if first != [127, 126, 125, 124]:
-                raise AssertionError(f"first-on-wire {first} expected [127,126,125,124]")
-            compare_word(got, exp, 4, "beat0")
+            self.check([127, 126, 125, 124], first, "first-on-wire")
+            self.check_word(got, exp, 4, "beat0")
             for k, (win, exp_k) in enumerate(rows[1:], start=1):
                 got_k, _ = await self._drive(pack_symbols(win), 1)
-                compare_word(got_k, exp_k, 4, f"RS128 word {k}")
+                self.check_word(got_k, exp_k, 4, f"RS128 word {k}")
             sample_lane(4, "first_wire", self.hooks)
             self.rec.pass_(name, TP_X4)
         except Exception as exc:
@@ -111,7 +107,7 @@ class LaneDistLeafTest(LeafUvmTest):
             symbols = [rng.randrange(256) for _ in range(ns)]
             exp = expected_window(symbols, self.num_lanes)
             got, _ = await self._drive(pack_symbols(symbols), 1)
-            compare_word(got, exp, self.num_lanes, "window")
+            self.check_word(got, exp, self.num_lanes, "window")
             sample_lane(self.num_lanes, "window", self.hooks)
             self.rec.pass_(name, tps)
         except Exception as exc:
@@ -125,7 +121,7 @@ class LaneDistLeafTest(LeafUvmTest):
             ns = nsym(self.num_lanes)
             exp = expected_window([0] * ns, self.num_lanes)
             got, _ = await self._drive(0, 1)
-            compare_word(got, exp, self.num_lanes, "zero")
+            self.check_word(got, exp, self.num_lanes, "zero")
             sample_lane(self.num_lanes, "zero", self.hooks)
             self.rec.pass_(name, tps)
         except Exception as exc:
@@ -140,7 +136,7 @@ class LaneDistLeafTest(LeafUvmTest):
             ones = (1 << self.width) - 1
             exp = expected_window([0xFF] * ns, self.num_lanes)
             got, _ = await self._drive(ones, 1)
-            compare_word(got, exp, self.num_lanes, "one")
+            self.check_word(got, exp, self.num_lanes, "one")
             sample_lane(self.num_lanes, "one", self.hooks)
             self.rec.pass_(name, tps)
         except Exception as exc:
@@ -156,7 +152,7 @@ class LaneDistLeafTest(LeafUvmTest):
                 symbols = [(vec >> (8 * i)) & 0xFF for i in range(ns)]
                 exp = expected_window(symbols, self.num_lanes)
                 got, _ = await self._drive(vec, 1)
-                compare_word(got, exp, self.num_lanes, f"walk 0x{vec:x}")
+                self.check_word(got, exp, self.num_lanes, f"walk 0x{vec:x}")
             sample_lane(self.num_lanes, "walk", self.hooks)
             self.rec.pass_(name, tps)
         except Exception as exc:
@@ -173,9 +169,8 @@ class LaneDistLeafTest(LeafUvmTest):
                 symbols = [rng.randrange(256) for _ in range(ns)]
                 exp = expected_window(symbols, self.num_lanes)
                 got, vout = await self._drive(pack_symbols(symbols), 1)
-                if vout != 1:
-                    raise AssertionError(f"rand valid={vout}")
-                compare_word(got, exp, self.num_lanes, "rand")
+                self.check(1, vout, "rand valid")
+                self.check_word(got, exp, self.num_lanes, "rand")
             sample_lane(self.num_lanes, "rand", self.hooks)
             self.rec.pass_(name, tps)
         except Exception as exc:
@@ -190,8 +185,8 @@ class LaneDistLeafTest(LeafUvmTest):
             b = expected_window([2] * nsym(self.num_lanes), self.num_lanes)
             got_a, _ = await self._drive(pack_symbols([1] * nsym(self.num_lanes)), 1)
             got_b, _ = await self._drive(pack_symbols([2] * nsym(self.num_lanes)), 1)
-            compare_word(got_a, a, self.num_lanes, "lat0 a")
-            compare_word(got_b, b, self.num_lanes, "lat0 b")
+            self.check_word(got_a, a, self.num_lanes, "lat0 a")
+            self.check_word(got_b, b, self.num_lanes, "lat0 b")
             sample_lane(self.num_lanes, "lat0", self.hooks)
             self.rec.pass_(name, tps)
         except Exception as exc:
@@ -205,9 +200,8 @@ class LaneDistLeafTest(LeafUvmTest):
             symbols = incrementing_symbols(self.num_lanes)
             exp = expected_window(symbols, self.num_lanes)
             got, vout = await self._drive(pack_symbols(symbols), 1)
-            if vout != 1:
-                raise AssertionError(f"valid_out={vout}")
-            compare_word(got, exp, self.num_lanes, "inc_symbols")
+            self.check(1, vout, "inc valid")
+            self.check_word(got, exp, self.num_lanes, "inc_symbols")
             sample_lane(self.num_lanes, "inc", self.hooks)
             self.rec.pass_(name, tps)
         except Exception as exc:
@@ -221,7 +215,7 @@ class LaneDistLeafTest(LeafUvmTest):
             for idx, symbols in onehot_symbols(self.num_lanes):
                 exp = expected_window(symbols, self.num_lanes)
                 got, _ = await self._drive(pack_symbols(symbols), 1)
-                compare_word(got, exp, self.num_lanes, f"onehot ca[{idx}]")
+                self.check_word(got, exp, self.num_lanes, f"onehot ca[{idx}]")
             sample_lane(self.num_lanes, "onehot", self.hooks)
             self.rec.pass_(name, tps)
         except Exception as exc:

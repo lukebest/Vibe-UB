@@ -70,6 +70,7 @@ class TbSelfcheckTest(UVMTest):
         await self._check_hooks(env)
         sample_selfcheck("hook", self.hooks)
 
+        env.scoreboard.finalize()
         export_functional(REPORTS / "cov_func" / f"selfcheck_hooks{self.hooks}.json")
         uvm_info("TB", f"PASS tb_selfcheck TEST_HOOKS={self.hooks}", UVM_LOW)
         print(f"PASS tb_selfcheck TEST_HOOKS={self.hooks}", flush=True)
@@ -88,7 +89,7 @@ class TbSelfcheckTest(UVMTest):
             timeout -= 1
         if timeout == 0:
             uvm_fatal("TB", "valid/ready loopback never presented vr_out_valid")
-        env.scoreboard.compare(item.data, int(dut.vr_out_data.value), "vr loopback")
+        env.scoreboard.check(item.data, int(dut.vr_out_data.value), "vr loopback")
 
     async def _check_valid_only(self, env, dut):
         item = VoItem("vo")
@@ -100,7 +101,7 @@ class TbSelfcheckTest(UVMTest):
         while int(dut.vo_out_valid.value) != 1 and timeout:
             await RisingEdge(dut.core_clk)
             timeout -= 1
-        env.scoreboard.compare(item.data, int(dut.vo_out_data.value), "vo loopback")
+        env.scoreboard.check(item.data, int(dut.vo_out_data.value), "vo loopback")
 
     async def _check_csr(self, env):
         wr = CsrItem("wr")
@@ -109,77 +110,77 @@ class TbSelfcheckTest(UVMTest):
         wr.addr = PORT_CNA
         wr.wdata = 0x11223344
         await env.csr.driver.access(wr)
-        env.scoreboard.compare(0, wr.err, "csr PORT_CNA write err")
+        env.scoreboard.check(0, wr.err, "csr PORT_CNA write err")
 
         rd = CsrItem("rd")
         rd.write = 0
         rd.addr = PORT_CNA
         await env.csr.driver.access(rd)
-        env.scoreboard.compare(0, rd.err, "csr PORT_CNA read err")
-        env.scoreboard.compare(0x11223344, rd.rdata, "csr PORT_CNA readback")
+        env.scoreboard.check(0, rd.err, "csr PORT_CNA read err")
+        env.scoreboard.check(0x11223344, rd.rdata, "csr PORT_CNA readback")
 
         ro = CsrItem("ro")
         ro.write = 0
         ro.addr = STATUS
         await env.csr.driver.access(ro)
-        env.scoreboard.compare(0, ro.err, "csr STATUS err")
-        env.scoreboard.compare(0, ro.rdata, "csr STATUS reset")
+        env.scoreboard.check(0, ro.err, "csr STATUS err")
+        env.scoreboard.check(0, ro.rdata, "csr STATUS reset")
 
         clr = CsrItem("clr")
         clr.write = 1
         clr.addr = CNT_CLR
         clr.wdata = CNT_CLR_ALL
         await env.csr.driver.access(clr)
-        env.scoreboard.compare(0, clr.err, "CNT_CLR mapped write")
+        env.scoreboard.check(0, clr.err, "CNT_CLR mapped write")
 
         clr_rd = CsrItem("clr_rd")
         clr_rd.write = 0
         clr_rd.addr = CNT_CLR
         await env.csr.driver.access(clr_rd)
-        env.scoreboard.compare(0, clr_rd.err, "CNT_CLR read err")
-        env.scoreboard.compare(0, clr_rd.rdata, "CNT_CLR WO self-clear reads 0")
+        env.scoreboard.check(0, clr_rd.err, "CNT_CLR read err")
+        env.scoreboard.check(0, clr_rd.rdata, "CNT_CLR WO self-clear reads 0")
 
         uf = CsrItem("uf")
         uf.write = 0
         uf.addr = CNT_CRD_UF
         await env.csr.driver.access(uf)
-        env.scoreboard.compare(0, uf.err, "CNT_CRD_UF mapped")
-        env.scoreboard.compare(0, uf.rdata, "CNT_CRD_UF RO")
+        env.scoreboard.check(0, uf.err, "CNT_CRD_UF mapped")
+        env.scoreboard.check(0, uf.rdata, "CNT_CRD_UF RO")
 
         lmsm = CsrItem("lmsm")
         lmsm.write = 0
         lmsm.addr = APPD_LMSM_ST
         await env.csr.driver.access(lmsm)
-        env.scoreboard.compare(0, lmsm.err, "APPD_LMSM_ST 0x1E00 mapped")
+        env.scoreboard.check(0, lmsm.err, "APPD_LMSM_ST 0x1E00 mapped")
 
         perr = CsrItem("perr")
         perr.write = 0
         perr.addr = APPD_PORT_ERR
         await env.csr.driver.access(perr)
-        env.scoreboard.compare(0, perr.err, "APPD_PORT_ERR 0x1F00 mapped")
+        env.scoreboard.check(0, perr.err, "APPD_PORT_ERR 0x1F00 mapped")
 
         bad = CsrItem("bad")
         bad.write = 0
         bad.addr = 0x00F0
         await env.csr.driver.access(bad)
-        env.scoreboard.compare(1, bad.err, "csr unmapped read sets csr_err")
-        env.scoreboard.compare(0, bad.rdata, "csr unmapped read data")
+        env.scoreboard.check(1, bad.err, "csr unmapped read sets csr_err")
+        env.scoreboard.check(0, bad.rdata, "csr unmapped read data")
 
         unal = CsrItem("unal")
         unal.write = 1
         unal.addr = 0x0001
         unal.wdata = 1
         await env.csr.driver.access(unal)
-        env.scoreboard.compare(1, unal.err, "csr unaligned is unmapped")
+        env.scoreboard.check(1, unal.err, "csr unaligned is unmapped")
 
         test = CsrItem("test")
         test.write = 0
         test.addr = TEST_BASE
         await env.csr.driver.access(test)
-        env.scoreboard.compare(0, test.err, "TEST window is mapped (err=0)")
+        env.scoreboard.check(0, test.err, "TEST window is mapped (err=0)")
         # PRODUCT, or HOOKS with test_mode=0: read 0 (SPEC §3.2.3 / §11 / REGMAP §2.4)
         if not env.hook.present or env.hook.sample_obs().test_mode == 0:
-            env.scoreboard.compare(0, test.rdata, "TEST window quiet when not live")
+            env.scoreboard.check(0, test.rdata, "TEST window quiet when not live")
 
     async def _check_hooks(self, env):
         if not env.hook.present:
@@ -188,13 +189,13 @@ class TbSelfcheckTest(UVMTest):
         await env.hook.set_test_mode(0)
         await env.hook.drive_inj(tb_inj_lid_bad=1, tb_inj_crd_cells=0x123, tb_inj_am_lock=5)
         obs = env.hook.sample_obs()
-        env.scoreboard.compare(0, obs.obs["tb_obs_link_up"], "mode=0 obs held 0")
-        env.scoreboard.compare(0, obs.obs["tb_obs_crd_cells"], "mode=0 crd obs 0")
+        env.scoreboard.check(0, obs.obs["tb_obs_link_up"], "mode=0 obs held 0")
+        env.scoreboard.check(0, obs.obs["tb_obs_crd_cells"], "mode=0 crd obs 0")
         await env.hook.set_test_mode(1)
         await env.hook.drive_inj(tb_inj_lid_bad=1, tb_inj_crd_cells=0x123, tb_inj_am_lock=5)
         obs = env.hook.sample_obs()
-        env.scoreboard.compare(1, obs.obs["tb_obs_link_up"], "mode=1 lid_bad visible")
-        env.scoreboard.compare(0x123, obs.obs["tb_obs_crd_cells"], "mode=1 crd inj mux")
+        env.scoreboard.check(1, obs.obs["tb_obs_link_up"], "mode=1 lid_bad visible")
+        env.scoreboard.check(0x123, obs.obs["tb_obs_crd_cells"], "mode=1 crd inj mux")
         await env.hook.idle_inj()
 
 

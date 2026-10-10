@@ -34,3 +34,4 @@
 - `docs/TEAM.md`、`docs/PROCESS.md`：按 D19 写入三条轨道、轨道所有权，以及「设计-B」/「验证-B」、「设计-C」/「验证-C」新角色。
 - `docs/SPEC.md` §1 / `docs/SPEC_INDEX.md` Phase 列：D18 全控制器；D19 线 A/B/C + 优先通路；§1.4 按线写里程碑草案。不改 TEAM/PROCESS/DECISIONS；不改 `regmap.yaml`。不展开 PR #9 的 §6/§13 针脚。
 - `docs/arch/MODULE_INVENTORY.md` 存储列：行为 stub 时序（Xia 提案，非规范）默认读 1 拍寄存、1R1W、同址 read-old；换 SRAM 宏不改口/测试。第 9 章 UMMU 大表钩子列：每表 `tb_*` backdoor 预载（we/addr/wdata）+ 回读（re/rdata），仅 HOOKS；宽随表项格式（未关前 **未知**）；待与表格式一并写入 SPEC §10。§11 计数与行对齐：PHY S1/M4/L4，合计 S12/M34/L31。
+- `docs/arch/MODULE_INVENTORY.md` 存储列挂到统一原语 `ub_cmn_mem_1r1w`：线 B RTP 重传/重排、TA 未决与线 C UMMU/decoder **须**例化；其它 SRAM/stub **应当**例化。口形/时序见该原语（CODING_STYLE 存储节，另 PR）。不改 TEAM/PROCESS/DECISIONS。

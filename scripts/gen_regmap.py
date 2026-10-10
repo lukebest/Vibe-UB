@@ -30,6 +30,7 @@ from regmap_lib import (  # noqa: E402
     reset_int,
     reset_key_of,
     resolve_reset,
+    variant_reset_word,
     variant_tags,
 )
 
@@ -156,12 +157,12 @@ def emit_regmap_md(data: dict[str, Any]) -> str:
             w("")
             tags = variant_tags(data)
             if tags:
-                w("SPEC §2.2 参数集（`ub_csr_<tag>`；`_placeholder` 扰码叶子仅 lint/TB）：")
+                w("SPEC §2.2 参数集（`ub_csr_<tag>`）：")
                 w("")
                 w("| tag | module | NUM_LANES | NUM_VL | SCR_PLACEHOLDER | PARAM_VARIANT reset |")
                 w("| --- | --- | --- | --- | --- | --- |")
                 for tag, params in tags.items():
-                    word = (int(params["NUM_VL"]) & 0xF) | ((int(params["SCR_PLACEHOLDER"]) & 1) << 4)
+                    word = variant_reset_word(params)
                     w(
                         f"| `{tag}` | `{csr_module_name(tag)}` | {params['NUM_LANES']} | "
                         f"{params['NUM_VL']} | {params['SCR_PLACEHOLDER']} | {word:#04x} |"
@@ -169,6 +170,9 @@ def emit_regmap_md(data: dict[str, Any]) -> str:
                 w("")
                 w(f"默认 tag：`{default_variant(data)}`。")
                 w("")
+                if prose.get("variants_note"):
+                    w(one_line(prose["variants_note"]))
+                    w("")
         if win["id"] == "ERR" and prose.get("err_intro"):
             w(one_line(prose["err_intro"]))
             w("")
@@ -335,7 +339,7 @@ def emit_py_constants(data: dict[str, Any]) -> str:
         lines.append(f"VARIANT_{ident}_NUM_LANES = {params['NUM_LANES']}")
         lines.append(f"VARIANT_{ident}_NUM_VL = {params['NUM_VL']}")
         lines.append(f"VARIANT_{ident}_SCR_PLACEHOLDER = {params['SCR_PLACEHOLDER']}")
-        word = (int(params["NUM_VL"]) & 0xF) | ((int(params["SCR_PLACEHOLDER"]) & 1) << 4)
+        word = variant_reset_word(params)
         lines.append(f"VARIANT_{ident}_PARAM_VARIANT_RESET = {word:#x}")
     lines.append("")
 
@@ -415,7 +419,7 @@ def emit_c_header(data: dict[str, Any]) -> str:
     lines.append(f'#define UB_CSR_DEFAULT_VARIANT  "{default}"')
     for i, (tag, params) in enumerate(tags.items()):
         ident = tag.upper()
-        word = (int(params["NUM_VL"]) & 0xF) | ((int(params["SCR_PLACEHOLDER"]) & 1) << 4)
+        word = variant_reset_word(params)
         lines.append(f"#define UB_CSR_VARIANT_{ident}  {i}u")
         lines.append(f'#define UB_CSR_MODULE_{ident}  "{csr_module_name(tag)}"')
         lines.append(f"#define UB_VARIANT_{ident}_NUM_LANES  {params['NUM_LANES']}u")
@@ -433,7 +437,7 @@ def emit_c_header(data: dict[str, Any]) -> str:
     lines.append("")
     lines.append("static const ub_csr_variant_t UB_CSR_VARIANTS[] = {")
     for tag, params in tags.items():
-        word = (int(params["NUM_VL"]) & 0xF) | ((int(params["SCR_PLACEHOLDER"]) & 1) << 4)
+        word = variant_reset_word(params)
         lines.append(
             f'    {{"{tag}", {params["NUM_LANES"]}u, {params["NUM_VL"]}u, '
             f'{params["SCR_PLACEHOLDER"]}u, {word:#x}u}},'

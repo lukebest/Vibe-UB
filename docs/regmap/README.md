@@ -74,6 +74,12 @@ for lint; do not commit the `.v`.
 `PARAM_VARIANT` (`0x011C`) is the RO capability word for a single driver:
 `NUM_VL[3:0]`, `SCR_PLACEHOLDER[4]`, `RSVD[31:5]`. Lane count is
 `PARAM_PHY.NUM_LANES_TX` / `NUM_LANES_RX` (not duplicated).
+`product_*` tags are PRODUCT (`SCR_PLACEHOLDER=0`) and never instantiate a
+`_placeholder` scrambler. `x4_vl2_placeholder` / `x8_vl2_placeholder` are
+lint/TB only and are deleted once SPEC §13 closes and the scrambler has a
+PRODUCT netlist. `--check` rejects `product_*` with `SCR_PLACEHOLDER!=0`,
+`SCR_PLACEHOLDER=1` unless the name ends `_placeholder`, and lane/VL counts
+that do not match `xN_vlM` in the tag.
 
 ## YAML-driven CSR semantics
 

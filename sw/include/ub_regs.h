@@ -420,14 +420,26 @@ extern "C" {
 #define UB_CSR_MODULE_PRODUCT_X4_VL2  "ub_csr_product_x4_vl2"
 #define UB_VARIANT_PRODUCT_X4_VL2_NUM_LANES  4u
 #define UB_VARIANT_PRODUCT_X4_VL2_NUM_VL  2u
-#define UB_VARIANT_PRODUCT_X4_VL2_SCR_PLACEHOLDER  1u
-#define UB_VARIANT_PRODUCT_X4_VL2_PARAM_VARIANT_RESET  0x12u
+#define UB_VARIANT_PRODUCT_X4_VL2_SCR_PLACEHOLDER  0u
+#define UB_VARIANT_PRODUCT_X4_VL2_PARAM_VARIANT_RESET  0x2u
 #define UB_CSR_VARIANT_PRODUCT_X8_VL2  1u
 #define UB_CSR_MODULE_PRODUCT_X8_VL2  "ub_csr_product_x8_vl2"
 #define UB_VARIANT_PRODUCT_X8_VL2_NUM_LANES  8u
 #define UB_VARIANT_PRODUCT_X8_VL2_NUM_VL  2u
-#define UB_VARIANT_PRODUCT_X8_VL2_SCR_PLACEHOLDER  1u
-#define UB_VARIANT_PRODUCT_X8_VL2_PARAM_VARIANT_RESET  0x12u
+#define UB_VARIANT_PRODUCT_X8_VL2_SCR_PLACEHOLDER  0u
+#define UB_VARIANT_PRODUCT_X8_VL2_PARAM_VARIANT_RESET  0x2u
+#define UB_CSR_VARIANT_X4_VL2_PLACEHOLDER  2u
+#define UB_CSR_MODULE_X4_VL2_PLACEHOLDER  "ub_csr_x4_vl2_placeholder"
+#define UB_VARIANT_X4_VL2_PLACEHOLDER_NUM_LANES  4u
+#define UB_VARIANT_X4_VL2_PLACEHOLDER_NUM_VL  2u
+#define UB_VARIANT_X4_VL2_PLACEHOLDER_SCR_PLACEHOLDER  1u
+#define UB_VARIANT_X4_VL2_PLACEHOLDER_PARAM_VARIANT_RESET  0x12u
+#define UB_CSR_VARIANT_X8_VL2_PLACEHOLDER  3u
+#define UB_CSR_MODULE_X8_VL2_PLACEHOLDER  "ub_csr_x8_vl2_placeholder"
+#define UB_VARIANT_X8_VL2_PLACEHOLDER_NUM_LANES  8u
+#define UB_VARIANT_X8_VL2_PLACEHOLDER_NUM_VL  2u
+#define UB_VARIANT_X8_VL2_PLACEHOLDER_SCR_PLACEHOLDER  1u
+#define UB_VARIANT_X8_VL2_PLACEHOLDER_PARAM_VARIANT_RESET  0x12u
 
 typedef struct {
     const char *tag;
@@ -438,10 +450,12 @@ typedef struct {
 } ub_csr_variant_t;
 
 static const ub_csr_variant_t UB_CSR_VARIANTS[] = {
-    {"product_x4_vl2", 4u, 2u, 1u, 0x12u},
-    {"product_x8_vl2", 8u, 2u, 1u, 0x12u},
+    {"product_x4_vl2", 4u, 2u, 0u, 0x2u},
+    {"product_x8_vl2", 8u, 2u, 0u, 0x2u},
+    {"x4_vl2_placeholder", 4u, 2u, 1u, 0x12u},
+    {"x8_vl2_placeholder", 8u, 2u, 1u, 0x12u},
 };
-#define UB_CSR_VARIANT_COUNT  2u
+#define UB_CSR_VARIANT_COUNT  4u
 
 static inline uint32_t ub_fld_get(uint32_t word, uint32_t mask, unsigned shift)
 {

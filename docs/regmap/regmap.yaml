@@ -72,11 +72,21 @@ global_rules:
 
 variants:
   default: product_x4_vl2
+  # PRODUCT: never instantiate a _placeholder scrambler (Xia).
   product_x4_vl2:
     NUM_LANES: 4
     NUM_VL: 2
-    SCR_PLACEHOLDER: 1
+    SCR_PLACEHOLDER: 0
   product_x8_vl2:
+    NUM_LANES: 8
+    NUM_VL: 2
+    SCR_PLACEHOLDER: 0
+  # lint/TB only. Delete once SPEC §13 closes and the scrambler has a PRODUCT netlist.
+  x4_vl2_placeholder:
+    NUM_LANES: 4
+    NUM_VL: 2
+    SCR_PLACEHOLDER: 1
+  x8_vl2_placeholder:
     NUM_LANES: 8
     NUM_VL: 2
     SCR_PLACEHOLDER: 1
@@ -160,7 +170,14 @@ prose:
     禁止在字段上手写。协商完成后 STATUS 类镜像以 App. D 节为准。
     `PARAM_VARIANT`（`0x011C`）是给单一驱动覆盖全部变体的能力字：
     `NUM_LANES` 复用 `PARAM_PHY.NUM_LANES_TX` / `NUM_LANES_RX`（不重复）；
-    本寄存器含 `NUM_VL[3:0]` 与 `SCR_PLACEHOLDER[4]`（1=扰码叶子为 `_placeholder`，仅 lint/TB）。
+    本寄存器含 `NUM_VL[3:0]` 与 `SCR_PLACEHOLDER[4]`。
+    `product_*` 为 PRODUCT（`SCR_PLACEHOLDER=0`），网表永不例化 `_placeholder` 扰码。
+    `*_placeholder`（`ub_csr_x4_vl2_placeholder` / `ub_csr_x8_vl2_placeholder`）仅 lint/TB；
+    SPEC §13 闭合且扰码有 PRODUCT 网表后删除这些 tag。
+  variants_note: >-
+    `product_*` 是 PRODUCT 网表：`SCR_PLACEHOLDER=0`，永不例化 `_placeholder` 扰码（Xia）。
+    以 `_placeholder` 结尾的 tag（`ub_csr_x4_vl2_placeholder` / `ub_csr_x8_vl2_placeholder`）
+    仅 lint/TB。SPEC §13 闭合、扰码叶子有 PRODUCT 网表后，删除这些变体。
   init_block: >-
     Init Block 其余字段（`DATA_ACK_GRAIN_SIZE`、`CTRL_ACK_GRAIN_SIZE`、
     `DATA_CREDIT_GRAIN_SIZE`、`CTRL_CREDIT_GRAIN_SIZE`、`PACKET_MIN_INTERVAL`）

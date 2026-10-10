@@ -9,6 +9,7 @@ that schema cannot express (overlap, uniqueness, reset fit, enum width).
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -62,6 +63,26 @@ def reset_int(field: dict[str, Any]) -> int | None:
 
 VARIANT_KEYS = ("NUM_LANES", "NUM_VL", "SCR_PLACEHOLDER")
 NUM_LANES_LEGAL = frozenset({1, 2, 4, 8})
+VARIANT_GEOM_RE = re.compile(r"x(\d+)_vl(\d+)")
+
+
+def parse_variant_geom(tag: str) -> tuple[int, int] | None:
+    match = VARIANT_GEOM_RE.search(tag)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def is_product_variant(tag: str) -> bool:
+    return tag.startswith("product_")
+
+
+def is_placeholder_variant(tag: str) -> bool:
+    return tag.endswith("_placeholder")
+
+
+def variant_reset_word(params: dict[str, int]) -> int:
+    return (int(params["NUM_VL"]) & 0xF) | ((int(params["SCR_PLACEHOLDER"]) & 1) << 4)
 
 
 def variant_tags(data: dict[str, Any]) -> dict[str, dict[str, int]]:
@@ -356,6 +377,36 @@ def validate_variants(data: dict[str, Any]) -> list[str]:
         extra = [k for k in params if k not in VARIANT_KEYS]
         if extra:
             errors.append(f"variants.{tag}: unknown keys {extra}")
+        geom = parse_variant_geom(tag)
+        if geom is None:
+            errors.append(f"variants.{tag}: name must contain xN_vlM")
+        else:
+            want_lanes, want_vl = geom
+            if lanes != want_lanes:
+                errors.append(
+                    f"variants.{tag}: NUM_LANES={lanes} does not match x{want_lanes} in the name"
+                )
+            if nvl != want_vl:
+                errors.append(
+                    f"variants.{tag}: NUM_VL={nvl} does not match vl{want_vl} in the name"
+                )
+        if is_product_variant(tag) and scr != 0:
+            errors.append(
+                f"variants.{tag}: product_ variants must have SCR_PLACEHOLDER=0 "
+                "(PRODUCT never instantiates _placeholder scrambler)"
+            )
+        if scr == 1 and not is_placeholder_variant(tag):
+            errors.append(
+                f"variants.{tag}: SCR_PLACEHOLDER=1 only allowed when the name ends with _placeholder"
+            )
+        if is_placeholder_variant(tag) and scr != 1:
+            errors.append(
+                f"variants.{tag}: _placeholder variants must have SCR_PLACEHOLDER=1"
+            )
+        if is_product_variant(tag) and is_placeholder_variant(tag):
+            errors.append(f"variants.{tag}: product_ tag cannot also end with _placeholder")
+    if default in tags and not is_product_variant(default):
+        errors.append(f"variants.default {default!r} must be a product_ tag")
 
     phy_has_lanes = any(
         r.get("name") == "PARAM_PHY" and f.get("name") in ("NUM_LANES_TX", "NUM_LANES_RX")

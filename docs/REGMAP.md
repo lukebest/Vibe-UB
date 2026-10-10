@@ -72,16 +72,20 @@
 
 ### 2.2 PARAM 读回（`0x0100`）
 
-只读，反映编译/协商后的生效值。`NUM_LANES_*` / `NUM_VL` / `SCR_PLACEHOLDER` 的复位来自 `variants:` 表（SPEC §2.2 一套参数一份 `ub_csr_<tag>` 网表）， 禁止在字段上手写。协商完成后 STATUS 类镜像以 App. D 节为准。 `PARAM_VARIANT`（`0x011C`）是给单一驱动覆盖全部变体的能力字： `NUM_LANES` 复用 `PARAM_PHY.NUM_LANES_TX` / `NUM_LANES_RX`（不重复）； 本寄存器含 `NUM_VL[3:0]` 与 `SCR_PLACEHOLDER[4]`（1=扰码叶子为 `_placeholder`，仅 lint/TB）。
+只读，反映编译/协商后的生效值。`NUM_LANES_*` / `NUM_VL` / `SCR_PLACEHOLDER` 的复位来自 `variants:` 表（SPEC §2.2 一套参数一份 `ub_csr_<tag>` 网表）， 禁止在字段上手写。协商完成后 STATUS 类镜像以 App. D 节为准。 `PARAM_VARIANT`（`0x011C`）是给单一驱动覆盖全部变体的能力字： `NUM_LANES` 复用 `PARAM_PHY.NUM_LANES_TX` / `NUM_LANES_RX`（不重复）； 本寄存器含 `NUM_VL[3:0]` 与 `SCR_PLACEHOLDER[4]`。 `product_*` 为 PRODUCT（`SCR_PLACEHOLDER=0`），网表永不例化 `_placeholder` 扰码。 `*_placeholder`（`ub_csr_x4_vl2_placeholder` / `ub_csr_x8_vl2_placeholder`）仅 lint/TB； SPEC §13 闭合且扰码有 PRODUCT 网表后删除这些 tag。
 
-SPEC §2.2 参数集（`ub_csr_<tag>`；`_placeholder` 扰码叶子仅 lint/TB）：
+SPEC §2.2 参数集（`ub_csr_<tag>`）：
 
 | tag | module | NUM_LANES | NUM_VL | SCR_PLACEHOLDER | PARAM_VARIANT reset |
 | --- | --- | --- | --- | --- | --- |
-| `product_x4_vl2` | `ub_csr_product_x4_vl2` | 4 | 2 | 1 | 0x12 |
-| `product_x8_vl2` | `ub_csr_product_x8_vl2` | 8 | 2 | 1 | 0x12 |
+| `product_x4_vl2` | `ub_csr_product_x4_vl2` | 4 | 2 | 0 | 0x02 |
+| `product_x8_vl2` | `ub_csr_product_x8_vl2` | 8 | 2 | 0 | 0x02 |
+| `x4_vl2_placeholder` | `ub_csr_x4_vl2_placeholder` | 4 | 2 | 1 | 0x12 |
+| `x8_vl2_placeholder` | `ub_csr_x8_vl2_placeholder` | 8 | 2 | 1 | 0x12 |
 
 默认 tag：`product_x4_vl2`。
+
+`product_*` 是 PRODUCT 网表：`SCR_PLACEHOLDER=0`，永不例化 `_placeholder` 扰码（Xia）。 以 `_placeholder` 结尾的 tag（`ub_csr_x4_vl2_placeholder` / `ub_csr_x8_vl2_placeholder`） 仅 lint/TB。SPEC §13 闭合、扰码叶子有 PRODUCT 网表后，删除这些变体。
 
 | offset_hex | reg_name | field_name | hi | lo | access | reset_hex | description | spec_ref |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |

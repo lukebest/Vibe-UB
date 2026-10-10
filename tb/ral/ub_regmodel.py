@@ -13,8 +13,8 @@ create_ub_regmodel(variant=) applies variants: table resets (SPEC §2.2).
 from __future__ import annotations
 
 DEFAULT_VARIANT = 'product_x4_vl2'
-VARIANTS = {'product_x4_vl2': {'NUM_LANES': 4, 'NUM_VL': 2, 'SCR_PLACEHOLDER': 1}, 'product_x8_vl2': {'NUM_LANES': 8, 'NUM_VL': 2, 'SCR_PLACEHOLDER': 1}}
-CSR_MODULE = {'product_x4_vl2': 'ub_csr_product_x4_vl2', 'product_x8_vl2': 'ub_csr_product_x8_vl2'}
+VARIANTS = {'product_x4_vl2': {'NUM_LANES': 4, 'NUM_VL': 2, 'SCR_PLACEHOLDER': 0}, 'product_x8_vl2': {'NUM_LANES': 8, 'NUM_VL': 2, 'SCR_PLACEHOLDER': 0}, 'x4_vl2_placeholder': {'NUM_LANES': 4, 'NUM_VL': 2, 'SCR_PLACEHOLDER': 1}, 'x8_vl2_placeholder': {'NUM_LANES': 8, 'NUM_VL': 2, 'SCR_PLACEHOLDER': 1}}
+CSR_MODULE = {'product_x4_vl2': 'ub_csr_product_x4_vl2', 'product_x8_vl2': 'ub_csr_product_x8_vl2', 'x4_vl2_placeholder': 'ub_csr_x4_vl2_placeholder', 'x8_vl2_placeholder': 'ub_csr_x8_vl2_placeholder'}
 
 try:
     from uvm.macros import uvm_object_utils

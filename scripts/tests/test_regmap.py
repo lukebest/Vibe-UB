@@ -16,11 +16,15 @@ from regmap_lib import (  # noqa: E402
     default_variant,
     field_mask,
     field_width,
+    is_placeholder_variant,
+    is_product_variant,
     load_regmap,
     parse_int,
     reset_int,
     resolve_reset,
     validate_regmap,
+    validate_variants,
+    variant_reset_word,
     variant_tags,
 )
 
@@ -247,11 +251,16 @@ def test_variant_reset_matches_tag_name():
     data = load_regmap()
     tags = variant_tags(data)
     assert default_variant(data) == "product_x4_vl2"
-    assert "product_x4_vl2" in tags and "product_x8_vl2" in tags
-    assert tags["product_x4_vl2"] == {"NUM_LANES": 4, "NUM_VL": 2, "SCR_PLACEHOLDER": 1}
-    assert tags["product_x8_vl2"]["NUM_LANES"] == 8
-    assert tags["product_x8_vl2"]["NUM_VL"] == 2
-    assert tags["product_x8_vl2"]["SCR_PLACEHOLDER"] == 1
+    assert set(tags) == {
+        "product_x4_vl2",
+        "product_x8_vl2",
+        "x4_vl2_placeholder",
+        "x8_vl2_placeholder",
+    }
+    assert tags["product_x4_vl2"] == {"NUM_LANES": 4, "NUM_VL": 2, "SCR_PLACEHOLDER": 0}
+    assert tags["product_x8_vl2"] == {"NUM_LANES": 8, "NUM_VL": 2, "SCR_PLACEHOLDER": 0}
+    assert tags["x4_vl2_placeholder"] == {"NUM_LANES": 4, "NUM_VL": 2, "SCR_PLACEHOLDER": 1}
+    assert tags["x8_vl2_placeholder"] == {"NUM_LANES": 8, "NUM_VL": 2, "SCR_PLACEHOLDER": 1}
 
     phy_tx = next(
         f
@@ -306,23 +315,43 @@ def test_variant_reset_matches_tag_name():
             assert field.get("reset_from") == "variant"
             assert "reset" not in field
 
+        word = variant_reset_word(params)
+        if is_product_variant(tag):
+            assert params["SCR_PLACEHOLDER"] == 0
+            assert word == 0x02
+        if is_placeholder_variant(tag):
+            assert params["SCR_PLACEHOLDER"] == 1
+            assert word == 0x12
+
     md = emit_regmap_md(data)
     assert "ub_csr_product_x4_vl2" in md
     assert "ub_csr_product_x8_vl2" in md
+    assert "ub_csr_x4_vl2_placeholder" in md
+    assert "ub_csr_x8_vl2_placeholder" in md
     assert "| `product_x4_vl2`" in md
-    assert "0x12" in md  # NUM_VL=2 | SCR_PLACEHOLDER<<4
+    assert "0x02" in md
+    assert "0x12" in md
+    assert "SPEC §13" in md
+    assert "lint/TB" in md or "lint / TB" in md
 
     py = emit_py_constants(data)
     assert "VARIANT_PRODUCT_X4_VL2_NUM_LANES = 4" in py
-    assert "VARIANT_PRODUCT_X8_VL2_NUM_LANES = 8" in py
+    assert "VARIANT_PRODUCT_X4_VL2_SCR_PLACEHOLDER = 0" in py
+    assert "VARIANT_PRODUCT_X4_VL2_PARAM_VARIANT_RESET = 0x2" in py
+    assert "VARIANT_X4_VL2_PLACEHOLDER_SCR_PLACEHOLDER = 1" in py
+    assert "VARIANT_X4_VL2_PLACEHOLDER_PARAM_VARIANT_RESET = 0x12" in py
     assert "PARAM_PHY_NUM_LANES_TX_RESET = None  # reset_from: variant" in py
 
     hdr = emit_c_header(data)
     assert "#define UB_REG_PARAM_VARIANT  0x011c" in hdr
     assert "#define UB_VARIANT_PRODUCT_X4_VL2_NUM_LANES  4u" in hdr
-    assert "#define UB_VARIANT_PRODUCT_X8_VL2_NUM_LANES  8u" in hdr
+    assert "#define UB_VARIANT_PRODUCT_X4_VL2_SCR_PLACEHOLDER  0u" in hdr
+    assert "#define UB_VARIANT_PRODUCT_X4_VL2_PARAM_VARIANT_RESET  0x2u" in hdr
+    assert "#define UB_VARIANT_X4_VL2_PLACEHOLDER_SCR_PLACEHOLDER  1u" in hdr
+    assert "#define UB_VARIANT_X8_VL2_PLACEHOLDER_NUM_LANES  8u" in hdr
     assert "UB_CSR_VARIANTS[]" in hdr
     assert '"ub_csr_product_x4_vl2"' in hdr
+    assert '"ub_csr_x4_vl2_placeholder"' in hdr
     assert "UB_PHY_NUM_LANES_TX_RESET" not in hdr
 
     ral_src = emit_ral(data)
@@ -336,8 +365,51 @@ def test_variant_reset_matches_tag_name():
         assert model.param_phy.NUM_LANES_TX.reset == params["NUM_LANES"]
         assert model.param_phy.NUM_LANES_RX.reset == params["NUM_LANES"]
         assert model.param_dll.NUM_VL.reset == params["NUM_VL"]
-        word = (params["NUM_VL"] & 0xF) | ((params["SCR_PLACEHOLDER"] & 1) << 4)
+        word = variant_reset_word(params)
         got = model.param_variant.NUM_VL.reset | (
             model.param_variant.SCR_PLACEHOLDER.reset << 4
         )
         assert got == word
+
+
+def test_variant_naming_rules_fail_check():
+    """product_ => SCR=0; SCR=1 only on *_placeholder; xN_vlM matches fields."""
+    import copy
+
+    data = load_regmap()
+    assert validate_variants(data) == []
+
+    bad_product = copy.deepcopy(data)
+    bad_product["variants"]["product_x4_vl2"]["SCR_PLACEHOLDER"] = 1
+    errs = validate_variants(bad_product)
+    assert any("product_" in e and "SCR_PLACEHOLDER=0" in e for e in errs)
+
+    bad_scr = copy.deepcopy(data)
+    bad_scr["variants"]["product_x8_vl2"]["SCR_PLACEHOLDER"] = 1
+    # also rename so it is not product_? keep as product to hit product rule
+    errs = validate_variants(bad_scr)
+    assert any("SCR_PLACEHOLDER=1 only allowed" in e or "product_" in e for e in errs)
+
+    lone_scr = copy.deepcopy(data)
+    lone_scr["variants"]["custom_x4_vl2"] = {
+        "NUM_LANES": 4,
+        "NUM_VL": 2,
+        "SCR_PLACEHOLDER": 1,
+    }
+    errs = validate_variants(lone_scr)
+    assert any("SCR_PLACEHOLDER=1 only allowed" in e for e in errs)
+
+    bad_lanes = copy.deepcopy(data)
+    bad_lanes["variants"]["product_x4_vl2"]["NUM_LANES"] = 8
+    errs = validate_variants(bad_lanes)
+    assert any("NUM_LANES=8" in e and "x4" in e for e in errs)
+
+    bad_vl = copy.deepcopy(data)
+    bad_vl["variants"]["x4_vl2_placeholder"]["NUM_VL"] = 4
+    errs = validate_variants(bad_vl)
+    assert any("NUM_VL=4" in e and "vl2" in e for e in errs)
+
+    ph_zero = copy.deepcopy(data)
+    ph_zero["variants"]["x4_vl2_placeholder"]["SCR_PLACEHOLDER"] = 0
+    errs = validate_variants(ph_zero)
+    assert any("_placeholder variants must have SCR_PLACEHOLDER=1" in e for e in errs)

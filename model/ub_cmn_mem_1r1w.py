@@ -1,7 +1,9 @@
 """Cycle-accurate 1R1W storage primitive (CODING_STYLE §10 / PR #20).
 
 Registered ``rdata``, 1-cycle read latency, same-address same-cycle
-read-old, 1R1W. The rdata register and the array are not reset.
+read-old, 1R1W. Clock is ``core_clk``. No reset port (business-leaf
+name is ``rst_pyc``; this primitive does not bring it out). The rdata
+register and the array are not reset.
 
 ``rdata`` is defined only after a read of a written address: before the
 first such read, and after a read of a never-written entry when

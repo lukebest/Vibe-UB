@@ -1,0 +1,22 @@
+name: regmap
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  regmap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install pyyaml pytest
+      - name: Validate YAML
+        run: python3 scripts/gen_regmap.py --validate-only
+      - name: Pytest
+        run: pytest -q scripts/tests
+      - name: Check generated outputs
+        run: python3 scripts/gen_regmap.py --check

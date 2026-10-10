@@ -44,15 +44,19 @@
 
 ## 3. REGMAP 单一来源
 
-`docs/REGMAP.md` 为单一来源（single source），自动生成三份下游，固件与验证共用同一份生成代码：
+`docs/regmap/regmap.yaml` 为单一来源（single source）。`docs/REGMAP.md` 由生成器写出，禁止手改。下游固件与验证共用同一份生成代码。约定见 [regmap/README.md](regmap/README.md)。
 
-| 下游 | 用途 |
-| --- | --- |
-| (a) pyCircuit 寄存器读写逻辑 | 设计侧 CSR 实现 |
-| (b) cocotb / uvm-python 寄存器模型 | 验证侧 |
-| (c) 固件驱动 | 原型固件的寄存器访问层 |
+| 下游 | 路径 | 用途 |
+| --- | --- | --- |
+| (a) pyCircuit 寄存器读写逻辑 | `rtl/csr/ub_csr_regs.py` | 设计侧 CSR 实现 |
+| (b) uvm-python 寄存器模型 | `gen/tb_ral/ub_regmodel.py`（PR #6 `tb/` 未合入前；日后迁 `tb/ral/`） | 验证侧 |
+| (c) 固件驱动 | `sw/include/ub_regs.h`、`sw/hal/ub_regs_access.{h,c}` | 原型固件的寄存器访问层 |
+| (d) Python 常量 | `model/regs.py` | 验证 / 模型共用 |
 
-生成器尚未实现，列为待办，由后续独立 PR 完成。
+```bash
+python3 scripts/gen_regmap.py          # 再生
+python3 scripts/gen_regmap.py --check  # 与已提交产物 diff，漂移则非 0
+```
 
 ---
 

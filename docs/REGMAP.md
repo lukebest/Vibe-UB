@@ -1,3 +1,4 @@
+<!-- GENERATED — edit docs/regmap/regmap.yaml -->
 # Vibe-UB M1 寄存器表
 
 | 项 | 值 |
@@ -9,7 +10,7 @@
 
 职责与流程见 [TEAM.md](TEAM.md)、[PROCESS.md](PROCESS.md)。
 
-**引用约定：** 不抄录规范字段说明、表或复位表。App. D / Init Block 只给 **节号**。实现对照官方规范展开位域。本表足够生成头文件与 Python 寄存器模型。
+**引用约定：** 不抄录规范字段说明、表或复位表。App. D / Init Block 只给 **节号**。 实现对照官方规范展开位域。本表足够生成头文件与 Python 寄存器模型。
 
 **机器可读列：** `offset_hex,reg_name,field_name,hi,lo,access,reset_hex,description,spec_ref`
 
@@ -17,7 +18,7 @@
 - `access`：`RW` / `RO` / `W1C` / `WO`。禁止读清；禁止 RW 写清。粘滞=W1C；计数=RO + `CNT_CLR`。
 - `reset_hex`：字段复位。`NA` = 本仓库不抄规范复位，实现时对照 `spec_ref`。
 - `spec_ref`：规范节号，或 `proj`（项目本地）。
-- 测试寄存器仅当 `tb_test_mode=1` 且 `TEST_HOOKS=1` 时功能生效。`tb_test_mode=0` 或 PRODUCT：该窗读 0、写忽略、`csr_err=0`（已映射）。见 SPEC §3.2.3、§11。
+- 测试寄存器仅当 `tb_test_mode=1` 且 `TEST_HOOKS=1` 时功能生效。 `tb_test_mode=0` 或 PRODUCT：该窗读 0、写忽略、`csr_err=0`（已映射）。 见 SPEC §3.2.3、§11。
 
 ---
 
@@ -37,13 +38,13 @@
 
 ## 2. 字段表
 
-未实现的保留位读 0、写忽略。多值字段的保留编码（如 `RETRY_REQ_ST` 5–7、`RETRY_ACK_ST` 2–3、`NUM_LANES_*` 除 1/2/4/8 外）由 RTL **永不产出**；TB assert。
+未实现的保留位读 0、写忽略。多值字段的保留编码（如 `RETRY_REQ_ST` 5–7、 `RETRY_ACK_ST` 2–3、`NUM_LANES_*` 除 1/2/4/8 外）由 RTL **永不产出**；TB assert。
 
 ### 2.1 CTRL / STATUS（`0x0000`）
 
 | offset_hex | reg_name | field_name | hi | lo | access | reset_hex | description | spec_ref |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0x0000 | CTRL | PORT_RST | 0 | 0 | WO | 0x0 | 写 1 自清。产生 16 拍 `core_clk` 脉冲，复位 PCS/LMSM/DLL（含 retry）与信用计数。**不**复位 CSR 配置、计数、IRQ、TEST | proj; SPEC §3.2.3 |
+| 0x0000 | CTRL | PORT_RST | 0 | 0 | WO | 0x0 | 写 1 自清。产生 16 拍 `core_clk` 脉冲，复位 PCS/LMSM/DLL（含 retry）与信用计数。 **不**复位 CSR 配置、计数、IRQ、TEST | proj; SPEC §3.2.3 |
 | 0x0000 | CTRL | LMSM_START | 1 | 1 | RW | 0x0 | 软件启动 LMSM 离开 Link_Idle（实现「上层指示」） | proj; UB-PHY §3.4.3.1 |
 | 0x0000 | CTRL | IRQ_EN | 2 | 2 | RW | 0x0 | 顶层 `irq` 总使能 | proj |
 | 0x0000 | CTRL | RSVD | 31 | 3 | RO | 0x0 | 保留 | proj |
@@ -67,11 +68,11 @@
 | 0x000C | IRQ_MASK | RSVD | 31 | 7 | RO | 0x0 | 保留 | proj |
 | 0x0010 | PORT_CNA | CNA | 31 | 0 | RW | 0x0 | 本地 CNA。软件读/写；**无** `tb_*` 钩子 | proj; App. D.5.5 |
 
-`irq`：高有效电平。`IRQ_EN=1` 且任一未屏蔽 `IRQ_STATUS` 位置位则为 1。复位后 `IRQ_MASK` 全 1、`IRQ_EN=0`，全部源屏蔽。
+`irq`：高有效电平。`IRQ_EN=1` 且任一未屏蔽 `IRQ_STATUS` 位置位则为 1。 复位后 `IRQ_MASK` 全 1、`IRQ_EN=0`，全部源屏蔽。
 
 ### 2.2 PARAM 读回（`0x0100`）
 
-只读，反映编译/协商后的生效值。复位列为 M1 已确认默认（船长确认），协商完成后 STATUS 类镜像以 App. D 节为准。
+只读，反映编译/协商后的生效值。复位列为 M1 已确认默认（船长确认）， 协商完成后 STATUS 类镜像以 App. D 节为准。
 
 | offset_hex | reg_name | field_name | hi | lo | access | reset_hex | description | spec_ref |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -101,7 +102,7 @@
 | 0x0118 | PARAM_INIT_VL | VL_ENABLE | 15 | 0 | RO | 0x0003 | 16-bit VL 使能，M1=VL0+VL1 | UB-DL §4.3.3.9 |
 | 0x0118 | PARAM_INIT_VL | RSVD | 31 | 16 | RO | 0x0 | 保留 | proj |
 
-Init Block 其余字段（`DATA_ACK_GRAIN_SIZE`、`CTRL_ACK_GRAIN_SIZE`、`DATA_CREDIT_GRAIN_SIZE`、`CTRL_CREDIT_GRAIN_SIZE`、`PACKET_MIN_INTERVAL`）的位打包 **不在本仓库展开**，实现按 UB-DL §4.3.3.9；协商后的只读镜像落在 App. D.6.2.3 窗口（§2.5）。
+Init Block 其余字段（`DATA_ACK_GRAIN_SIZE`、`CTRL_ACK_GRAIN_SIZE`、 `DATA_CREDIT_GRAIN_SIZE`、`CTRL_CREDIT_GRAIN_SIZE`、`PACKET_MIN_INTERVAL`） 的位打包 **不在本仓库展开**，实现按 UB-DL §4.3.3.9；协商后的只读镜像落在 App. D.6.2.3 窗口（§2.5）。
 
 ### 2.3 ERR 计数（`0x0200`）
 
@@ -133,22 +134,24 @@ App. D PORT_CAP2 的 flit/LTB 错误计数切片（D.6.3）为规范镜像，不
 
 ### 2.4 TEST（`0x0300`）— 代替内部 deposit
 
-**功能生效：** `TEST_HOOKS=1` **且** `tb_test_mode=1`。
+功能生效：`TEST_HOOKS=1` **且** `tb_test_mode=1`。
 
-**`tb_test_mode=0` 以及 PRODUCT（`TEST_HOOKS=0`）：** 本窗地址 **已映射**。读回 0，写忽略，**`csr_err=0`**。PRODUCT 与 HOOKS（`tb_test_mode=0`）对 eqy 等价（SPEC §11 (d)）。`PORT_RST` 不复位本窗。
+`tb_test_mode=0` 以及 PRODUCT（`TEST_HOOKS=0`）：本窗地址 **已映射**。读回 0，写忽略，**`csr_err=0`**。
+
+PRODUCT 与 HOOKS（`tb_test_mode=0`）对 eqy 等价（SPEC §11 (d)）。`PORT_RST` 不复位本窗。
 
 复位 = 不介入。
 
 | offset_hex | reg_name | field_name | hi | lo | access | reset_hex | description | spec_ref |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0x0300 | LMSM_TMR_SCALE | SCALE | 7 | 0 | RW | 0x00 | 代替向 LMSM 定时器 deposit。0=实时。非 0 时加速超时计数，使训练沿真实路径到 Link_Active。编码 **待定**（建议每拍加 SCALE，SCALE=0 时加 1） | proj; SPEC §10.4 |
+| 0x0300 | LMSM_TMR_SCALE | SCALE | 7 | 0 | RW | 0x00 | 代替向 LMSM 定时器 deposit。0=实时。非 0 时加速超时计数，使训练沿真实路径到 Link_Active。 编码 **待定**（建议每拍加 SCALE，SCALE=0 时加 1） | proj; SPEC §10.4 |
 | 0x0300 | LMSM_TMR_SCALE | RSVD | 31 | 8 | RO | 0x0 | 保留 | proj |
 | 0x0304 | CRD_TO_DIS | DIS | 0 | 0 | RW | 0x0 | 1=关闭 Crd_Ack 超时检错（不把 pending 钉 0）。0=检查使能 | proj; SPEC §10.4; UB-DL §4.8.1 |
 | 0x0304 | CRD_TO_DIS | RSVD | 31 | 1 | RO | 0x0 | 保留 | proj |
-| 0x0308 | PCS_TX_TEST | AM_IVL_SCALE | 7 | 0 | RW | 0x00 | 代替向 AM 符号计数器 deposit。缩放 PCS TX AMCTL 间隔。0=规范间隔。非 0 编码 **待定**（建议与 LMSM_TMR_SCALE 相同） | proj; SPEC §10.4; UB-PHY §3.2.4 |
+| 0x0308 | PCS_TX_TEST | AM_IVL_SCALE | 7 | 0 | RW | 0x00 | 代替向 AM 符号计数器 deposit。缩放 PCS TX AMCTL 间隔。0=规范间隔。 非 0 编码 **待定**（建议与 LMSM_TMR_SCALE 相同） | proj; SPEC §10.4; UB-PHY §3.2.4 |
 | 0x0308 | PCS_TX_TEST | RSVD | 31 | 8 | RO | 0x0 | 保留 | proj |
 
-信用钩子（`tb_inj_crd_cells` / `tb_obs_crd_*`）固定对 **VL0**。`tb_inj_crd_cells` 在 `tb_test_mode=1` 时每拍覆盖 cell 计数，HOOKS **不**增加存储寄存器。
+信用钩子（`tb_inj_crd_cells` / `tb_obs_crd_*`）固定对 **VL0**。 `tb_inj_crd_cells` 在 `tb_test_mode=1` 时每拍覆盖 cell 计数，HOOKS **不**增加存储寄存器。
 
 不在本窗口提供：FSM 状态 force、叶子内部（CRC/FEC/deskew/缓冲）观察。见 SPEC §10.5。
 
@@ -156,11 +159,11 @@ App. D PORT_CAP2 的 flit/LTB 错误计数切片（D.6.3）为规范镜像，不
 
 ### 2.5 App. D 端口镜像（`0x1000`）
 
-相对 `0x1000` 的偏移 = 规范 PORT0 相对 `0x0002_0000` 的偏移。字段级位定义 **不在本仓库展开**；一行表示一个 32-bit 软件窗口或切片基址。生成器可按节号对照规范展开。
+相对 `0x1000` 的偏移 = 规范 PORT0 相对 `0x0002_0000` 的偏移。 字段级位定义 **不在本仓库展开**；一行表示一个 32-bit 软件窗口或切片基址。 生成器可按节号对照规范展开。
 
 | offset_hex | reg_name | field_name | hi | lo | access | reset_hex | description | spec_ref |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0x1000 | APPD_PORT_BASIC | WINDOW | 31 | 0 | MIX | NA | CFG0_PORT_BASIC 切片窗口（含 PORT_CAP Bitmap、Port Info、Port CNA、Port Rst）。CNA 亦映射到 `0x0010` | App. D.5、D.5.1–D.5.6 |
+| 0x1000 | APPD_PORT_BASIC | WINDOW | 31 | 0 | MIX | NA | CFG0_PORT_BASIC 切片窗口（含 PORT_CAP Bitmap、Port Info、Port CNA、Port Rst）。 CNA 亦映射到 `0x0010` | App. D.5、D.5.1–D.5.6 |
 | 0x1100 | APPD_LINK_CAP | WINDOW | 31 | 0 | MIX | NA | PORT_CAP1_LINK：能力 / 配置 / 状态（含协商后的粒度与 DLL SM 状态） | App. D.6.2、D.6.2.1–D.6.2.3 |
 | 0x1200 | APPD_LINK_LOG | WINDOW | 31 | 0 | MIX | NA | PORT_CAP2_LINK_LOG：flit/LTB 错误日志与计数 | App. D.6.3 |
 | 0x1E00 | APPD_LMSM_ST | WINDOW | 31 | 0 | MIX | NA | PORT_CAP20_LMSM_ST 镜像（M1 窗内地址；原 `0x2400`） | App. D.6.21 |
@@ -168,7 +171,7 @@ App. D PORT_CAP2 的 flit/LTB 错误计数切片（D.6.3）为规范镜像，不
 
 `MIX` = 切片内既有 RO 也有 RW/W1C，以对应节为准。`NA` 复位：对照该节，不在此抄。
 
-M1 不实现的 PORT_CAP 切片（DATA_RATE2–9、EYE_MONITOR、QDLWS 等）在 Bitmap 中报不存在。DATA_RATE1（D.6.5）是否只读反映 Data Rate 0：**待定**（建议最小只读镜像，不实现改速控制）。
+M1 不实现的 PORT_CAP 切片（DATA_RATE2–9、EYE_MONITOR、QDLWS 等）在 Bitmap 中报不存在。 DATA_RATE1（D.6.5）是否只读反映 Data Rate 0：**待定**（建议最小只读镜像，不实现改速控制）。
 
 ---
 
@@ -183,4 +186,4 @@ M1 不实现的 PORT_CAP 切片（DATA_RATE2–9、EYE_MONITOR、QDLWS 等）在
 
 访问类型缩写供生成器使用，勿改拼写：`RW` `RO` `W1C` `WO` `MIX`。
 
-App. D 窗口内地址迁徙（Q3）：`APPD_LMSM_ST` `0x2400`→`0x1E00`；`APPD_PORT_ERR` `0x2500`→`0x1F00`。两者落入 `0x1000`–`0x1FFF`，避开规范相对偏移上的 DATA_RATE 等切片。
+App. D 窗口内地址迁徙（Q3）：`APPD_LMSM_ST` `0x2400`→`0x1E00`； `APPD_PORT_ERR` `0x2500`→`0x1F00`。两者落入 `0x1000`–`0x1FFF`， 避开规范相对偏移上的 DATA_RATE 等切片。

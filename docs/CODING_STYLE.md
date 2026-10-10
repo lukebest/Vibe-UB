@@ -113,3 +113,12 @@
 ## 9. 与现有树的关系
 
 `rtl/`、`tb/` 下现存手写 Verilog 不是本约定的范本（异步复位、2-bit 分 lane、PCS 内 Gray）。重写以 SPEC §12 为准。
+
+---
+
+## 10. 寄存器表单一来源
+
+`docs/regmap/regmap.yaml` 是 CSR 的唯一可编辑源。`docs/REGMAP.md` 与
+`rtl/csr/ub_csr_regs.py` / RAL / 固件头 / `model/regs.py` 均由
+`python3 scripts/gen_regmap.py` 生成，禁止手改。约定与端口拆分见
+[regmap/README.md](regmap/README.md)。

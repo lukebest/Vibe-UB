@@ -19,6 +19,13 @@ when the file itself declares `parameter NUM_LANES` / `PYC_RST_ACTIVE_HIGH`
 (handwritten / older nets). pycc SPEC §2.2 nets have no Verilog parameter;
 polarity and `NUM_LANES` come from the variant tag (`_x4`, `_pol0`) or env.
 
+Gate `read_verilog` always uses `-I rtl/pyc_lib` (one copy of `pyc_reg.v` and
+other pycc runtime primitives). If that directory is not in the tree yet,
+the script falls back to `-I rtl/common` and prints
+`WARN: rtl/pyc_lib/ missing; falling back to rtl/common for Yosys -I`.
+The banner line includes `pyc_inc=rtl/pyc_lib` or `pyc_inc=rtl/common`.
+The TB filelist (`tb/Makefile` `VERILOG_INCLUDE_DIRS`) uses the same pair.
+
 Methods, in order. Exit 0 only if a method **proves** the compare (no
 BMC-only pass):
 

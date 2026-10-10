@@ -20,7 +20,9 @@ usage() {
   echo "  Gold is always chparam'd. Gate is chparam'd only if it declares the" >&2
   echo "  Verilog parameter (old / handwritten). pycc §2.2 nets have no params;" >&2
   echo "  polarity / NUM_LANES are taken from the variant tag or env." >&2
-  echo "  EQUIV_INC=dir[:dir] extra include dirs for gate \`include (pyc_reg.v)." >&2
+  echo "  Always -I rtl/pyc_lib for pycc \`include \"pyc_reg.v\". If that dir is" >&2
+  echo "  missing (main before #5/#21), fall back to -I rtl/common and WARN." >&2
+  echo "  EQUIV_INC=dir[:dir] extra include dirs (after the repo primitive dir)." >&2
   exit 2
 }
 
@@ -130,8 +132,20 @@ add_inc() {
   done
   INC_FLAGS+=("$abs")
 }
+# SPEC §2.2: one copy of pyc_reg.v (and other pyc_* primitives) in rtl/pyc_lib/.
+# main may not have that directory yet — same fallback as scripts/impl/quick_synth.py.
+PYC_INC="none"
+if [[ -d "$ROOT/rtl/pyc_lib" ]]; then
+  add_inc "$ROOT/rtl/pyc_lib"
+  PYC_INC="rtl/pyc_lib"
+elif [[ -d "$ROOT/rtl/common" ]]; then
+  add_inc "$ROOT/rtl/common"
+  PYC_INC="rtl/common"
+  echo "WARN: rtl/pyc_lib/ missing; falling back to rtl/common for Yosys -I" >&2
+else
+  echo "WARN: neither rtl/pyc_lib nor rtl/common exists; \`include may fail" >&2
+fi
 add_inc "$(dirname "$NET_ABS")"
-add_inc "$(dirname "$NET_ABS")/../common"
 if [[ -n "${EQUIV_INC:-}" ]]; then
   IFS=':' read -r -a _incs <<<"$EQUIV_INC"
   for local_i in "${_incs[@]}"; do
@@ -196,7 +210,7 @@ pass_method() {
 }
 
 METHOD=""
-echo "equiv_ref leaf=${LEAF} gold=${GOLD} gate=${NET_ABS} top=${GATE_TOP} NUM_LANES=${NUM_LANES:-n/a} PYC=${PYC_RST_ACTIVE_HIGH} gate_chparam=${gate_ch:-none}"
+echo "equiv_ref leaf=${LEAF} gold=${GOLD} gate=${NET_ABS} top=${GATE_TOP} NUM_LANES=${NUM_LANES:-n/a} PYC=${PYC_RST_ACTIVE_HIGH} gate_chparam=${gate_ch:-none} pyc_inc=${PYC_INC}"
 
 # 1) default equiv_make / simple / induct
 SCRIPT1="${prep_gold}${prep_gate}${restore}

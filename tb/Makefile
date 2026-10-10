@@ -133,6 +133,20 @@ endif
 
 VERILOG_INCLUDE_DIRS += $(TB_ROOT)/harness
 
+# SPEC §2.2: one copy of pyc_reg.v in rtl/pyc_lib/. main before #5/#21
+# has no that directory — fall back to rtl/common (same as equiv_ref.sh).
+ifeq ($(wildcard $(RTL)/pyc_lib/.),)
+ifneq ($(wildcard $(RTL)/common/.),)
+VERILOG_INCLUDE_DIRS += $(RTL)/common
+ifndef PYC_LIB_WARNED
+export PYC_LIB_WARNED := 1
+$(warning WARN: rtl/pyc_lib/ missing; falling back to rtl/common for include pyc_reg.v)
+endif
+endif
+else
+VERILOG_INCLUDE_DIRS += $(RTL)/pyc_lib
+endif
+
 # Optional external PRODUCT netlist (e.g. a pycc head). Does not write rtl/.
 ifneq ($(GATE_NET),)
 DUT_RTL := $(abspath $(GATE_NET))
@@ -147,7 +161,7 @@ VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_bcrc.sv $(DUT_RTL)
 else ifeq ($(LEAF),ub_dll_bcrc_check)
 VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_bcrc_check.sv $(DUT_RTL)
 endif
-VERILOG_INCLUDE_DIRS += $(dir $(DUT_RTL)) $(abspath $(dir $(DUT_RTL))/../common)
+VERILOG_INCLUDE_DIRS += $(dir $(DUT_RTL))
 endif
 
 # -DTB_TEST_HOOKS is only for the passthrough self-check harness, not leaf TBs.

@@ -23,6 +23,7 @@
 
 ### Changed
 
+- SPEC §2.6：BCRC 流式接口拍位（已定）：`start`/`valid_in` 同拍计入首 flit；`start`/`valid_in`/`last` 同拍只算末 4 字节 BCRC 之前的 16 字节并 1 拍给出 `crc_word`；`start==1 && valid_in==0` 只复位全 1；未见 `last` 再 `start` 以新块初值重算。与 `tb/models/ub_dll_bcrc.py` 的 `start()`/`eat()` 一致。架构 Xia 2026-10-10 裁定。
 - `docs/rules/verif_gate.md` v0.4：后门命名 `tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`（HOOKS only，§10 登记，eqy 拉低）；`ub_cmn_mem_1r1w` 时钟口 `core_clk`；存储变体 `d<DEPTH>w<WIDTH>[m<WMASK_W>]`；regmap `variants:`（PR #11 格式）`product_` 的 `SCR_PLACEHOLDER` 必须为 0，`=1` 非 PRODUCT 只 lint/TB，`NUM_VL`/`NUM_LANES` 与变体名一致。GATE-TB-SB-001：分段比对按段计次数。
 - `docs/rules/verif_gate.md` v0.3：§8.0.1 / §11 增补 GATE-TB-SB-001（记分板须统计实际比对次数，结束时断言次数 `> 0` 且等于预期；审查清单，不自动拦截）。
 - `docs/TEAM.md` §4、`docs/PROCESS.md` §2：豁免清单从 `docs/WAIVERS.md` 改为 `waivers/`。

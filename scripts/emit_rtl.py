@@ -55,11 +55,19 @@ from lib.registry import register  # noqa: E402, F401
 
 
 def main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--out", type=Path, default=REPO / "rtl")
+    args = parser.parse_args()
     register_batch1()
-    paths = emit_all()
+    paths = emit_all(args.out)
     print(try_pycc())
     for p in paths:
-        print(f"wrote {p.relative_to(REPO)}")
+        try:
+            print(f"wrote {p.relative_to(REPO)}")
+        except ValueError:
+            print(f"wrote {p}")
     return 0
 
 

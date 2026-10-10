@@ -91,10 +91,6 @@ def bits_or_reduce(m: Circuit, word):
     return cur[0]
 
 
-def consume_rsvd(match, rsvd):
-    return match & ~(rsvd & u(1, 0))
-
-
 def drive_gen(crc_q, word_q, done_q, start, valid_in, last, nxt, m: Circuit):
     init = u(CRC_W, INIT)
     crc_q.set(mux(start, init, nxt), when=(start | valid_in))

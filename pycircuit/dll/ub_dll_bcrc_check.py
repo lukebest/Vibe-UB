@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pycircuit import Circuit, module, u
 
-from dll.bcrc_hw import bits_or_reduce, consume_rsvd, drive_gen, next_crc_hw
+from dll.bcrc_hw import bits_or_reduce, drive_gen, next_crc_hw
 from dll.bcrc_matrix import CRC_W, FLIT_W, INIT, WORD_W
 
 LEAF = "ub_dll_bcrc_check"
@@ -19,13 +19,13 @@ VARIANTS: dict[str, dict] = {
 }
 
 
-def _check_update(m: Circuit, nxt, crc_recv, eat_last, ok_q, fail_q, eflag_q):
+def _check_regs(m: Circuit, nxt, crc_recv, eat_last, ok_q, fail_q, eflag_q, zero_q):
     recv_crc = crc_recv.slice(lsb=0, width=CRC_W)
     recv_flag = crc_recv.slice(lsb=30, width=1)
     recv_rsvd = crc_recv.slice(lsb=31, width=1)
     any_diff = bits_or_reduce(m, nxt ^ recv_crc)
     match = ~any_diff
-    ok_q.set(consume_rsvd(match, recv_rsvd), when=eat_last)
+    ok_q.set(match & ~(recv_rsvd & zero_q.out()), when=eat_last)
     fail_q.set(any_diff, when=eat_last)
     eflag_q.set(recv_flag, when=eat_last)
 
@@ -46,9 +46,11 @@ def build(m: Circuit, test_hooks: int = 0) -> None:
     ok_q = m.out("ok_q", clk=clk, rst=rst, width=1, init=u(1, 0))
     fail_q = m.out("fail_q", clk=clk, rst=rst, width=1, init=u(1, 0))
     eflag_q = m.out("eflag_q", clk=clk, rst=rst, width=1, init=u(1, 0))
+    zero_q = m.out("zero_q", clk=clk, rst=rst, width=1, init=u(1, 0))
+    zero_q.set(u(1, 0))
     nxt = next_crc_hw(m, crc_q.out(), data_in, last)
     eat_last = drive_gen(crc_q, word_q, done_q, start, valid_in, last, nxt, m)
-    _check_update(m, nxt, crc_recv, eat_last, ok_q, fail_q, eflag_q)
+    _check_regs(m, nxt, crc_recv, eat_last, ok_q, fail_q, eflag_q, zero_q)
     m.output("crc_word", word_q.out())
     m.output("done", done_q.out())
     m.output("crc_ok", ok_q.out())

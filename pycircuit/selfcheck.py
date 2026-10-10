@@ -9,6 +9,7 @@ Scrambler involution uses *explicit* elaboration-only OPEN tokens
 
 from __future__ import annotations
 
+import ast
 import os
 import re
 import sys
@@ -175,7 +176,7 @@ MIGRATED_PY = (
     HERE / "dll/bcrc_matrix.py",
 )
 
-FORBIDDEN_IN_SRC = re.compile(r"""['"][^'"]*\b(module|endmodule|always)\b[^'"]*['"]""")
+FORBIDDEN_WORDS = re.compile(r"(?<!@)\b(module|endmodule|always)\b")
 
 
 def _ports_block(text: str) -> str:
@@ -185,8 +186,11 @@ def _ports_block(text: str) -> str:
 def _no_verilog_text_in_migrated_src() -> None:
     for path in MIGRATED_PY:
         src = path.read_text(encoding="utf-8")
-        hit = FORBIDDEN_IN_SRC.search(src)
-        assert hit is None, f"Verilog text in {path}: {hit.group(0)}"
+        tree = ast.parse(src)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                hit = FORBIDDEN_WORDS.search(node.value)
+                assert hit is None, f"Verilog text in {path}: {hit.group(0)!r}"
 
 
 def main() -> int:

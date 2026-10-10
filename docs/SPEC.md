@@ -852,15 +852,16 @@ Retry 深度下界公式见 UB-DL §4.7.3.2（含 FEC 120/128 与 RTT）。M1 25
 
 用途：`formal/mem/` 等 bind 到 HOOKS 网表上的这些口做断言，不 force / deposit 内部信号。
 
-首个登记叶子：`ub_mem_tlb`（线 C 内存管理）。
+首个登记叶子：`ub_mem_tlb`（线 C 内存管理）。四口同一拍：查找请求的 **下一拍**，即原语寄存 `rdata` 做标签比较的那一拍（hit 取自 way 选择之前）。`tb_mem_tlb_obs_lkup_v=1` 表示本拍 hit / vld / tag 属于一次有效查找；断言只在 `lkup_v=1` 时检查。
 
 | 端口 | 方向 | 宽度 | 时钟域 | 接入 | 含义 |
 | --- | --- | --- | --- | --- | --- |
+| `tb_mem_tlb_obs_lkup_v` | out | 1 | `core_clk` | `ub_mem_tlb` | 本拍 hit/vld/tag 属于一次有效查找 |
 | `tb_mem_tlb_obs_hit` | out | 4 | `core_clk` | `ub_mem_tlb` | 标签比较后、选择前的 per-way hit 向量 |
 | `tb_mem_tlb_obs_vld` | out | 4 | `core_clk` | `ub_mem_tlb` | 本次查到的 set 的 per-way valid |
 | `tb_mem_tlb_obs_tag_w0`…`w3` | out | 各 60 | `core_clk` | `ub_mem_tlb` | 本次查到的 set 的 per-way tag |
 
-断言意图（formal，HOOKS bind）：one-hot hit、无重复 tag、invalid way 不得 hit。不在此展开表项字段布局。
+断言意图（formal，HOOKS bind；仅 `lkup_v=1`）：one-hot hit、无重复 tag、invalid way 不得 hit。不在此展开表项字段布局。
 
 ---
 

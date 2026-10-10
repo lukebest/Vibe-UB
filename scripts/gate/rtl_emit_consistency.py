@@ -81,14 +81,19 @@ def write_hooks_wrapper(
     dest: Path,
     product_path: Path | None = None,
     incdirs: list[Path] | None = None,
+    wrapper_module: str | None = None,
 ) -> list[str]:
-    """Wrap HOOKS so only PRODUCT ports are compared (SPEC §11).
+    """Wrap a side so only PRODUCT ports are compared (SPEC §11).
 
     Exposed ports keep the PRODUCT packed width (fixes gold/gate bus
     mismatch). Extra HOOKS inputs (tb_test_mode / tb_inj_* /
     tb_<inst>_bd_* / tb_<inst>_bd_vld_*) tie to 0 at their native width.
     Observe (tb_obs_* / tb_<inst>_obs_*) left open. Other extra tb_*
     inputs also tie low.
+
+    Gold and HOOKS both instantiate `u_leaf` so flatten names line up
+    and equiv_* can prove an identical sequential (e.g. ub_dll_bcrc)
+    without falling through to a 160-bit SAT BMC timeout.
     """
     hooks = parse_port_decls(hooks_path, incdirs=incdirs, module=module)
     if product_path is not None and product_path.is_file():
@@ -101,10 +106,11 @@ def write_hooks_wrapper(
         if name in exposed_names:
             continue
         tied.append((kind, name, packed))
+    wrap_mod = wrapper_module or f"{module}_eqy_hooks"
     lines = [
         f"// Auto-generated eqy wrapper: {module} PRODUCT ports only;",
         "// extra HOOKS inputs tied low at native width. Do not commit.",
-        f"module {module}_eqy_hooks (",
+        f"module {wrap_mod} (",
     ]
     if exposed:
         lines.append("  " + ",\n  ".join(n for _k, n, _p in exposed))
@@ -119,7 +125,7 @@ def write_hooks_wrapper(
             conns.append(f".{name}()")
         else:
             conns.append(f".{name}({_tie_low_expr(packed)})")
-    lines.append(f"  {module} u_hooks (")
+    lines.append(f"  {module} u_leaf (")
     lines.append("    " + ",\n    ".join(conns))
     lines.append("  );")
     lines.append("endmodule")
@@ -148,7 +154,7 @@ def _sv_read(path: Path, incdirs: list[Path] | None = None) -> str:
 
 
 def _yosys_load_both(
-    product: Path,
+    gold_reads: list[str],
     gold_top: str,
     gate_reads: list[str],
     gate_top: str,
@@ -161,7 +167,7 @@ def _yosys_load_both(
     extras = [_sv_read(p, incdirs) for p in (extra_rtl or [])]
     return [
         *extras,
-        _sv_read(product, incdirs),
+        *gold_reads,
         *libs,
         f"hierarchy -check -top {gold_top}",
         "proc",
@@ -182,7 +188,7 @@ def _yosys_load_both(
 
 
 def _yosys_equiv_script(
-    product: Path,
+    gold_reads: list[str],
     gold_top: str,
     gate_reads: list[str],
     gate_top: str,
@@ -194,7 +200,7 @@ def _yosys_equiv_script(
     return "\n".join(
         [
             *_yosys_load_both(
-                product,
+                gold_reads,
                 gold_top,
                 gate_reads,
                 gate_top,
@@ -212,7 +218,7 @@ def _yosys_equiv_script(
 
 
 def _yosys_miter_common(
-    product: Path,
+    gold_reads: list[str],
     gold_top: str,
     gate_reads: list[str],
     gate_top: str,
@@ -222,7 +228,7 @@ def _yosys_miter_common(
 ) -> list[str]:
     return [
         *_yosys_load_both(
-            product,
+            gold_reads,
             gold_top,
             gate_reads,
             gate_top,
@@ -237,7 +243,7 @@ def _yosys_miter_common(
 
 
 def _yosys_miter_sat_script(
-    product: Path,
+    gold_reads: list[str],
     gold_top: str,
     gate_reads: list[str],
     gate_top: str,
@@ -249,7 +255,7 @@ def _yosys_miter_sat_script(
     return "\n".join(
         [
             *_yosys_miter_common(
-                product,
+                gold_reads,
                 gold_top,
                 gate_reads,
                 gate_top,
@@ -264,7 +270,7 @@ def _yosys_miter_sat_script(
 
 
 def _yosys_miter_bmc_script(
-    product: Path,
+    gold_reads: list[str],
     gold_top: str,
     gate_reads: list[str],
     gate_top: str,
@@ -282,7 +288,7 @@ def _yosys_miter_bmc_script(
     return "\n".join(
         [
             *_yosys_miter_common(
-                product,
+                gold_reads,
                 gold_top,
                 gate_reads,
                 gate_top,
@@ -313,6 +319,30 @@ def _equiv_proven(rc: int, text: str) -> bool:
         return True
     if "SAT proof finished - no model found: SUCCESS" in text:
         return True
+    return False
+
+
+def _unproven_on_outputs(text: str, output_names: list[str]) -> bool:
+    """True when equiv_status left an exposed PRODUCT output unproven.
+
+    That is a real I/O mismatch — do not spend minutes on SAT BMC.
+    Internal $equiv (pyc_reg .q) still fall through to miter/BMC.
+    """
+    if not output_names:
+        return False
+    hits = []
+    for line in text.splitlines():
+        if "Unproven $equiv" not in line:
+            continue
+        hits.append(line)
+    if not hits:
+        return False
+    blob = "\n".join(hits)
+    for name in output_names:
+        if f".{name}_gold" in blob or f".{name}_gate" in blob:
+            return True
+        if f"\\{name} " in blob or f"\\{name}[" in blob:
+            return True
     return False
 
 
@@ -523,22 +553,34 @@ def run_equiv(
 ) -> Finding | None:
     """Prove PRODUCT≡HOOKS on PRODUCT ports only (SPEC §11 (d)).
 
-    Always wrap HOOKS so exposed ports keep PRODUCT packed widths.
-    Extra HOOKS inputs tie low at native width; obs outputs float.
-    Primary: Yosys equiv_*. Fallback: miter + sat -tempinduct.
-    Structurally different sequential (separate pycc PRODUCT/HOOKS):
-    tempinduct may not close; then miter SAT BMC from zero init.
+    Always wrap both sides so exposed ports keep PRODUCT packed widths
+    and flatten names share `u_leaf` (identical sequential, e.g. BCRC,
+    can close via equiv_*). Extra HOOKS inputs tie low at native width;
+    obs outputs float. Primary: Yosys equiv_*. Fallback: miter +
+    sat -tempinduct. Structurally different sequential (separate pycc
+    PRODUCT/HOOKS): tempinduct may not close; then miter SAT BMC from
+    zero init.
     """
     work = OUT_DIR / "eqy" / module
     work.mkdir(parents=True, exist_ok=True)
-    gold_top = module
     incs = list(incdirs) if incdirs is not None else default_verilog_incdirs()
+    gold_wrap = work / f"{module}_eqy_gold.v"
+    write_hooks_wrapper(
+        product,
+        module,
+        gold_wrap,
+        product_path=product,
+        incdirs=incs,
+        wrapper_module=f"{module}_eqy_gold",
+    )
+    gold_top = f"{module}_eqy_gold"
     wrap = work / f"{module}_eqy_hooks.v"
     tied = write_hooks_wrapper(
         hooks, module, wrap, product_path=product, incdirs=incs
     )
     gate_top = f"{module}_eqy_hooks"
     extra_reads = [_sv_read(p, incs) for p in (extra_rtl or [])]
+    gold_reads = [*extra_reads, _sv_read(product, incs), _sv_read(gold_wrap, incs)]
     gate_reads = [*extra_reads, _sv_read(hooks, incs), _sv_read(wrap, incs)]
     extra_note = (
         "listed extras" if extra_ports is not None else "no hooks_ports row"
@@ -568,7 +610,7 @@ def run_equiv(
         ys = work / f"{module}_equiv.ys"
         ys.write_text(
             _yosys_equiv_script(
-                product,
+                gold_reads,
                 gold_top,
                 gate_reads,
                 gate_top,
@@ -586,12 +628,29 @@ def run_equiv(
         rc, text = _run_yosys_script(ys, work, 180)
         print("\n".join((text.strip().splitlines() or [""])[-40:]))
         proven = _equiv_proven(rc, text)
+        exposed = parse_port_decls(product, incdirs=incs, module=module)
+        outputs = [n for k, n, _p in exposed if k == "output"]
+        if not proven and _unproven_on_outputs(text, outputs):
+            print(
+                f"EQUIV {module}: FAIL tool=yosys-equiv "
+                "(unproven PRODUCT output; skip SAT)"
+            )
+            return Finding(
+                check="emit",
+                module=module,
+                file=rel(product),
+                rule="EQUIV_FAIL",
+                message=(
+                    f"PRODUCT vs hooks not equivalent (tool=yosys-equiv, "
+                    f"{kind}; unproven PRODUCT output)"
+                ),
+            )
         if not proven:
             tool = "yosys-miter-sat"
             ms = work / f"{module}_miter.ys"
             ms.write_text(
                 _yosys_miter_sat_script(
-                    product,
+                    gold_reads,
                     gold_top,
                     gate_reads,
                     gate_top,
@@ -614,7 +673,7 @@ def run_equiv(
             bs = work / f"{module}_miter_bmc.ys"
             bs.write_text(
                 _yosys_miter_bmc_script(
-                    product,
+                    gold_reads,
                     gold_top,
                     gate_reads,
                     gate_top,
@@ -646,6 +705,7 @@ def run_equiv(
                     "",
                     "[gold]",
                     f"read_verilog -sv {gold_inc} {product}".replace("  ", " "),
+                    f"read_verilog -sv {gold_inc} {gold_wrap}".replace("  ", " "),
                     *_lib_reads(lib_files),
                     f"prep -top {gold_top}",
                     "",

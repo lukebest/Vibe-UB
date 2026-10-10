@@ -548,6 +548,33 @@ def _wide_combo(path: Path, module: str, width: int, flip_bit: int | None = None
     )
 
 
+def _write_lane_dist_x8(path: Path, flip_bit: int | None = None) -> None:
+    """8-lane 256-bit splitter (SPEC x8 / PMA_W=32). No hook ports."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lanes = ", ".join(f"lane{i}" for i in range(8))
+    if flip_bit == 0:
+        assigns = (
+            "  wire [255:0] src;\n"
+            "  assign src = {data_in[255:1], ~data_in[0]};\n"
+            + "\n".join(
+                f"  assign lane{i} = src[{i * 32 + 31}:{i * 32}];" for i in range(8)
+            )
+        )
+    else:
+        assigns = "\n".join(
+            f"  assign lane{i} = data_in[{i * 32 + 31}:{i * 32}];" for i in range(8)
+        )
+    path.write_text(
+        "module ub_pcs_lane_dist_x8 (\n"
+        "  input [255:0] data_in,\n"
+        f"  output [31:0] {lanes}\n"
+        ");\n"
+        f"{assigns}\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+
+
 def test_equiv_wide_bus_and_flip() -> None:
     """160-bit (BCRC-style) and 256-bit (lane_dist_x8-style) through the wrapper."""
     cases = [
@@ -573,6 +600,23 @@ def test_equiv_wide_bus_and_flip() -> None:
             if bad.rule != "EQUIV_FAIL":
                 _fail(f"equiv-{module}-flip", f"expected EQUIV_FAIL, got {bad.rule}")
             print(f"SELFTEST PASS equiv-{module}-flip: fake bit fail")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        prod = root / "ub_pcs_lane_dist_x8.v"
+        hooks = root / "hooks.v"
+        fake = root / "fake.v"
+        _write_lane_dist_x8(prod)
+        _write_lane_dist_x8(hooks)
+        _write_lane_dist_x8(fake, flip_bit=0)
+        hit = run_equiv("ub_pcs_lane_dist_x8", prod, hooks, None)
+        if hit is not None:
+            _fail("equiv-ub_pcs_lane_dist_x8", f"x8 leaf must prove: {hit.message}")
+        print("SELFTEST PASS equiv-ub_pcs_lane_dist_x8: 256-bit / 8-lane through wrapper")
+        bad = run_equiv("ub_pcs_lane_dist_x8", prod, fake, None)
+        if bad is None:
+            _fail("equiv-ub_pcs_lane_dist_x8-flip", "one flipped bus bit must fail")
+        print("SELFTEST PASS equiv-ub_pcs_lane_dist_x8-flip: fake bit fail")
 
 
 def _git_show(rev: str, rel_path: str, dest: Path) -> bool:
@@ -715,11 +759,22 @@ def test_equiv_real_csr_tlb() -> None:
                 _fail("equiv-bcrc", bhit.message)
             print("SELFTEST PASS equiv-bcrc: 160-bit data_in through wrapper")
             bports = parse_port_decls(files["bcrc"], incdirs=inc, module="ub_dll_bcrc")
+            if not any(n == "data_in" and p == "[159:0]" for _k, n, p in bports):
+                _fail("equiv-bcrc", f"expected data_in[159:0], got {bports}")
             bfake = Path(tmp) / "bcrc_fake.v"
-            _fake_hooks_xor_bit(bfake, "ub_dll_bcrc", files["bcrc"], bports, "data_in", [])
+            # Same module shape (no extra hierarchy) so equiv_simple sees crc_word[0].
+            text = files["bcrc"].read_text(encoding="utf-8")
+            flipped = text.replace(
+                "assign crc_word = word_q;",
+                "assign crc_word = {word_q[31:1], ~word_q[0]};",
+                1,
+            )
+            if flipped == text:
+                _fail("equiv-bcrc-flip", "could not plant crc_word[0] invert")
+            bfake.write_text(flipped, encoding="utf-8")
             bbad = run_equiv("ub_dll_bcrc", files["bcrc"], bfake, None, incdirs=inc)
             if bbad is None:
-                _fail("equiv-bcrc-flip", "data_in[0] flipped HOOKS must fail")
+                _fail("equiv-bcrc-flip", "crc_word[0] flipped HOOKS must fail")
             print("SELFTEST PASS equiv-bcrc-flip: fake bus bit fail")
 
         if files["tlb_prod"].is_file() and files["tlb_hooks"].is_file():

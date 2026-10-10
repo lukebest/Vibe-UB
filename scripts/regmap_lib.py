@@ -60,6 +60,51 @@ def reset_int(field: dict[str, Any]) -> int | None:
     return parse_int(field.get("reset"), allow_na=True)
 
 
+VARIANT_KEYS = ("NUM_LANES", "NUM_VL", "SCR_PLACEHOLDER")
+NUM_LANES_LEGAL = frozenset({1, 2, 4, 8})
+
+
+def variant_tags(data: dict[str, Any]) -> dict[str, dict[str, int]]:
+    raw = data.get("variants") or {}
+    tags: dict[str, dict[str, int]] = {}
+    for key, val in raw.items():
+        if key == "default" or not isinstance(val, dict):
+            continue
+        tags[str(key)] = {str(k): int(parse_int(v) or 0) for k, v in val.items()}
+    return tags
+
+
+def default_variant(data: dict[str, Any]) -> str:
+    raw = data.get("variants") or {}
+    listed = raw.get("default")
+    tags = variant_tags(data)
+    if isinstance(listed, str) and listed in tags:
+        return listed
+    if not tags:
+        raise RegmapError("variants: table is empty")
+    return next(iter(tags))
+
+
+def csr_module_name(tag: str) -> str:
+    """SPEC §2.2: <leaf>_<tag> when more than one parameter set exists."""
+    return f"ub_csr_{tag}"
+
+
+def reset_key_of(field: dict[str, Any]) -> str | None:
+    if field.get("reset_from") != "variant":
+        return None
+    return str(field.get("reset_key") or field["name"])
+
+
+def resolve_reset(field: dict[str, Any], params: dict[str, int]) -> int | None:
+    key = reset_key_of(field)
+    if key is not None:
+        if key not in params:
+            raise RegmapError(f"reset_from variant missing key {key!r}")
+        return int(params[key])
+    return reset_int(field)
+
+
 def is_window_reg(reg: dict[str, Any]) -> bool:
     if reg.get("kind") == "window":
         return True
@@ -90,7 +135,7 @@ def _require(obj: dict[str, Any], keys: Iterable[str], where: str) -> None:
 def validate_schema_lite(data: dict[str, Any]) -> list[str]:
     """Structural checks mirroring docs/regmap/schema.json (no jsonschema dep)."""
     errors: list[str] = []
-    for key in ("meta", "global_rules", "windows", "registers"):
+    for key in ("meta", "global_rules", "windows", "registers", "variants"):
         if key not in data:
             errors.append(f"root missing {key}")
     meta = data.get("meta") or {}
@@ -203,9 +248,13 @@ def validate_semantics(data: dict[str, Any]) -> list[str]:
             try:
                 _require(
                     field,
-                    ("name", "msb", "lsb", "access", "reset", "description", "spec_ref"),
+                    ("name", "msb", "lsb", "access", "description", "spec_ref"),
                     fwhere,
                 )
+                if field.get("reset_from") != "variant" and "reset" not in field:
+                    raise RegmapError("missing reset (or reset_from: variant)")
+                if field.get("reset_from") == "variant" and "reset" in field:
+                    raise RegmapError("reset must not be hand-written when reset_from: variant")
                 msb = int(field["msb"])
                 lsb = int(field["lsb"])
             except (RegmapError, TypeError, ValueError) as exc:
@@ -235,6 +284,10 @@ def validate_semantics(data: dict[str, Any]) -> list[str]:
                 errors.append(
                     f"{fwhere}: reset {field.get('reset')!r} does not fit width {width}"
                 )
+            if field.get("reset_from") == "variant":
+                key = reset_key_of(field)
+                if key not in VARIANT_KEYS:
+                    errors.append(f"{fwhere}: reset_key {key!r} not in {VARIANT_KEYS}")
 
             for enum in field.get("enums") or []:
                 val = parse_int(enum.get("value"))
@@ -273,8 +326,69 @@ def validate_semantics(data: dict[str, Any]) -> list[str]:
     return errors
 
 
+def validate_variants(data: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    tags = variant_tags(data)
+    if not tags:
+        errors.append("variants: table required (SPEC §2.2 per-tag netlists)")
+        return errors
+    try:
+        default = default_variant(data)
+    except RegmapError as exc:
+        errors.append(str(exc))
+        return errors
+    if default not in tags:
+        errors.append(f"variants.default {default!r} is not a tag")
+    for tag, params in tags.items():
+        missing = [k for k in VARIANT_KEYS if k not in params]
+        if missing:
+            errors.append(f"variants.{tag}: missing {missing}")
+            continue
+        lanes = params["NUM_LANES"]
+        if lanes not in NUM_LANES_LEGAL:
+            errors.append(f"variants.{tag}: NUM_LANES={lanes} not in {sorted(NUM_LANES_LEGAL)}")
+        nvl = params["NUM_VL"]
+        if nvl < 1 or nvl > 15:
+            errors.append(f"variants.{tag}: NUM_VL={nvl} does not fit PARAM_VARIANT[3:0]")
+        scr = params["SCR_PLACEHOLDER"]
+        if scr not in (0, 1):
+            errors.append(f"variants.{tag}: SCR_PLACEHOLDER={scr} must be 0 or 1")
+        extra = [k for k in params if k not in VARIANT_KEYS]
+        if extra:
+            errors.append(f"variants.{tag}: unknown keys {extra}")
+
+    phy_has_lanes = any(
+        r.get("name") == "PARAM_PHY" and f.get("name") in ("NUM_LANES_TX", "NUM_LANES_RX")
+        for r, f in iter_fields(data)
+    )
+    for reg, field in iter_fields(data):
+        if reset_key_of(field) is None:
+            continue
+        for tag, params in tags.items():
+            try:
+                rst = resolve_reset(field, params)
+            except RegmapError as exc:
+                errors.append(f"{reg['name']}.{field['name']}/{tag}: {exc}")
+                continue
+            width = field_width(field)
+            mask = (1 << width) - 1
+            if rst is not None and rst != (rst & mask):
+                errors.append(
+                    f"{reg['name']}.{field['name']}/{tag}: reset {rst} does not fit width {width}"
+                )
+        if (
+            reg.get("name") == "PARAM_VARIANT"
+            and field.get("name") == "NUM_LANES"
+            and phy_has_lanes
+        ):
+            errors.append(
+                "PARAM_VARIANT.NUM_LANES duplicates PARAM_PHY.NUM_LANES_*; reuse the existing field"
+            )
+    return errors
+
+
 def validate_regmap(data: dict[str, Any]) -> list[str]:
-    return validate_schema_lite(data) + validate_semantics(data)
+    return validate_schema_lite(data) + validate_semantics(data) + validate_variants(data)
 
 
 def assert_valid(data: dict[str, Any]) -> None:

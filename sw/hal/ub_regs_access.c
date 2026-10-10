@@ -91,6 +91,11 @@ uint32_t ub_param_init_vl_read(const ub_csr_bus_t *bus)
     return ub_reg_read(bus, (uint16_t)UB_REG_PARAM_INIT_VL);
 }
 
+uint32_t ub_param_variant_read(const ub_csr_bus_t *bus)
+{
+    return ub_reg_read(bus, (uint16_t)UB_REG_PARAM_VARIANT);
+}
+
 uint32_t ub_cnt_fec_uncorr_read(const ub_csr_bus_t *bus)
 {
     return ub_reg_read(bus, (uint16_t)UB_REG_CNT_FEC_UNCORR);

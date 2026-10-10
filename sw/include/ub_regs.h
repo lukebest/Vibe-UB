@@ -153,11 +153,9 @@ extern "C" {
 #define UB_PARAM_PHY_NUM_LANES_TX_SHIFT  6u
 #define UB_PARAM_PHY_NUM_LANES_TX_WIDTH  4u
 #define UB_PARAM_PHY_NUM_LANES_TX_MASK   0x000003c0u
-#define UB_PARAM_PHY_NUM_LANES_TX_RESET  0x1u
 #define UB_PARAM_PHY_NUM_LANES_RX_SHIFT  10u
 #define UB_PARAM_PHY_NUM_LANES_RX_WIDTH  4u
 #define UB_PARAM_PHY_NUM_LANES_RX_MASK   0x00003c00u
-#define UB_PARAM_PHY_NUM_LANES_RX_RESET  0x1u
 #define UB_PARAM_PHY_PMA_W_SHIFT  14u
 #define UB_PARAM_PHY_PMA_W_WIDTH  8u
 #define UB_PARAM_PHY_PMA_W_MASK   0x003fc000u
@@ -189,7 +187,6 @@ extern "C" {
 #define UB_PARAM_DLL_NUM_VL_SHIFT  0u
 #define UB_PARAM_DLL_NUM_VL_WIDTH  5u
 #define UB_PARAM_DLL_NUM_VL_MASK   0x0000001fu
-#define UB_PARAM_DLL_NUM_VL_RESET  0x2u
 #define UB_PARAM_DLL_FLOW_CTRL_SIZE_SHIFT  5u
 #define UB_PARAM_DLL_FLOW_CTRL_SIZE_WIDTH  8u
 #define UB_PARAM_DLL_FLOW_CTRL_SIZE_MASK   0x00001fe0u
@@ -254,6 +251,18 @@ extern "C" {
 #define UB_PARAM_INIT_VL_RSVD_WIDTH  16u
 #define UB_PARAM_INIT_VL_RSVD_MASK   0xffff0000u
 #define UB_PARAM_INIT_VL_RSVD_RESET  0x0u
+
+#define UB_REG_PARAM_VARIANT  0x011cu
+#define UB_PARAM_VARIANT_NUM_VL_SHIFT  0u
+#define UB_PARAM_VARIANT_NUM_VL_WIDTH  4u
+#define UB_PARAM_VARIANT_NUM_VL_MASK   0x0000000fu
+#define UB_PARAM_VARIANT_SCR_PLACEHOLDER_SHIFT  4u
+#define UB_PARAM_VARIANT_SCR_PLACEHOLDER_WIDTH  1u
+#define UB_PARAM_VARIANT_SCR_PLACEHOLDER_MASK   0x00000010u
+#define UB_PARAM_VARIANT_RSVD_SHIFT  5u
+#define UB_PARAM_VARIANT_RSVD_WIDTH  27u
+#define UB_PARAM_VARIANT_RSVD_MASK   0xffffffe0u
+#define UB_PARAM_VARIANT_RSVD_RESET  0x0u
 
 #define UB_REG_CNT_FEC_UNCORR  0x0200u
 #define UB_CNT_FEC_UNCORR_COUNT_SHIFT  0u
@@ -405,6 +414,34 @@ extern "C" {
 #define UB_APPD_PORT_ERR_WINDOW_SHIFT  0u
 #define UB_APPD_PORT_ERR_WINDOW_WIDTH  32u
 #define UB_APPD_PORT_ERR_WINDOW_MASK   0xffffffffu
+
+#define UB_CSR_DEFAULT_VARIANT  "product_x4_vl2"
+#define UB_CSR_VARIANT_PRODUCT_X4_VL2  0u
+#define UB_CSR_MODULE_PRODUCT_X4_VL2  "ub_csr_product_x4_vl2"
+#define UB_VARIANT_PRODUCT_X4_VL2_NUM_LANES  4u
+#define UB_VARIANT_PRODUCT_X4_VL2_NUM_VL  2u
+#define UB_VARIANT_PRODUCT_X4_VL2_SCR_PLACEHOLDER  1u
+#define UB_VARIANT_PRODUCT_X4_VL2_PARAM_VARIANT_RESET  0x12u
+#define UB_CSR_VARIANT_PRODUCT_X8_VL2  1u
+#define UB_CSR_MODULE_PRODUCT_X8_VL2  "ub_csr_product_x8_vl2"
+#define UB_VARIANT_PRODUCT_X8_VL2_NUM_LANES  8u
+#define UB_VARIANT_PRODUCT_X8_VL2_NUM_VL  2u
+#define UB_VARIANT_PRODUCT_X8_VL2_SCR_PLACEHOLDER  1u
+#define UB_VARIANT_PRODUCT_X8_VL2_PARAM_VARIANT_RESET  0x12u
+
+typedef struct {
+    const char *tag;
+    uint32_t num_lanes;
+    uint32_t num_vl;
+    uint32_t scr_placeholder;
+    uint32_t param_variant_reset;
+} ub_csr_variant_t;
+
+static const ub_csr_variant_t UB_CSR_VARIANTS[] = {
+    {"product_x4_vl2", 4u, 2u, 1u, 0x12u},
+    {"product_x8_vl2", 8u, 2u, 1u, 0x12u},
+};
+#define UB_CSR_VARIANT_COUNT  2u
 
 static inline uint32_t ub_fld_get(uint32_t word, uint32_t mask, unsigned shift)
 {
@@ -674,6 +711,16 @@ static inline uint32_t ub_param_init_feature_vl_enable_get(uint32_t word)
 static inline uint32_t ub_param_init_vl_vl_enable_get(uint32_t word)
 {
     return ub_fld_get(word, UB_PARAM_INIT_VL_VL_ENABLE_MASK, UB_PARAM_INIT_VL_VL_ENABLE_SHIFT);
+}
+
+static inline uint32_t ub_param_variant_num_vl_get(uint32_t word)
+{
+    return ub_fld_get(word, UB_PARAM_VARIANT_NUM_VL_MASK, UB_PARAM_VARIANT_NUM_VL_SHIFT);
+}
+
+static inline uint32_t ub_param_variant_scr_placeholder_get(uint32_t word)
+{
+    return ub_fld_get(word, UB_PARAM_VARIANT_SCR_PLACEHOLDER_MASK, UB_PARAM_VARIANT_SCR_PLACEHOLDER_SHIFT);
 }
 
 static inline uint32_t ub_cnt_fec_uncorr_count_get(uint32_t word)

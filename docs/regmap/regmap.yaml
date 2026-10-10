@@ -40,7 +40,7 @@ meta:
   column_notes:
     offset_hex: 相对 M1 CSR 窗口的字节偏移。
     access: "`RW` / `RO` / `W1C` / `WO`。禁止读清；禁止 RW 写清。粘滞=W1C；计数=RO + `CNT_CLR`。"
-    reset_hex: 字段复位。`NA` = 本仓库不抄规范复位，实现时对照 `spec_ref`。
+    reset_hex: 字段复位。`NA` = 本仓库不抄规范复位。`variant` = 由 `variants:` 表按 tag 填入，禁止手写。
     spec_ref: 规范节号，或 `proj`（项目本地）。
   test_window_rule: >-
     测试寄存器仅当 `tb_test_mode=1` 且 `TEST_HOOKS=1` 时功能生效。
@@ -69,6 +69,17 @@ global_rules:
     - "`PORT_RST` 写 1 自清，产生 16 拍 `core_clk` 脉冲；不复位 CSR 配置、计数、IRQ、TEST。"
     - TEST 窗在 `tb_test_mode=0` 或 `TEST_HOOKS=0` 时已映射：读 0、写忽略、`csr_err=0`。
     - irq = IRQ_EN & OR(IRQ_STATUS & ~IRQ_MASK)；MASK 位 1=屏蔽；复位全部屏蔽。
+
+variants:
+  default: product_x4_vl2
+  product_x4_vl2:
+    NUM_LANES: 4
+    NUM_VL: 2
+    SCR_PLACEHOLDER: 1
+  product_x8_vl2:
+    NUM_LANES: 8
+    NUM_VL: 2
+    SCR_PLACEHOLDER: 1
 
 irq:
   enable: {reg: CTRL, field: IRQ_EN}
@@ -144,8 +155,12 @@ prose:
     `irq`：高有效电平。`IRQ_EN=1` 且任一未屏蔽 `IRQ_STATUS` 位置位则为 1。
     复位后 `IRQ_MASK` 全 1、`IRQ_EN=0`，全部源屏蔽。
   param_intro: >-
-    只读，反映编译/协商后的生效值。复位列为 M1 已确认默认（船长确认），
-    协商完成后 STATUS 类镜像以 App. D 节为准。
+    只读，反映编译/协商后的生效值。`NUM_LANES_*` / `NUM_VL` / `SCR_PLACEHOLDER`
+    的复位来自 `variants:` 表（SPEC §2.2 一套参数一份 `ub_csr_<tag>` 网表），
+    禁止在字段上手写。协商完成后 STATUS 类镜像以 App. D 节为准。
+    `PARAM_VARIANT`（`0x011C`）是给单一驱动覆盖全部变体的能力字：
+    `NUM_LANES` 复用 `PARAM_PHY.NUM_LANES_TX` / `NUM_LANES_RX`（不重复）；
+    本寄存器含 `NUM_VL[3:0]` 与 `SCR_PLACEHOLDER[4]`（1=扰码叶子为 `_placeholder`，仅 lint/TB）。
   init_block: >-
     Init Block 其余字段（`DATA_ACK_GRAIN_SIZE`、`CTRL_ACK_GRAIN_SIZE`、
     `DATA_CREDIT_GRAIN_SIZE`、`CTRL_CREDIT_GRAIN_SIZE`、`PACKET_MIN_INTERVAL`）
@@ -453,8 +468,11 @@ registers:
         msb: 9
         lsb: 6
         access: RO
-        reset: "0x1"
-        description: 二进制 TX lane 数。合法 1/2/4/8，其余保留。RTL 永不产出保留值；TB assert。复位 1
+        reset_from: variant
+        reset_key: NUM_LANES
+        description: >-
+          二进制 TX lane 数。合法 1/2/4/8，其余保留。RTL 永不产出保留值；TB assert。
+          复位来自 `variants:`（本字段即能力字的 NUM_LANES，不在 PARAM_VARIANT 重复）
         spec_ref: proj; UB-PHY §3.1.1
         legal_values: [1, 2, 4, 8]
         reserved_values: [0, 3, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15]
@@ -464,8 +482,11 @@ registers:
         msb: 13
         lsb: 10
         access: RO
-        reset: "0x1"
-        description: 二进制 RX lane 数。合法 1/2/4/8，其余保留。RTL 永不产出保留值；TB assert。复位 1；默认等于 TX
+        reset_from: variant
+        reset_key: NUM_LANES
+        description: >-
+          二进制 RX lane 数。合法 1/2/4/8，其余保留。RTL 永不产出保留值；TB assert。
+          复位来自 `variants:`，默认等于 TX
         spec_ref: proj
         legal_values: [1, 2, 4, 8]
         reserved_values: [0, 3, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15]
@@ -527,8 +548,9 @@ registers:
         msb: 4
         lsb: 0
         access: RO
-        reset: "0x2"
-        description: 使能 VL 数。M1=2
+        reset_from: variant
+        reset_key: NUM_VL
+        description: 使能 VL 数。复位来自 `variants:`（与 PARAM_VARIANT.NUM_VL 同一 key）
         spec_ref: proj; UB-DL §4.5.1
       - name: FLOW_CTRL_SIZE
         msb: 12
@@ -644,6 +666,36 @@ registers:
       - name: RSVD
         msb: 31
         lsb: 16
+        access: RO
+        reset: "0x0"
+        description: 保留
+        spec_ref: proj
+
+  - name: PARAM_VARIANT
+    offset: 0x011C
+    window: PARAM
+    fields:
+      - name: NUM_VL
+        msb: 3
+        lsb: 0
+        access: RO
+        reset_from: variant
+        reset_key: NUM_VL
+        description: >-
+          VL 数（与 `PARAM_DLL.NUM_VL` 同一 `variants:` key）。
+          NUM_LANES 不在本寄存器：复用 `PARAM_PHY.NUM_LANES_TX` / `NUM_LANES_RX`
+        spec_ref: proj; SPEC §2.2
+      - name: SCR_PLACEHOLDER
+        msb: 4
+        lsb: 4
+        access: RO
+        reset_from: variant
+        reset_key: SCR_PLACEHOLDER
+        description: 1=扰码/解扰叶子为 `_placeholder` 变体（lint/TB only，SPEC §2.2）
+        spec_ref: proj; SPEC §2.2
+      - name: RSVD
+        msb: 31
+        lsb: 5
         access: RO
         reset: "0x0"
         description: 保留

@@ -38,6 +38,7 @@ uint32_t ub_param_retry_read(const ub_csr_bus_t *bus);
 uint32_t ub_param_crd_read(const ub_csr_bus_t *bus);
 uint32_t ub_param_init_feature_read(const ub_csr_bus_t *bus);
 uint32_t ub_param_init_vl_read(const ub_csr_bus_t *bus);
+uint32_t ub_param_variant_read(const ub_csr_bus_t *bus);
 uint32_t ub_cnt_fec_uncorr_read(const ub_csr_bus_t *bus);
 uint32_t ub_cnt_crc_fail_read(const ub_csr_bus_t *bus);
 uint32_t ub_cnt_retry_req_read(const ub_csr_bus_t *bus);

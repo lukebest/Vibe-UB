@@ -6,9 +6,15 @@ Assumptions: uvm-python (tpoikela/uvm-python / lukebest/uvm-python) UVMReg,
 UVMRegField.configure(parent, size, lsb_pos, access, volatile, reset,
 has_reset, is_rand, individually_accessible). MIX/NA App. D windows are
 address placeholders only (REGMAP §3).
+
+create_ub_regmodel(variant=) applies variants: table resets (SPEC §2.2).
 """
 
 from __future__ import annotations
+
+DEFAULT_VARIANT = 'product_x4_vl2'
+VARIANTS = {'product_x4_vl2': {'NUM_LANES': 4, 'NUM_VL': 2, 'SCR_PLACEHOLDER': 1}, 'product_x8_vl2': {'NUM_LANES': 8, 'NUM_VL': 2, 'SCR_PLACEHOLDER': 1}}
+CSR_MODULE = {'product_x4_vl2': 'ub_csr_product_x4_vl2', 'product_x8_vl2': 'ub_csr_product_x8_vl2'}
 
 try:
     from uvm.macros import uvm_object_utils
@@ -81,7 +87,7 @@ class ub_ctrl_reg(UVMReg):
         self.IRQ_EN = UVMRegField.type_id.create('IRQ_EN')
         self.RSVD = UVMRegField.type_id.create('RSVD')
 
-    def build(self):
+    def build(self, variant=None):
         self.PORT_RST.configure(self, 1, 0, 'WO', 1, 0, 1, 1, 0)
         self.LMSM_START.configure(self, 1, 1, 'RW', 0, 0, 1, 1, 0)
         self.IRQ_EN.configure(self, 1, 2, 'RW', 0, 0, 1, 1, 0)
@@ -103,7 +109,7 @@ class ub_status_reg(UVMReg):
         self.RETRY_ACK_ST = UVMRegField.type_id.create('RETRY_ACK_ST')
         self.RSVD = UVMRegField.type_id.create('RSVD')
 
-    def build(self):
+    def build(self, variant=None):
         self.LINK_UP.configure(self, 1, 0, 'RO', 1, 0, 1, 1, 0)
         self.LINK_READY.configure(self, 1, 1, 'RO', 1, 0, 1, 1, 0)
         self.DLL_STATUS_UP.configure(self, 1, 2, 'RO', 1, 0, 1, 1, 0)
@@ -129,7 +135,7 @@ class ub_irq_status_reg(UVMReg):
         self.CRD_UF = UVMRegField.type_id.create('CRD_UF')
         self.RSVD = UVMRegField.type_id.create('RSVD')
 
-    def build(self):
+    def build(self, variant=None):
         self.FEC_UNCORR.configure(self, 1, 0, 'W1C', 1, 0, 1, 1, 0)
         self.CRC_FAIL.configure(self, 1, 1, 'W1C', 1, 0, 1, 1, 0)
         self.RETRY_ERR.configure(self, 1, 2, 'W1C', 1, 0, 1, 1, 0)
@@ -149,7 +155,7 @@ class ub_irq_mask_reg(UVMReg):
         self.MASK = UVMRegField.type_id.create('MASK')
         self.RSVD = UVMRegField.type_id.create('RSVD')
 
-    def build(self):
+    def build(self, variant=None):
         self.MASK.configure(self, 7, 0, 'RW', 0, 127, 1, 1, 0)
         self.RSVD.configure(self, 25, 7, 'RO', 1, 0, 1, 1, 0)
 
@@ -162,7 +168,7 @@ class ub_port_cna_reg(UVMReg):
         super().__init__(name, 32, 0)
         self.CNA = UVMRegField.type_id.create('CNA')
 
-    def build(self):
+    def build(self, variant=None):
         self.CNA.configure(self, 32, 0, 'RW', 0, 0, 1, 1, 0)
 
 
@@ -180,11 +186,12 @@ class ub_param_phy_reg(UVMReg):
         self.ALLOW_ASYM = UVMRegField.type_id.create('ALLOW_ASYM')
         self.RSVD = UVMRegField.type_id.create('RSVD')
 
-    def build(self):
+    def build(self, variant=None):
+        params = VARIANTS[variant or DEFAULT_VARIANT]
         self.PHY_MODE.configure(self, 2, 0, 'RO', 1, 2, 1, 1, 0)
         self.DATA_RATE.configure(self, 4, 2, 'RO', 1, 0, 1, 1, 0)
-        self.NUM_LANES_TX.configure(self, 4, 6, 'RO', 1, 1, 1, 1, 0)
-        self.NUM_LANES_RX.configure(self, 4, 10, 'RO', 1, 1, 1, 1, 0)
+        self.NUM_LANES_TX.configure(self, 4, 6, 'RO', 1, int(params['NUM_LANES']), 1, 1, 0)
+        self.NUM_LANES_RX.configure(self, 4, 10, 'RO', 1, int(params['NUM_LANES']), 1, 1, 0)
         self.PMA_W.configure(self, 8, 14, 'RO', 1, 32, 1, 1, 0)
         self.ALLOW_ASYM.configure(self, 1, 22, 'RO', 1, 0, 1, 1, 0)
         self.RSVD.configure(self, 9, 23, 'RO', 1, 0, 1, 1, 0)
@@ -200,7 +207,7 @@ class ub_param_fec_reg(UVMReg):
         self.CODEC_NUM = UVMRegField.type_id.create('CODEC_NUM')
         self.RSVD = UVMRegField.type_id.create('RSVD')
 
-    def build(self):
+    def build(self, variant=None):
         self.FEC_MODE.configure(self, 3, 0, 'RO', 1, 2, 1, 1, 0)
         self.CODEC_NUM.configure(self, 2, 3, 'RO', 1, 1, 1, 1, 0)
         self.RSVD.configure(self, 27, 5, 'RO', 1, 0, 1, 1, 0)
@@ -218,8 +225,9 @@ class ub_param_dll_reg(UVMReg):
         self.CREDIT_EXCL = UVMRegField.type_id.create('CREDIT_EXCL')
         self.RSVD = UVMRegField.type_id.create('RSVD')
 
-    def build(self):
-        self.NUM_VL.configure(self, 5, 0, 'RO', 1, 2, 1, 1, 0)
+    def build(self, variant=None):
+        params = VARIANTS[variant or DEFAULT_VARIANT]
+        self.NUM_VL.configure(self, 5, 0, 'RO', 1, int(params['NUM_VL']), 1, 1, 0)
         self.FLOW_CTRL_SIZE.configure(self, 8, 5, 'RO', 1, 1, 1, 1, 0)
         self.ACK_GRAIN.configure(self, 8, 13, 'RO', 1, 32, 1, 1, 0)
         self.CREDIT_EXCL.configure(self, 1, 21, 'RO', 1, 1, 1, 1, 0)
@@ -236,7 +244,7 @@ class ub_param_retry_reg(UVMReg):
         self.NUM_RETRY_TH = UVMRegField.type_id.create('NUM_RETRY_TH')
         self.NUM_PHY_REINIT_TH = UVMRegField.type_id.create('NUM_PHY_REINIT_TH')
 
-    def build(self):
+    def build(self, variant=None):
         self.RETRY_BUF_DEPTH.configure(self, 16, 0, 'RO', 1, 256, 1, 1, 0)
         self.NUM_RETRY_TH.configure(self, 8, 16, 'RO', 1, 15, 1, 1, 0)
         self.NUM_PHY_REINIT_TH.configure(self, 8, 24, 'RO', 1, 4, 1, 1, 0)
@@ -251,7 +259,7 @@ class ub_param_crd_reg(UVMReg):
         self.INIT_CRD = UVMRegField.type_id.create('INIT_CRD')
         self.CRD_BP_TH = UVMRegField.type_id.create('CRD_BP_TH')
 
-    def build(self):
+    def build(self, variant=None):
         self.INIT_CRD.configure(self, 16, 0, 'RO', 1, 640, 1, 1, 0)
         self.CRD_BP_TH.configure(self, 16, 16, 'RO', 1, 1024, 1, 1, 0)
 
@@ -266,7 +274,7 @@ class ub_param_init_feature_reg(UVMReg):
         self.RXBUF_VL_SHARE = UVMRegField.type_id.create('RXBUF_VL_SHARE')
         self.VL_ENABLE = UVMRegField.type_id.create('VL_ENABLE')
 
-    def build(self):
+    def build(self, variant=None):
         self.FEATURE_ID.configure(self, 16, 0, 'RO', 1, 1, 1, 1, 0)
         self.RXBUF_VL_SHARE.configure(self, 1, 16, 'RO', 1, 0, 1, 1, 0)
         self.VL_ENABLE.configure(self, 15, 17, 'RO', 1, 3, 1, 1, 0)
@@ -281,7 +289,7 @@ class ub_param_init_vl_reg(UVMReg):
         self.VL_ENABLE = UVMRegField.type_id.create('VL_ENABLE')
         self.RSVD = UVMRegField.type_id.create('RSVD')
 
-    def build(self):
+    def build(self, variant=None):
         self.VL_ENABLE.configure(self, 16, 0, 'RO', 1, 3, 1, 1, 0)
         self.RSVD.configure(self, 16, 16, 'RO', 1, 0, 1, 1, 0)
 
@@ -289,12 +297,29 @@ class ub_param_init_vl_reg(UVMReg):
 ub_param_init_vl_reg = uvm_object_utils(ub_param_init_vl_reg)
 
 
+class ub_param_variant_reg(UVMReg):
+    def __init__(self, name="PARAM_VARIANT"):
+        super().__init__(name, 32, 0)
+        self.NUM_VL = UVMRegField.type_id.create('NUM_VL')
+        self.SCR_PLACEHOLDER = UVMRegField.type_id.create('SCR_PLACEHOLDER')
+        self.RSVD = UVMRegField.type_id.create('RSVD')
+
+    def build(self, variant=None):
+        params = VARIANTS[variant or DEFAULT_VARIANT]
+        self.NUM_VL.configure(self, 4, 0, 'RO', 1, int(params['NUM_VL']), 1, 1, 0)
+        self.SCR_PLACEHOLDER.configure(self, 1, 4, 'RO', 1, int(params['SCR_PLACEHOLDER']), 1, 1, 0)
+        self.RSVD.configure(self, 27, 5, 'RO', 1, 0, 1, 1, 0)
+
+
+ub_param_variant_reg = uvm_object_utils(ub_param_variant_reg)
+
+
 class ub_cnt_fec_uncorr_reg(UVMReg):
     def __init__(self, name="CNT_FEC_UNCORR"):
         super().__init__(name, 32, 0)
         self.COUNT = UVMRegField.type_id.create('COUNT')
 
-    def build(self):
+    def build(self, variant=None):
         self.COUNT.configure(self, 32, 0, 'RO', 1, 0, 1, 1, 0)
 
 
@@ -306,7 +331,7 @@ class ub_cnt_crc_fail_reg(UVMReg):
         super().__init__(name, 32, 0)
         self.COUNT = UVMRegField.type_id.create('COUNT')
 
-    def build(self):
+    def build(self, variant=None):
         self.COUNT.configure(self, 32, 0, 'RO', 1, 0, 1, 1, 0)
 
 
@@ -318,7 +343,7 @@ class ub_cnt_retry_req_reg(UVMReg):
         super().__init__(name, 32, 0)
         self.COUNT = UVMRegField.type_id.create('COUNT')
 
-    def build(self):
+    def build(self, variant=None):
         self.COUNT.configure(self, 32, 0, 'RO', 1, 0, 1, 1, 0)
 
 
@@ -330,7 +355,7 @@ class ub_cnt_retry_to_reg(UVMReg):
         super().__init__(name, 32, 0)
         self.COUNT = UVMRegField.type_id.create('COUNT')
 
-    def build(self):
+    def build(self, variant=None):
         self.COUNT.configure(self, 32, 0, 'RO', 1, 0, 1, 1, 0)
 
 
@@ -342,7 +367,7 @@ class ub_cnt_crd_of_reg(UVMReg):
         super().__init__(name, 32, 0)
         self.COUNT = UVMRegField.type_id.create('COUNT')
 
-    def build(self):
+    def build(self, variant=None):
         self.COUNT.configure(self, 32, 0, 'RO', 1, 0, 1, 1, 0)
 
 
@@ -354,7 +379,7 @@ class ub_cnt_crd_to_reg(UVMReg):
         super().__init__(name, 32, 0)
         self.COUNT = UVMRegField.type_id.create('COUNT')
 
-    def build(self):
+    def build(self, variant=None):
         self.COUNT.configure(self, 32, 0, 'RO', 1, 0, 1, 1, 0)
 
 
@@ -366,7 +391,7 @@ class ub_cnt_train_to_reg(UVMReg):
         super().__init__(name, 32, 0)
         self.COUNT = UVMRegField.type_id.create('COUNT')
 
-    def build(self):
+    def build(self, variant=None):
         self.COUNT.configure(self, 32, 0, 'RO', 1, 0, 1, 1, 0)
 
 
@@ -378,7 +403,7 @@ class ub_cnt_bad_vl_reg(UVMReg):
         super().__init__(name, 32, 0)
         self.COUNT = UVMRegField.type_id.create('COUNT')
 
-    def build(self):
+    def build(self, variant=None):
         self.COUNT.configure(self, 32, 0, 'RO', 1, 0, 1, 1, 0)
 
 
@@ -390,7 +415,7 @@ class ub_cnt_crd_uf_reg(UVMReg):
         super().__init__(name, 32, 0)
         self.COUNT = UVMRegField.type_id.create('COUNT')
 
-    def build(self):
+    def build(self, variant=None):
         self.COUNT.configure(self, 32, 0, 'RO', 1, 0, 1, 1, 0)
 
 
@@ -411,7 +436,7 @@ class ub_cnt_clr_reg(UVMReg):
         self.CRD_UF = UVMRegField.type_id.create('CRD_UF')
         self.RSVD = UVMRegField.type_id.create('RSVD')
 
-    def build(self):
+    def build(self, variant=None):
         self.FEC_UNCORR.configure(self, 1, 0, 'WO', 1, 0, 1, 1, 0)
         self.CRC_FAIL.configure(self, 1, 1, 'WO', 1, 0, 1, 1, 0)
         self.RETRY_REQ.configure(self, 1, 2, 'WO', 1, 0, 1, 1, 0)
@@ -433,7 +458,7 @@ class ub_lmsm_tmr_scale_reg(UVMReg):
         self.SCALE = UVMRegField.type_id.create('SCALE')
         self.RSVD = UVMRegField.type_id.create('RSVD')
 
-    def build(self):
+    def build(self, variant=None):
         self.SCALE.configure(self, 8, 0, 'RW', 0, 0, 1, 1, 0)
         self.RSVD.configure(self, 24, 8, 'RO', 1, 0, 1, 1, 0)
 
@@ -447,7 +472,7 @@ class ub_crd_to_dis_reg(UVMReg):
         self.DIS = UVMRegField.type_id.create('DIS')
         self.RSVD = UVMRegField.type_id.create('RSVD')
 
-    def build(self):
+    def build(self, variant=None):
         self.DIS.configure(self, 1, 0, 'RW', 0, 0, 1, 1, 0)
         self.RSVD.configure(self, 31, 1, 'RO', 1, 0, 1, 1, 0)
 
@@ -461,7 +486,7 @@ class ub_pcs_tx_test_reg(UVMReg):
         self.AM_IVL_SCALE = UVMRegField.type_id.create('AM_IVL_SCALE')
         self.RSVD = UVMRegField.type_id.create('RSVD')
 
-    def build(self):
+    def build(self, variant=None):
         self.AM_IVL_SCALE.configure(self, 8, 0, 'RW', 0, 0, 1, 1, 0)
         self.RSVD.configure(self, 24, 8, 'RO', 1, 0, 1, 1, 0)
 
@@ -474,7 +499,7 @@ class ub_appd_port_basic_reg(UVMReg):
         super().__init__(name, 32, 0)
         self.WINDOW = UVMRegField.type_id.create('WINDOW')
 
-    def build(self):
+    def build(self, variant=None):
         self.WINDOW.configure(self, 32, 0, 'RW', 0, 0, 0, 1, 0)
         # WINDOW placeholder; expand from App. D.5、D.5.1–D.5.6
 
@@ -487,7 +512,7 @@ class ub_appd_link_cap_reg(UVMReg):
         super().__init__(name, 32, 0)
         self.WINDOW = UVMRegField.type_id.create('WINDOW')
 
-    def build(self):
+    def build(self, variant=None):
         self.WINDOW.configure(self, 32, 0, 'RW', 0, 0, 0, 1, 0)
         # WINDOW placeholder; expand from App. D.6.2、D.6.2.1–D.6.2.3
 
@@ -500,7 +525,7 @@ class ub_appd_link_log_reg(UVMReg):
         super().__init__(name, 32, 0)
         self.WINDOW = UVMRegField.type_id.create('WINDOW')
 
-    def build(self):
+    def build(self, variant=None):
         self.WINDOW.configure(self, 32, 0, 'RW', 0, 0, 0, 1, 0)
         # WINDOW placeholder; expand from App. D.6.3
 
@@ -513,7 +538,7 @@ class ub_appd_lmsm_st_reg(UVMReg):
         super().__init__(name, 32, 0)
         self.WINDOW = UVMRegField.type_id.create('WINDOW')
 
-    def build(self):
+    def build(self, variant=None):
         self.WINDOW.configure(self, 32, 0, 'RW', 0, 0, 0, 1, 0)
         # WINDOW placeholder; expand from App. D.6.21
 
@@ -526,7 +551,7 @@ class ub_appd_port_err_reg(UVMReg):
         super().__init__(name, 32, 0)
         self.WINDOW = UVMRegField.type_id.create('WINDOW')
 
-    def build(self):
+    def build(self, variant=None):
         self.WINDOW.configure(self, 32, 0, 'RW', 0, 0, 0, 1, 0)
         # WINDOW placeholder; expand from App. D.6.22
 
@@ -549,6 +574,7 @@ class ub_reg_block(UVMRegBlock):
         self.param_crd = ub_param_crd_reg.type_id.create('PARAM_CRD') if HAVE_UVM else ub_param_crd_reg('PARAM_CRD')
         self.param_init_feature = ub_param_init_feature_reg.type_id.create('PARAM_INIT_FEATURE') if HAVE_UVM else ub_param_init_feature_reg('PARAM_INIT_FEATURE')
         self.param_init_vl = ub_param_init_vl_reg.type_id.create('PARAM_INIT_VL') if HAVE_UVM else ub_param_init_vl_reg('PARAM_INIT_VL')
+        self.param_variant = ub_param_variant_reg.type_id.create('PARAM_VARIANT') if HAVE_UVM else ub_param_variant_reg('PARAM_VARIANT')
         self.cnt_fec_uncorr = ub_cnt_fec_uncorr_reg.type_id.create('CNT_FEC_UNCORR') if HAVE_UVM else ub_cnt_fec_uncorr_reg('CNT_FEC_UNCORR')
         self.cnt_crc_fail = ub_cnt_crc_fail_reg.type_id.create('CNT_CRC_FAIL') if HAVE_UVM else ub_cnt_crc_fail_reg('CNT_CRC_FAIL')
         self.cnt_retry_req = ub_cnt_retry_req_reg.type_id.create('CNT_RETRY_REQ') if HAVE_UVM else ub_cnt_retry_req_reg('CNT_RETRY_REQ')
@@ -568,97 +594,100 @@ class ub_reg_block(UVMRegBlock):
         self.appd_lmsm_st = ub_appd_lmsm_st_reg.type_id.create('APPD_LMSM_ST') if HAVE_UVM else ub_appd_lmsm_st_reg('APPD_LMSM_ST')
         self.appd_port_err = ub_appd_port_err_reg.type_id.create('APPD_PORT_ERR') if HAVE_UVM else ub_appd_port_err_reg('APPD_PORT_ERR')
 
-    def build(self):
+    def build(self, variant=None):
         self.default_map = self.create_map("default_map", 0, 4, "LITTLE_ENDIAN")
         self.ctrl.configure(self) if HAVE_UVM else None
-        self.ctrl.build()
+        self.ctrl.build(variant=variant)
         self.default_map.add_reg(self.ctrl, 0x0000, 'RW')
         self.status.configure(self) if HAVE_UVM else None
-        self.status.build()
+        self.status.build(variant=variant)
         self.default_map.add_reg(self.status, 0x0004, 'RO')
         self.irq_status.configure(self) if HAVE_UVM else None
-        self.irq_status.build()
+        self.irq_status.build(variant=variant)
         self.default_map.add_reg(self.irq_status, 0x0008, 'RW')
         self.irq_mask.configure(self) if HAVE_UVM else None
-        self.irq_mask.build()
+        self.irq_mask.build(variant=variant)
         self.default_map.add_reg(self.irq_mask, 0x000c, 'RW')
         self.port_cna.configure(self) if HAVE_UVM else None
-        self.port_cna.build()
+        self.port_cna.build(variant=variant)
         self.default_map.add_reg(self.port_cna, 0x0010, 'RW')
         self.param_phy.configure(self) if HAVE_UVM else None
-        self.param_phy.build()
+        self.param_phy.build(variant=variant)
         self.default_map.add_reg(self.param_phy, 0x0100, 'RO')
         self.param_fec.configure(self) if HAVE_UVM else None
-        self.param_fec.build()
+        self.param_fec.build(variant=variant)
         self.default_map.add_reg(self.param_fec, 0x0104, 'RO')
         self.param_dll.configure(self) if HAVE_UVM else None
-        self.param_dll.build()
+        self.param_dll.build(variant=variant)
         self.default_map.add_reg(self.param_dll, 0x0108, 'RO')
         self.param_retry.configure(self) if HAVE_UVM else None
-        self.param_retry.build()
+        self.param_retry.build(variant=variant)
         self.default_map.add_reg(self.param_retry, 0x010c, 'RO')
         self.param_crd.configure(self) if HAVE_UVM else None
-        self.param_crd.build()
+        self.param_crd.build(variant=variant)
         self.default_map.add_reg(self.param_crd, 0x0110, 'RO')
         self.param_init_feature.configure(self) if HAVE_UVM else None
-        self.param_init_feature.build()
+        self.param_init_feature.build(variant=variant)
         self.default_map.add_reg(self.param_init_feature, 0x0114, 'RO')
         self.param_init_vl.configure(self) if HAVE_UVM else None
-        self.param_init_vl.build()
+        self.param_init_vl.build(variant=variant)
         self.default_map.add_reg(self.param_init_vl, 0x0118, 'RO')
+        self.param_variant.configure(self) if HAVE_UVM else None
+        self.param_variant.build(variant=variant)
+        self.default_map.add_reg(self.param_variant, 0x011c, 'RO')
         self.cnt_fec_uncorr.configure(self) if HAVE_UVM else None
-        self.cnt_fec_uncorr.build()
+        self.cnt_fec_uncorr.build(variant=variant)
         self.default_map.add_reg(self.cnt_fec_uncorr, 0x0200, 'RO')
         self.cnt_crc_fail.configure(self) if HAVE_UVM else None
-        self.cnt_crc_fail.build()
+        self.cnt_crc_fail.build(variant=variant)
         self.default_map.add_reg(self.cnt_crc_fail, 0x0204, 'RO')
         self.cnt_retry_req.configure(self) if HAVE_UVM else None
-        self.cnt_retry_req.build()
+        self.cnt_retry_req.build(variant=variant)
         self.default_map.add_reg(self.cnt_retry_req, 0x0208, 'RO')
         self.cnt_retry_to.configure(self) if HAVE_UVM else None
-        self.cnt_retry_to.build()
+        self.cnt_retry_to.build(variant=variant)
         self.default_map.add_reg(self.cnt_retry_to, 0x020c, 'RO')
         self.cnt_crd_of.configure(self) if HAVE_UVM else None
-        self.cnt_crd_of.build()
+        self.cnt_crd_of.build(variant=variant)
         self.default_map.add_reg(self.cnt_crd_of, 0x0210, 'RO')
         self.cnt_crd_to.configure(self) if HAVE_UVM else None
-        self.cnt_crd_to.build()
+        self.cnt_crd_to.build(variant=variant)
         self.default_map.add_reg(self.cnt_crd_to, 0x0214, 'RO')
         self.cnt_train_to.configure(self) if HAVE_UVM else None
-        self.cnt_train_to.build()
+        self.cnt_train_to.build(variant=variant)
         self.default_map.add_reg(self.cnt_train_to, 0x0218, 'RO')
         self.cnt_bad_vl.configure(self) if HAVE_UVM else None
-        self.cnt_bad_vl.build()
+        self.cnt_bad_vl.build(variant=variant)
         self.default_map.add_reg(self.cnt_bad_vl, 0x021c, 'RO')
         self.cnt_crd_uf.configure(self) if HAVE_UVM else None
-        self.cnt_crd_uf.build()
+        self.cnt_crd_uf.build(variant=variant)
         self.default_map.add_reg(self.cnt_crd_uf, 0x0220, 'RO')
         self.cnt_clr.configure(self) if HAVE_UVM else None
-        self.cnt_clr.build()
+        self.cnt_clr.build(variant=variant)
         self.default_map.add_reg(self.cnt_clr, 0x0224, 'RW')
         self.lmsm_tmr_scale.configure(self) if HAVE_UVM else None
-        self.lmsm_tmr_scale.build()
+        self.lmsm_tmr_scale.build(variant=variant)
         self.default_map.add_reg(self.lmsm_tmr_scale, 0x0300, 'RW')
         self.crd_to_dis.configure(self) if HAVE_UVM else None
-        self.crd_to_dis.build()
+        self.crd_to_dis.build(variant=variant)
         self.default_map.add_reg(self.crd_to_dis, 0x0304, 'RW')
         self.pcs_tx_test.configure(self) if HAVE_UVM else None
-        self.pcs_tx_test.build()
+        self.pcs_tx_test.build(variant=variant)
         self.default_map.add_reg(self.pcs_tx_test, 0x0308, 'RW')
         self.appd_port_basic.configure(self) if HAVE_UVM else None
-        self.appd_port_basic.build()
+        self.appd_port_basic.build(variant=variant)
         self.default_map.add_reg(self.appd_port_basic, 0x1000, 'RW')
         self.appd_link_cap.configure(self) if HAVE_UVM else None
-        self.appd_link_cap.build()
+        self.appd_link_cap.build(variant=variant)
         self.default_map.add_reg(self.appd_link_cap, 0x1100, 'RW')
         self.appd_link_log.configure(self) if HAVE_UVM else None
-        self.appd_link_log.build()
+        self.appd_link_log.build(variant=variant)
         self.default_map.add_reg(self.appd_link_log, 0x1200, 'RW')
         self.appd_lmsm_st.configure(self) if HAVE_UVM else None
-        self.appd_lmsm_st.build()
+        self.appd_lmsm_st.build(variant=variant)
         self.default_map.add_reg(self.appd_lmsm_st, 0x1e00, 'RW')
         self.appd_port_err.configure(self) if HAVE_UVM else None
-        self.appd_port_err.build()
+        self.appd_port_err.build(variant=variant)
         self.default_map.add_reg(self.appd_port_err, 0x1f00, 'RW')
         self.lock_model()
 
@@ -666,13 +695,17 @@ class ub_reg_block(UVMRegBlock):
 ub_reg_block = uvm_object_utils(ub_reg_block)
 
 
-def create_ub_regmodel(name: str = "ub_reg_block"):
+def create_ub_regmodel(name: str = "ub_reg_block", variant: str | None = None):
+    tag = variant or DEFAULT_VARIANT
+    if tag not in VARIANTS:
+        raise KeyError(f"unknown CSR variant {tag!r}")
     model = ub_reg_block(name) if not HAVE_UVM else ub_reg_block.type_id.create(name)
     if HAVE_UVM:
         # type_id.create path still needs build()
         pass
     if not hasattr(model, 'default_map') or model.default_map is None:
-        model.build()
+        model.build(variant=tag)
     elif HAVE_UVM:
-        model.build()
+        model.build(variant=tag)
+    model.variant = tag
     return model

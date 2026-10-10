@@ -20,11 +20,19 @@ jobs:
         run: pytest -q scripts/tests
       - name: Check generated outputs
         run: python3 scripts/gen_regmap.py --check
-      - name: Elaborate CSR (TEST_HOOKS=0/1)
+      - name: Elaborate CSR (TEST_HOOKS=0/1, all variants)
         run: |
-          python3 -c "import runpy; ns=runpy.run_path('pycircuit/csr/ub_csr_regs.py');
-          s0=ns['elaborate'](0); s1=ns['elaborate'](1); print(s0); print(s1);
-          assert s0['elaborated'] and s1['elaborated']"
+          python3 -c "
+          import runpy
+          ns=runpy.run_path('pycircuit/csr/ub_csr_regs.py')
+          assert ns['VARIANTS'], 'variants table empty'
+          for tag in ns['VARIANTS']:
+              s0=ns['elaborate'](0, variant=tag)
+              s1=ns['elaborate'](1, variant=tag)
+              print(s0); print(s1)
+              assert s0['elaborated'] and s1['elaborated'], (tag, s0, s1)
+              assert ns['csr_module_name'](tag) in s0['modules']
+          "
       - name: Verilator lint CSR (pycc .v when backend present)
         run: |
           sudo apt-get update

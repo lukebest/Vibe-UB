@@ -20,12 +20,17 @@ from gen_csr import emit_ub_csr_regs  # noqa: E402
 from regmap_lib import (  # noqa: E402
     DEFAULT_YAML,
     assert_valid,
+    csr_module_name,
+    default_variant,
     field_mask,
     field_width,
     is_window_reg,
     load_regmap,
     parse_int,
     reset_int,
+    reset_key_of,
+    resolve_reset,
+    variant_tags,
 )
 
 BANNER = "GENERATED — edit docs/regmap/regmap.yaml"
@@ -41,6 +46,8 @@ def hex4(value: int) -> str:
 
 
 def reset_hex(field: dict[str, Any]) -> str:
+    if field.get("reset_from") == "variant":
+        return "variant"
     raw = field.get("reset")
     if raw == "NA" or raw is None:
         return "NA"
@@ -147,6 +154,21 @@ def emit_regmap_md(data: dict[str, Any]) -> str:
         if win["id"] == "PARAM" and prose.get("param_intro"):
             w(one_line(prose["param_intro"]))
             w("")
+            tags = variant_tags(data)
+            if tags:
+                w("SPEC §2.2 参数集（`ub_csr_<tag>`；`_placeholder` 扰码叶子仅 lint/TB）：")
+                w("")
+                w("| tag | module | NUM_LANES | NUM_VL | SCR_PLACEHOLDER | PARAM_VARIANT reset |")
+                w("| --- | --- | --- | --- | --- | --- |")
+                for tag, params in tags.items():
+                    word = (int(params["NUM_VL"]) & 0xF) | ((int(params["SCR_PLACEHOLDER"]) & 1) << 4)
+                    w(
+                        f"| `{tag}` | `{csr_module_name(tag)}` | {params['NUM_LANES']} | "
+                        f"{params['NUM_VL']} | {params['SCR_PLACEHOLDER']} | {word:#04x} |"
+                    )
+                w("")
+                w(f"默认 tag：`{default_variant(data)}`。")
+                w("")
         if win["id"] == "ERR" and prose.get("err_intro"):
             w(one_line(prose["err_intro"]))
             w("")
@@ -275,7 +297,9 @@ def emit_py_constants(data: dict[str, Any]) -> str:
             lines.append(f"{ident}_SHIFT = {lsb}")
             lines.append(f"{ident}_ACCESS = {field['access']!r}")
             rst = reset_int(field)
-            if rst is not None:
+            if field.get("reset_from") == "variant":
+                lines.append(f"{ident}_RESET = None  # reset_from: variant")
+            elif rst is not None:
                 lines.append(f"{ident}_RESET = {rst:#x}")
             else:
                 lines.append(f"{ident}_RESET = None  # NA; see {field['spec_ref']}")
@@ -295,6 +319,25 @@ def emit_py_constants(data: dict[str, Any]) -> str:
             if field.get("pulse_cycles"):
                 lines.append(f"{ident}_PULSE_CYCLES = {int(field['pulse_cycles'])}")
         lines.append("")
+
+    tags = variant_tags(data)
+    lines.append(f"DEFAULT_VARIANT = {default_variant(data)!r}")
+    lines.append("VARIANTS = {")
+    for tag, params in tags.items():
+        lines.append(f"    {tag!r}: {params!r},")
+    lines.append("}")
+    lines.append("CSR_MODULE = {")
+    for tag in tags:
+        lines.append(f"    {tag!r}: {csr_module_name(tag)!r},")
+    lines.append("}")
+    for tag, params in tags.items():
+        ident = tag.upper()
+        lines.append(f"VARIANT_{ident}_NUM_LANES = {params['NUM_LANES']}")
+        lines.append(f"VARIANT_{ident}_NUM_VL = {params['NUM_VL']}")
+        lines.append(f"VARIANT_{ident}_SCR_PLACEHOLDER = {params['SCR_PLACEHOLDER']}")
+        word = (int(params["NUM_VL"]) & 0xF) | ((int(params["SCR_PLACEHOLDER"]) & 1) << 4)
+        lines.append(f"VARIANT_{ident}_PARAM_VARIANT_RESET = {word:#x}")
+    lines.append("")
 
     lines.append("REGISTERS = (")
     for reg in data["registers"]:
@@ -361,12 +404,43 @@ def emit_c_header(data: dict[str, Any]) -> str:
             lines.append(f"#define {ident}_WIDTH  {width}u")
             lines.append(f"#define {ident}_MASK   {mask:#010x}u")
             rst = reset_int(field)
-            if rst is not None:
+            if rst is not None and field.get("reset_from") != "variant":
                 lines.append(f"#define {ident}_RESET  {rst:#x}u")
             for enum in field.get("enums") or []:
                 ename = str(enum["name"]).upper()
                 lines.append(f"#define {ident}_{ename}  {int(enum['value'])}u")
         lines.append("")
+    tags = variant_tags(data)
+    default = default_variant(data)
+    lines.append(f'#define UB_CSR_DEFAULT_VARIANT  "{default}"')
+    for i, (tag, params) in enumerate(tags.items()):
+        ident = tag.upper()
+        word = (int(params["NUM_VL"]) & 0xF) | ((int(params["SCR_PLACEHOLDER"]) & 1) << 4)
+        lines.append(f"#define UB_CSR_VARIANT_{ident}  {i}u")
+        lines.append(f'#define UB_CSR_MODULE_{ident}  "{csr_module_name(tag)}"')
+        lines.append(f"#define UB_VARIANT_{ident}_NUM_LANES  {params['NUM_LANES']}u")
+        lines.append(f"#define UB_VARIANT_{ident}_NUM_VL  {params['NUM_VL']}u")
+        lines.append(f"#define UB_VARIANT_{ident}_SCR_PLACEHOLDER  {params['SCR_PLACEHOLDER']}u")
+        lines.append(f"#define UB_VARIANT_{ident}_PARAM_VARIANT_RESET  {word:#x}u")
+    lines.append("")
+    lines.append("typedef struct {")
+    lines.append("    const char *tag;")
+    lines.append("    uint32_t num_lanes;")
+    lines.append("    uint32_t num_vl;")
+    lines.append("    uint32_t scr_placeholder;")
+    lines.append("    uint32_t param_variant_reset;")
+    lines.append("} ub_csr_variant_t;")
+    lines.append("")
+    lines.append("static const ub_csr_variant_t UB_CSR_VARIANTS[] = {")
+    for tag, params in tags.items():
+        word = (int(params["NUM_VL"]) & 0xF) | ((int(params["SCR_PLACEHOLDER"]) & 1) << 4)
+        lines.append(
+            f'    {{"{tag}", {params["NUM_LANES"]}u, {params["NUM_VL"]}u, '
+            f'{params["SCR_PLACEHOLDER"]}u, {word:#x}u}},'
+        )
+    lines.append("};")
+    lines.append(f"#define UB_CSR_VARIANT_COUNT  {len(tags)}u")
+    lines.append("")
     lines.extend(
         [
             "static inline uint32_t ub_fld_get(uint32_t word, uint32_t mask, unsigned shift)",
@@ -530,9 +604,15 @@ def emit_ral(data: dict[str, Any]) -> str:
         "UVMRegField.configure(parent, size, lsb_pos, access, volatile, reset,",
         "has_reset, is_rand, individually_accessible). MIX/NA App. D windows are",
         "address placeholders only (REGMAP §3).",
+        "",
+        "create_ub_regmodel(variant=) applies variants: table resets (SPEC §2.2).",
         '"""',
         "",
         "from __future__ import annotations",
+        "",
+        f"DEFAULT_VARIANT = {default_variant(data)!r}",
+        f"VARIANTS = {variant_tags(data)!r}",
+        f"CSR_MODULE = {{{', '.join(f'{t!r}: {csr_module_name(t)!r}' for t in variant_tags(data))}}}",
         "",
         "try:",
         "    from uvm.macros import uvm_object_utils",
@@ -611,17 +691,23 @@ def emit_ral(data: dict[str, Any]) -> str:
                 f"        self.{attr} = UVMRegField.type_id.create({fname!r})"
             )
         lines.append("")
-        lines.append("    def build(self):")
+        lines.append("    def build(self, variant=None):")
+        if any(reset_key_of(f) for f in reg["fields"]):
+            lines.append("        params = VARIANTS[variant or DEFAULT_VARIANT]")
         for field in reg["fields"]:
             fname = field["name"]
             attr = fname if fname != "WINDOW" else "WINDOW"
             width = field_width(field)
             lsb = int(field["lsb"])
             access = uvm_access(field["access"])
+            key = reset_key_of(field)
             rst = reset_int(field)
-            has_reset = 0 if rst is None else 1
-            rst_v = 0 if rst is None else rst
+            has_reset = 0 if (rst is None and key is None) else 1
             volatile = 1 if field["access"] in ("RO", "W1C", "WO") else 0
+            if key:
+                rst_v = f"int(params[{key!r}])"
+            else:
+                rst_v = "0" if rst is None else str(rst)
             lines.append(
                 f"        self.{attr}.configure(self, {width}, {lsb}, {access!r}, "
                 f"{volatile}, {rst_v}, {has_reset}, 1, 0)"
@@ -644,14 +730,14 @@ def emit_ral(data: dict[str, Any]) -> str:
         cls = f"ub_{attr}_reg"
         lines.append(f"        self.{attr} = {cls}.type_id.create({reg['name']!r}) if HAVE_UVM else {cls}({reg['name']!r})")
     lines.append("")
-    lines.append("    def build(self):")
+    lines.append("    def build(self, variant=None):")
     lines.append('        self.default_map = self.create_map("default_map", 0, 4, "LITTLE_ENDIAN")')
     for reg in data["registers"]:
         attr = py_ident(reg["name"])
         off = parse_int(reg["offset"]) or 0
         rights = "RO" if all(f["access"] == "RO" for f in reg["fields"]) else "RW"
         lines.append(f"        self.{attr}.configure(self) if HAVE_UVM else None")
-        lines.append(f"        self.{attr}.build()")
+        lines.append(f"        self.{attr}.build(variant=variant)")
         lines.append(f"        self.default_map.add_reg(self.{attr}, {off:#06x}, {rights!r})")
     lines.append("        self.lock_model()")
     lines.append("")
@@ -659,15 +745,19 @@ def emit_ral(data: dict[str, Any]) -> str:
     lines.append("ub_reg_block = uvm_object_utils(ub_reg_block)")
     lines.append("")
     lines.append("")
-    lines.append("def create_ub_regmodel(name: str = \"ub_reg_block\"):")
+    lines.append("def create_ub_regmodel(name: str = \"ub_reg_block\", variant: str | None = None):")
+    lines.append("    tag = variant or DEFAULT_VARIANT")
+    lines.append("    if tag not in VARIANTS:")
+    lines.append("        raise KeyError(f\"unknown CSR variant {tag!r}\")")
     lines.append("    model = ub_reg_block(name) if not HAVE_UVM else ub_reg_block.type_id.create(name)")
     lines.append("    if HAVE_UVM:")
     lines.append("        # type_id.create path still needs build()")
     lines.append("        pass")
     lines.append("    if not hasattr(model, 'default_map') or model.default_map is None:")
-    lines.append("        model.build()")
+    lines.append("        model.build(variant=tag)")
     lines.append("    elif HAVE_UVM:")
-    lines.append("        model.build()")
+    lines.append("        model.build(variant=tag)")
+    lines.append("    model.variant = tag")
     lines.append("    return model")
     lines.append("")
     return NL.join(lines)
@@ -676,9 +766,25 @@ def emit_ral(data: dict[str, Any]) -> str:
 def emit_csr_init() -> str:
     return (
         f'"""ub_csr package. {BANNER}"""\n'
-        "from .ub_csr_regs import PORT_RST_PULSE_CYCLES, elaborate, emit_verilog, generate\n"
+        "from .ub_csr_regs import (\n"
+        "    DEFAULT_VARIANT,\n"
+        "    PORT_RST_PULSE_CYCLES,\n"
+        "    VARIANTS,\n"
+        "    csr_module_name,\n"
+        "    elaborate,\n"
+        "    emit_verilog,\n"
+        "    generate,\n"
+        ")\n"
         "\n"
-        "__all__ = [\"PORT_RST_PULSE_CYCLES\", \"elaborate\", \"emit_verilog\", \"generate\"]\n"
+        "__all__ = [\n"
+        "    \"DEFAULT_VARIANT\",\n"
+        "    \"PORT_RST_PULSE_CYCLES\",\n"
+        "    \"VARIANTS\",\n"
+        "    \"csr_module_name\",\n"
+        "    \"elaborate\",\n"
+        "    \"emit_verilog\",\n"
+        "    \"generate\",\n"
+        "]\n"
     )
 
 

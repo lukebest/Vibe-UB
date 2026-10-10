@@ -16,7 +16,7 @@
 
 - `offset_hex`：相对 M1 CSR 窗口的字节偏移。
 - `access`：`RW` / `RO` / `W1C` / `WO`。禁止读清；禁止 RW 写清。粘滞=W1C；计数=RO + `CNT_CLR`。
-- `reset_hex`：字段复位。`NA` = 本仓库不抄规范复位，实现时对照 `spec_ref`。
+- `reset_hex`：字段复位。`NA` = 本仓库不抄规范复位。`variant` = 由 `variants:` 表按 tag 填入，禁止手写。
 - `spec_ref`：规范节号，或 `proj`（项目本地）。
 - 测试寄存器仅当 `tb_test_mode=1` 且 `TEST_HOOKS=1` 时功能生效。 `tb_test_mode=0` 或 PRODUCT：该窗读 0、写忽略、`csr_err=0`（已映射）。 见 SPEC §3.2.3、§11。
 
@@ -72,21 +72,30 @@
 
 ### 2.2 PARAM 读回（`0x0100`）
 
-只读，反映编译/协商后的生效值。复位列为 M1 已确认默认（船长确认）， 协商完成后 STATUS 类镜像以 App. D 节为准。
+只读，反映编译/协商后的生效值。`NUM_LANES_*` / `NUM_VL` / `SCR_PLACEHOLDER` 的复位来自 `variants:` 表（SPEC §2.2 一套参数一份 `ub_csr_<tag>` 网表）， 禁止在字段上手写。协商完成后 STATUS 类镜像以 App. D 节为准。 `PARAM_VARIANT`（`0x011C`）是给单一驱动覆盖全部变体的能力字： `NUM_LANES` 复用 `PARAM_PHY.NUM_LANES_TX` / `NUM_LANES_RX`（不重复）； 本寄存器含 `NUM_VL[3:0]` 与 `SCR_PLACEHOLDER[4]`（1=扰码叶子为 `_placeholder`，仅 lint/TB）。
+
+SPEC §2.2 参数集（`ub_csr_<tag>`；`_placeholder` 扰码叶子仅 lint/TB）：
+
+| tag | module | NUM_LANES | NUM_VL | SCR_PLACEHOLDER | PARAM_VARIANT reset |
+| --- | --- | --- | --- | --- | --- |
+| `product_x4_vl2` | `ub_csr_product_x4_vl2` | 4 | 2 | 1 | 0x12 |
+| `product_x8_vl2` | `ub_csr_product_x8_vl2` | 8 | 2 | 1 | 0x12 |
+
+默认 tag：`product_x4_vl2`。
 
 | offset_hex | reg_name | field_name | hi | lo | access | reset_hex | description | spec_ref |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 0x0100 | PARAM_PHY | PHY_MODE | 1 | 0 | RO | 0x2 | 1=Mode-1，2=Mode-2。M1=2 | proj; UB-PHY §3.1.2 |
 | 0x0100 | PARAM_PHY | DATA_RATE | 5 | 2 | RO | 0x0 | Data Rate 编号。M1=0（2.578125G NRZ） | proj; UB-PHY §3.1.2 |
-| 0x0100 | PARAM_PHY | NUM_LANES_TX | 9 | 6 | RO | 0x1 | 二进制 TX lane 数。合法 1/2/4/8，其余保留。RTL 永不产出保留值；TB assert。复位 1 | proj; UB-PHY §3.1.1 |
-| 0x0100 | PARAM_PHY | NUM_LANES_RX | 13 | 10 | RO | 0x1 | 二进制 RX lane 数。合法 1/2/4/8，其余保留。RTL 永不产出保留值；TB assert。复位 1；默认等于 TX | proj |
+| 0x0100 | PARAM_PHY | NUM_LANES_TX | 9 | 6 | RO | variant | 二进制 TX lane 数。合法 1/2/4/8，其余保留。RTL 永不产出保留值；TB assert。 复位来自 `variants:`（本字段即能力字的 NUM_LANES，不在 PARAM_VARIANT 重复） | proj; UB-PHY §3.1.1 |
+| 0x0100 | PARAM_PHY | NUM_LANES_RX | 13 | 10 | RO | variant | 二进制 RX lane 数。合法 1/2/4/8，其余保留。RTL 永不产出保留值；TB assert。 复位来自 `variants:`，默认等于 TX | proj |
 | 0x0100 | PARAM_PHY | PMA_W | 21 | 14 | RO | 0x20 | PMA–PCS 每 lane 位宽，M1=32 | proj |
 | 0x0100 | PARAM_PHY | ALLOW_ASYM | 22 | 22 | RO | 0x0 | 1=允许非对称。M1=0 | proj |
 | 0x0100 | PARAM_PHY | RSVD | 31 | 23 | RO | 0x0 | 保留 | proj |
 | 0x0104 | PARAM_FEC | FEC_MODE | 2 | 0 | RO | 0x2 | 与 LTB `fec_mode_ctrl` 同编码（§3.4.1.1）。复位 T=4 | proj; UB-PHY §3.2.2.1、§3.4.1.1 |
 | 0x0104 | PARAM_FEC | CODEC_NUM | 4 | 3 | RO | 0x1 | FEC 交织路数。默认建议 1，**待定** | proj; UB-PHY §3.2.2.3 |
 | 0x0104 | PARAM_FEC | RSVD | 31 | 5 | RO | 0x0 | 保留 | proj |
-| 0x0108 | PARAM_DLL | NUM_VL | 4 | 0 | RO | 0x2 | 使能 VL 数。M1=2 | proj; UB-DL §4.5.1 |
+| 0x0108 | PARAM_DLL | NUM_VL | 4 | 0 | RO | variant | 使能 VL 数。复位来自 `variants:`（与 PARAM_VARIANT.NUM_VL 同一 key） | proj; UB-DL §4.5.1 |
 | 0x0108 | PARAM_DLL | FLOW_CTRL_SIZE | 12 | 5 | RO | 0x1 | cell 对应 flit 数。M1=1 | proj; UB-DL §4.3.3.9 |
 | 0x0108 | PARAM_DLL | ACK_GRAIN | 20 | 13 | RO | 0x20 | credit/ACK 粒度（flit 或 cell，见协商）。M1=32 | proj; UB-DL §4.3.3.9、§4.6 |
 | 0x0108 | PARAM_DLL | CREDIT_EXCL | 21 | 21 | RO | 0x1 | 1=独占模式 | proj; UB-DL §4.6.1.2 |
@@ -101,6 +110,9 @@
 | 0x0114 | PARAM_INIT_FEATURE | VL_ENABLE | 31 | 17 | RO | 0x3 | bit0→VL0。M1 低 2 bit=1。宽度不足 16 VL 时高位置 0，完整 16 bit 见 0x0118 | UB-DL §4.3.3.9、§4.5 |
 | 0x0118 | PARAM_INIT_VL | VL_ENABLE | 15 | 0 | RO | 0x0003 | 16-bit VL 使能，M1=VL0+VL1 | UB-DL §4.3.3.9 |
 | 0x0118 | PARAM_INIT_VL | RSVD | 31 | 16 | RO | 0x0 | 保留 | proj |
+| 0x011C | PARAM_VARIANT | NUM_VL | 3 | 0 | RO | variant | VL 数（与 `PARAM_DLL.NUM_VL` 同一 `variants:` key）。 NUM_LANES 不在本寄存器：复用 `PARAM_PHY.NUM_LANES_TX` / `NUM_LANES_RX` | proj; SPEC §2.2 |
+| 0x011C | PARAM_VARIANT | SCR_PLACEHOLDER | 4 | 4 | RO | variant | 1=扰码/解扰叶子为 `_placeholder` 变体（lint/TB only，SPEC §2.2） | proj; SPEC §2.2 |
+| 0x011C | PARAM_VARIANT | RSVD | 31 | 5 | RO | 0x0 | 保留 | proj |
 
 Init Block 其余字段（`DATA_ACK_GRAIN_SIZE`、`CTRL_ACK_GRAIN_SIZE`、 `DATA_CREDIT_GRAIN_SIZE`、`CTRL_CREDIT_GRAIN_SIZE`、`PACKET_MIN_INTERVAL`） 的位打包 **不在本仓库展开**，实现按 UB-DL §4.3.3.9；协商后的只读镜像落在 App. D.6.2.3 窗口（§2.5）。
 

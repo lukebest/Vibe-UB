@@ -32,7 +32,7 @@ pytest scripts/tests
 | Path | Role |
 | --- | --- |
 | `docs/REGMAP.md` | Human table (header: `GENERATED — edit docs/regmap/regmap.yaml`) |
-| `pycircuit/csr/ub_csr_regs.py` | pyCircuit CSR leaf (`ub_csr`); SPEC §2.2 |
+| `pycircuit/csr/ub_csr_regs.py` | pyCircuit CSR leaf (`ub_csr_<tag>` per `variants:`); SPEC §2.2 |
 | `tb/ral/ub_regmodel.py` | uvm-python register model |
 | `sw/include/ub_regs.h` | Firmware address / mask / shift macros + inline field accessors |
 | `sw/hal/ub_regs_access.h` | HAL declarations |
@@ -46,27 +46,34 @@ Directory convention (PM): pyCircuit sources live in `pycircuit/<layer>/`.
 RAL lives at `tb/ral/ub_regmodel.py`. `gen/tb_ral/` is removed.
 
 Generator: `python3` + PyYAML only. The CSR leaf imports
-`from pycircuit import Circuit, compile, module, u` and builds `ub_csr` on the
-Circuit API. `elaborate(0)` / `elaborate(1)` call `pycircuit.compile()`.
-`emit_verilog(False/True)` writes the compile() MLIR and runs
+`from pycircuit import Circuit, compile, module, u` and builds one fixed
+`ub_csr_<tag>` netlist per `variants:` row (SPEC §2.2). `elaborate(0, variant=)` /
+`elaborate(1, variant=)` call `pycircuit.compile()`.
+`emit_verilog(False/True, variant=)` writes the compile() MLIR and runs
 `pycc <file.pyc> --emit=verilog --logic-depth=64 -o <out.v>` (LLVM 19). Verilog is not
 string-templated. GitHub CI has the frontend only; verilator lint runs when
-`pycc` is on `PATH`.
+`pycc` is on `PATH` (all tags). Reset fields marked `reset_from: variant` are
+filled from the table; they are not handwritten.
 
 ### Verilog emit (follow-up — PR #5 not on main)
 
 PR #5 is **not on main**. This PR does **not** hand-write or commit `rtl/csr/*.v`.
-When `scripts/emit_rtl.py` / `pycircuit/emit.py` land, register `ub_csr`:
+When `scripts/emit_rtl.py` / `pycircuit/emit.py` land, register each `variants:` tag:
 
 ```python
-from csr.ub_csr_regs import emit_verilog as emit_csr
-# PRODUCT → rtl/csr/ub_csr.v
-# HOOKS   → rtl/csr/hooks/ub_csr.v
-("csr", "ub_csr", emit_csr),  # plus a HOOKS emit of emit_verilog(True)
+from csr.ub_csr_regs import VARIANTS, emit_verilog as emit_csr
+# PRODUCT → rtl/csr/ub_csr_<tag>.v
+# HOOKS   → rtl/csr/hooks/ub_csr_<tag>.v
+for tag in VARIANTS:
+    ("csr", f"ub_csr_{tag}", lambda th=False, t=tag: emit_csr(th, variant=t))
 ```
 
 Until then: `python3 pycircuit/csr/ub_csr_regs.py` can write those paths locally
 for lint; do not commit the `.v`.
+
+`PARAM_VARIANT` (`0x011C`) is the RO capability word for a single driver:
+`NUM_VL[3:0]`, `SCR_PLACEHOLDER[4]`, `RSVD[31:5]`. Lane count is
+`PARAM_PHY.NUM_LANES_TX` / `NUM_LANES_RX` (not duplicated).
 
 ## YAML-driven CSR semantics
 

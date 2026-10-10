@@ -3,7 +3,7 @@
   "$id": "https://github.com/lukebest/Vibe-UB/docs/regmap/schema.json",
   "title": "Vibe-UB M1 register map",
   "type": "object",
-  "required": ["meta", "global_rules", "windows", "registers"],
+  "required": ["meta", "global_rules", "windows", "registers", "variants"],
   "additionalProperties": false,
   "properties": {
     "meta": {
@@ -65,6 +65,11 @@
     },
     "irq": {
       "type": "object",
+      "additionalProperties": true
+    },
+    "variants": {
+      "type": "object",
+      "description": "SPEC §2.2 parameter sets. Tag keys map to NUM_LANES / NUM_VL / SCR_PLACEHOLDER. Optional default: tag name. Drives reset_from: variant and ub_csr_<tag> module names.",
       "additionalProperties": true
     }
   },
@@ -175,13 +180,15 @@
     },
     "field": {
       "type": "object",
-      "required": ["name", "msb", "lsb", "access", "reset", "description", "spec_ref"],
+      "required": ["name", "msb", "lsb", "access", "description", "spec_ref"],
       "properties": {
         "name": { "type": "string" },
         "msb": { "type": "integer", "minimum": 0, "maximum": 31 },
         "lsb": { "type": "integer", "minimum": 0, "maximum": 31 },
         "access": { "enum": ["RW", "RO", "WO", "W1C", "MIX"] },
         "reset": { "$ref": "#/$defs/hex_or_na" },
+        "reset_from": { "enum": ["variant"] },
+        "reset_key": { "type": "string" },
         "description": { "type": "string" },
         "spec_ref": { "type": "string" },
         "self_clearing": { "type": "boolean" },

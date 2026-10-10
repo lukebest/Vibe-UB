@@ -12,12 +12,16 @@ if str(SCRIPT_DIR) not in sys.path:
 from regmap_lib import (  # noqa: E402
     DEFAULT_YAML,
     WORD_ALIGN,
+    csr_module_name,
+    default_variant,
     field_mask,
     field_width,
     load_regmap,
     parse_int,
     reset_int,
+    resolve_reset,
     validate_regmap,
+    variant_tags,
 )
 
 
@@ -137,10 +141,12 @@ def test_csr_uses_pycircuit_api_not_string_verilog():
 
     src = emit_ub_csr_regs(load_regmap())
     assert "from pycircuit import Circuit, compile, module, u" in src
-    assert "compile(fn, name=\"ub_csr\")" in src
+    assert 'compile(fn, name=f"ub_csr_{tag}")' in src
     assert "--emit=verilog" in src
     assert "def _csr_circuit(" in src
-    assert "@module(name=\"ub_csr\")" in src
+    assert '@module(name="ub_csr")' in src
+    assert "DEFAULT_VARIANT" in src
+    assert "VARIANTS" in src
     for banned in (
         "always @(posedge",
         "assign irq =",
@@ -160,43 +166,46 @@ def test_csr_compile_ports_and_hooks_split():
 
     path = SCRIPT_DIR.parent / "pycircuit" / "csr" / "ub_csr_regs.py"
     ns = runpy.run_path(str(path))
-    s0 = ns["elaborate"](0)
-    s1 = ns["elaborate"](1)
-    assert s0["elaborated"], s0.get("reason")
-    assert s1["elaborated"], s1.get("reason")
-    assert "ub_csr" in s0["modules"]
-    assert "tb_test_mode" not in s0["arg_names"]
-    assert "tb_test_mode" in s1["arg_names"]
-    for name in (
-        "port_rst_pulse",
-        "ev_fec_uncorr",
-        "inc_fec_uncorr",
-        "inc_crd_uf",
-        "csr_lmsm_start",
-        "csr_err",
-        "irq",
-        "csr_rvalid",
-    ):
-        ports = list(s0["arg_names"]) + list(s0["result_names"])
-        assert name in ports, name
-    if not shutil.which("pycc") and not ns["_find_pycc"]():
-        return
-    v0 = ns["emit_verilog"](False)
-    v1 = ns["emit_verilog"](True)
-    assert "module ub_csr" in v0
-    assert "tb_test_mode" not in v0
-    assert "tb_test_mode" in v1
-    for token in (
-        "port_rst_pulse",
-        "ev_fec_uncorr",
-        "inc_fec_uncorr",
-        "inc_crd_uf",
-        "csr_lmsm_start",
-        "csr_err",
-        "irq",
-    ):
-        assert token in v0, token
-    assert "`ifdef" not in v0 and "`ifdef" not in v1
+    for tag in ns["VARIANTS"]:
+        mod = ns["csr_module_name"](tag)
+        s0 = ns["elaborate"](0, variant=tag)
+        s1 = ns["elaborate"](1, variant=tag)
+        assert s0["elaborated"], s0.get("reason")
+        assert s1["elaborated"], s1.get("reason")
+        assert mod in s0["modules"], s0["modules"]
+        assert s0["variant"] == tag
+        assert "tb_test_mode" not in s0["arg_names"]
+        assert "tb_test_mode" in s1["arg_names"]
+        for name in (
+            "port_rst_pulse",
+            "ev_fec_uncorr",
+            "inc_fec_uncorr",
+            "inc_crd_uf",
+            "csr_lmsm_start",
+            "csr_err",
+            "irq",
+            "csr_rvalid",
+        ):
+            ports = list(s0["arg_names"]) + list(s0["result_names"])
+            assert name in ports, name
+        if not shutil.which("pycc") and not ns["_find_pycc"]():
+            continue
+        v0 = ns["emit_verilog"](False, variant=tag)
+        v1 = ns["emit_verilog"](True, variant=tag)
+        assert f"module {mod}" in v0
+        assert "tb_test_mode" not in v0
+        assert "tb_test_mode" in v1
+        for token in (
+            "port_rst_pulse",
+            "ev_fec_uncorr",
+            "inc_fec_uncorr",
+            "inc_crd_uf",
+            "csr_lmsm_start",
+            "csr_err",
+            "irq",
+        ):
+            assert token in v0, token
+        assert "`ifdef" not in v0 and "`ifdef" not in v1
 
 
 def test_ral_lives_under_tb_ral():
@@ -206,3 +215,129 @@ def test_ral_lives_under_tb_ral():
     assert "pycircuit/csr/ub_csr_regs.py" in OUTPUT_PATHS
     assert "gen/tb_ral/ub_regmodel.py" not in OUTPUT_PATHS
     assert "rtl/csr/ub_csr_regs.py" not in OUTPUT_PATHS
+
+
+def test_param_variant_reuses_num_lanes():
+    data = load_regmap()
+    reg = next(r for r in data["registers"] if r["name"] == "PARAM_VARIANT")
+    assert parse_int(reg["offset"]) == 0x011C
+    names = [f["name"] for f in reg["fields"]]
+    assert names == ["NUM_VL", "SCR_PLACEHOLDER", "RSVD"]
+    assert "NUM_LANES" not in names
+    nvl = next(f for f in reg["fields"] if f["name"] == "NUM_VL")
+    scr = next(f for f in reg["fields"] if f["name"] == "SCR_PLACEHOLDER")
+    rsvd = next(f for f in reg["fields"] if f["name"] == "RSVD")
+    assert (nvl["msb"], nvl["lsb"]) == (3, 0)
+    assert (scr["msb"], scr["lsb"]) == (4, 4)
+    assert (rsvd["msb"], rsvd["lsb"]) == (31, 5)
+    assert nvl["access"] == "RO" and scr["access"] == "RO"
+    assert nvl.get("reset_from") == "variant"
+    assert scr.get("reset_from") == "variant"
+    assert "reset" not in nvl and "reset" not in scr
+    phy = next(r for r in data["registers"] if r["name"] == "PARAM_PHY")
+    assert {f["name"] for f in phy["fields"]} >= {"NUM_LANES_TX", "NUM_LANES_RX"}
+
+
+def test_variant_reset_matches_tag_name():
+    """Reset values come from variants: and match the tag (xN_vlM)."""
+    import re
+
+    from gen_regmap import emit_c_header, emit_py_constants, emit_ral, emit_regmap_md
+
+    data = load_regmap()
+    tags = variant_tags(data)
+    assert default_variant(data) == "product_x4_vl2"
+    assert "product_x4_vl2" in tags and "product_x8_vl2" in tags
+    assert tags["product_x4_vl2"] == {"NUM_LANES": 4, "NUM_VL": 2, "SCR_PLACEHOLDER": 1}
+    assert tags["product_x8_vl2"]["NUM_LANES"] == 8
+    assert tags["product_x8_vl2"]["NUM_VL"] == 2
+    assert tags["product_x8_vl2"]["SCR_PLACEHOLDER"] == 1
+
+    phy_tx = next(
+        f
+        for r in data["registers"]
+        if r["name"] == "PARAM_PHY"
+        for f in r["fields"]
+        if f["name"] == "NUM_LANES_TX"
+    )
+    phy_rx = next(
+        f
+        for r in data["registers"]
+        if r["name"] == "PARAM_PHY"
+        for f in r["fields"]
+        if f["name"] == "NUM_LANES_RX"
+    )
+    dll_vl = next(
+        f
+        for r in data["registers"]
+        if r["name"] == "PARAM_DLL"
+        for f in r["fields"]
+        if f["name"] == "NUM_VL"
+    )
+    pvar_vl = next(
+        f
+        for r in data["registers"]
+        if r["name"] == "PARAM_VARIANT"
+        for f in r["fields"]
+        if f["name"] == "NUM_VL"
+    )
+    pvar_scr = next(
+        f
+        for r in data["registers"]
+        if r["name"] == "PARAM_VARIANT"
+        for f in r["fields"]
+        if f["name"] == "SCR_PLACEHOLDER"
+    )
+
+    for tag, params in tags.items():
+        parsed = re.search(r"x(\d+)_vl(\d+)", tag)
+        assert parsed, tag
+        assert params["NUM_LANES"] == int(parsed.group(1))
+        assert params["NUM_VL"] == int(parsed.group(2))
+        assert resolve_reset(phy_tx, params) == params["NUM_LANES"]
+        assert resolve_reset(phy_rx, params) == params["NUM_LANES"]
+        assert resolve_reset(dll_vl, params) == params["NUM_VL"]
+        assert resolve_reset(pvar_vl, params) == params["NUM_VL"]
+        assert resolve_reset(pvar_scr, params) == params["SCR_PLACEHOLDER"]
+        assert csr_module_name(tag) == f"ub_csr_{tag}"
+
+        # no handwritten reset on variant-driven fields
+        for field in (phy_tx, phy_rx, dll_vl, pvar_vl, pvar_scr):
+            assert field.get("reset_from") == "variant"
+            assert "reset" not in field
+
+    md = emit_regmap_md(data)
+    assert "ub_csr_product_x4_vl2" in md
+    assert "ub_csr_product_x8_vl2" in md
+    assert "| `product_x4_vl2`" in md
+    assert "0x12" in md  # NUM_VL=2 | SCR_PLACEHOLDER<<4
+
+    py = emit_py_constants(data)
+    assert "VARIANT_PRODUCT_X4_VL2_NUM_LANES = 4" in py
+    assert "VARIANT_PRODUCT_X8_VL2_NUM_LANES = 8" in py
+    assert "PARAM_PHY_NUM_LANES_TX_RESET = None  # reset_from: variant" in py
+
+    hdr = emit_c_header(data)
+    assert "#define UB_REG_PARAM_VARIANT  0x011c" in hdr
+    assert "#define UB_VARIANT_PRODUCT_X4_VL2_NUM_LANES  4u" in hdr
+    assert "#define UB_VARIANT_PRODUCT_X8_VL2_NUM_LANES  8u" in hdr
+    assert "UB_CSR_VARIANTS[]" in hdr
+    assert '"ub_csr_product_x4_vl2"' in hdr
+    assert "UB_PHY_NUM_LANES_TX_RESET" not in hdr
+
+    ral_src = emit_ral(data)
+    ral_ns: dict = {}
+    exec(ral_src, ral_ns)  # noqa: S102 — generated RAL, no uvm required
+    for tag, params in ral_ns["VARIANTS"].items():
+        model = ral_ns["create_ub_regmodel"](variant=tag)
+        assert model.variant == tag
+        assert model.param_variant.NUM_VL.reset == params["NUM_VL"]
+        assert model.param_variant.SCR_PLACEHOLDER.reset == params["SCR_PLACEHOLDER"]
+        assert model.param_phy.NUM_LANES_TX.reset == params["NUM_LANES"]
+        assert model.param_phy.NUM_LANES_RX.reset == params["NUM_LANES"]
+        assert model.param_dll.NUM_VL.reset == params["NUM_VL"]
+        word = (params["NUM_VL"] & 0xF) | ((params["SCR_PLACEHOLDER"] & 1) << 4)
+        got = model.param_variant.NUM_VL.reset | (
+            model.param_variant.SCR_PLACEHOLDER.reset << 4
+        )
+        assert got == word

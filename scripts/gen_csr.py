@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from regmap_lib import field_width, is_window_reg, parse_int, reset_int
+from regmap_lib import (
+    csr_module_name,
+    default_variant,
+    field_width,
+    is_window_reg,
+    parse_int,
+    reset_int,
+    variant_tags,
+)
 
 BANNER = "GENERATED — edit docs/regmap/regmap.yaml"
 
@@ -29,6 +37,9 @@ def _field_rows(data: dict[str, Any]) -> list[dict[str, Any]]:
                     "width": field_width(field),
                     "access": field["access"],
                     "reset": reset_int(field),
+                    "reset_from": field.get("reset_from"),
+                    "reset_key": field.get("reset_key")
+                    or (field["name"] if field.get("reset_from") == "variant" else None),
                     "self_clearing": bool(field.get("self_clearing")),
                     "saturating": bool(field.get("saturating")),
                     "pulse_cycles": field.get("pulse_cycles"),
@@ -54,7 +65,7 @@ def emit_ub_csr_regs(data: dict[str, Any]) -> str:
     irq = data.get("irq") or {}
     rules = data["global_rules"]
 
-    table_src = _py_repr_table(rows, regs, windows, irq, rules)
+    table_src = _py_repr_table(rows, regs, windows, irq, rules, data)
     engine = _ENGINE_SRC
     return f'''\
 """ub_csr register file — generated from docs/regmap/regmap.yaml.
@@ -67,7 +78,10 @@ Describes the circuit with the pyc4.0 modeling API
 and lowers Verilog through ``pycc --emit=verilog`` (LLVM 19). Not string-templated.
 
 Storage follows pyc_reg semantics: sync, ``rst_pyc`` active-high, ``core_clk``.
-``TEST_HOOKS`` is expanded at Python generation time (two netlists).
+``TEST_HOOKS`` is expanded at Python generation time (PRODUCT + HOOKS).
+SPEC §2.2: one fixed netlist per ``variants:`` tag, module ``ub_csr_<tag>``.
+Reset values marked ``reset_from: variant`` are baked from that table
+(not handwritten). ``_placeholder`` scrambler leaves are lint/TB only.
 
 Behaviors are built from YAML attributes, not hand-specialized per register:
 W1C sticky + event ports; saturating RO counters + increment ports + CNT_CLR;
@@ -95,8 +109,18 @@ BANNER = {BANNER!r}
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
-PRODUCT_V = REPO / "rtl" / "csr" / "ub_csr.v"
-HOOKS_V = REPO / "rtl" / "csr" / "hooks" / "ub_csr.v"
+
+
+def product_v(tag: str | None = None):
+    return REPO / "rtl" / "csr" / f"ub_csr_{{tag or DEFAULT_VARIANT}}.v"
+
+
+def hooks_v(tag: str | None = None):
+    return REPO / "rtl" / "csr" / "hooks" / f"ub_csr_{{tag or DEFAULT_VARIANT}}.v"
+
+
+PRODUCT_V = product_v()
+HOOKS_V = hooks_v()
 
 {engine}
 '''
@@ -108,6 +132,7 @@ def _py_repr_table(
     windows: list[dict[str, Any]],
     irq: dict[str, Any],
     rules: dict[str, Any],
+    data: dict[str, Any],
 ) -> str:
     def lit(obj: Any) -> str:
         return repr(obj)
@@ -125,6 +150,8 @@ def _py_repr_table(
         "width",
         "access",
         "reset",
+        "reset_from",
+        "reset_key",
         "self_clearing",
         "saturating",
         "pulse_cycles",
@@ -166,6 +193,15 @@ def _py_repr_table(
     lines.append(f"RULES = { {k: rules[k] for k in rules if k != 'notes'} !r}")
     lines.append("PORT_RST_PULSE_CYCLES = 16")
     lines.append("")
+    tags = variant_tags(data)
+    lines.append(f"DEFAULT_VARIANT = {default_variant(data)!r}")
+    lines.append(f"VARIANTS = {tags!r}")
+    lines.append(
+        "CSR_MODULE = {"
+        + ", ".join(f"{t!r}: {csr_module_name(t)!r}" for t in tags)
+        + "}"
+    )
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -189,6 +225,42 @@ except ImportError:  # pragma: no cover - frontend optional
 
 PYCIRCUIT_COMMIT = "43cc5918e3d09ecc0c814cabef6c1384cb9980ae"
 PYCC_EMIT = ["--emit=verilog"]
+
+_ACTIVE_VARIANT = DEFAULT_VARIANT
+
+
+def csr_module_name(tag: str) -> str:
+    if tag not in CSR_MODULE:
+        raise KeyError(f"unknown CSR variant {tag!r}")
+    return CSR_MODULE[tag]
+
+
+def variant_reset_word(tag: str) -> int:
+    params = VARIANTS[tag]
+    return (int(params["NUM_VL"]) & 0xF) | ((int(params["SCR_PLACEHOLDER"]) & 1) << 4)
+
+
+def _resolve_reset(f, params=None):
+    params = params or VARIANTS[_ACTIVE_VARIANT]
+    if f.get("reset_from") == "variant":
+        key = f.get("reset_key") or f["field"]
+        return int(params[key])
+    rst = f.get("reset")
+    return None if rst is None else int(rst)
+
+
+def _resolved_fields(tag=None):
+    name = tag or _ACTIVE_VARIANT
+    if name not in VARIANTS:
+        raise KeyError(f"unknown CSR variant {name!r}")
+    params = VARIANTS[name]
+    out = []
+    for f in FIELDS:
+        g = dict(f)
+        if g.get("reset_from") == "variant":
+            g["reset"] = _resolve_reset(g, params)
+        out.append(g)
+    return out
 
 
 def _qname(reg: str, field: str) -> str:
@@ -234,11 +306,12 @@ def _llvm_version() -> str | None:
     return None
 
 
-def _verilog_banner(test_hooks: int) -> str:
+def _verilog_banner(test_hooks: int, variant: str) -> str:
+    mod = csr_module_name(variant)
     return (
         "// Generated by pycircuit/csr/ub_csr_regs.py via pycircuit.compile() + pycc --emit=verilog\n"
         f"// {BANNER}\n"
-        f"// pyc4.0 leaf ub_csr. TEST_HOOKS={test_hooks} (Python generation-time).\n"
+        f"// pyc4.0 leaf {mod}. TEST_HOOKS={test_hooks} variant={variant}.\n"
         f"// lukebest/pyCircuit @{PYCIRCUIT_COMMIT}; backend pycc / LLVM 19.\n"
         "// Attribute-driven Circuit API: W1C / saturating / WO pulse / TEST gate / csr_err.\n"
         "// SPEC §2.2 / §3.2.3 / §11. Not string-templated Verilog.\n"
@@ -309,8 +382,9 @@ def _cfg_wire(m, f, qs, test_active):
     return q
 
 
-def _csr_circuit(m, test_hooks: int) -> None:
+def _csr_circuit(m, test_hooks: int, variant: str | None = None) -> None:
     """Full ub_csr on the pyc4.0 Circuit API (addr/W1C/sat/pulse/IRQ/rvalid)."""
+    FIELDS = _resolved_fields(variant)
     if RULES.get("write_rvalid_next_cycle", 0) != 0:
         raise ValueError("SPEC §3.2.3 requires write next-cycle csr_rvalid=0")
 
@@ -511,29 +585,35 @@ def _csr_circuit(m, test_hooks: int) -> None:
 if HAVE_PYCIRCUIT:
     @module(name="ub_csr")
     def _elab_product(m: Circuit) -> None:
-        _csr_circuit(m, 0)
+        _csr_circuit(m, 0, _ACTIVE_VARIANT)
 
     @module(name="ub_csr")
     def _elab_hooks(m: Circuit) -> None:
-        _csr_circuit(m, 1)
+        _csr_circuit(m, 1, _ACTIVE_VARIANT)
 else:  # pragma: no cover
     _elab_product = None
     _elab_hooks = None
 
 
-def _compile_design(test_hooks: int):
+def _compile_design(test_hooks: int, variant: str | None = None):
+    global _ACTIVE_VARIANT
     if not HAVE_PYCIRCUIT:
         raise RuntimeError("pycircuit not importable")
+    tag = variant or DEFAULT_VARIANT
+    if tag not in VARIANTS:
+        raise KeyError(f"unknown CSR variant {tag!r}")
+    _ACTIVE_VARIANT = tag
     fn = _elab_hooks if test_hooks else _elab_product
-    return compile(fn, name="ub_csr")
+    return compile(fn, name=f"ub_csr_{tag}")
 
 
-def emit_verilog(test_hooks: bool) -> str:
-    """Lower one TEST_HOOKS netlist: compile() Design → pycc --emit=verilog."""
+def emit_verilog(test_hooks: bool, variant: str | None = None) -> str:
+    """Lower one TEST_HOOKS × variants: tag netlist: compile() → pycc --emit=verilog."""
     th = 1 if test_hooks else 0
-    design = _compile_design(th)
+    tag = variant or DEFAULT_VARIANT
+    design = _compile_design(th, tag)
     body = _pycc_verilog(design.emit_mlir())
-    text = _verilog_banner(th) + body
+    text = _verilog_banner(th, tag) + body
     if "`ifdef" in text:
         raise RuntimeError("generated Verilog must not use ifdef TEST_HOOKS")
     if not test_hooks and "tb_test_mode" in text:
@@ -541,10 +621,14 @@ def emit_verilog(test_hooks: bool) -> str:
     return text
 
 
-def elaborate(test_hooks: int = 0) -> dict:
-    """Elaborate TEST_HOOKS=0/1 via pycircuit.compile(). Verilog is pycc when present."""
+def elaborate(test_hooks: int = 0, variant: str | None = None) -> dict:
+    """Elaborate TEST_HOOKS=0/1 for one variants: tag via pycircuit.compile()."""
+    tag = variant or DEFAULT_VARIANT
+    mod = f"ub_csr_{tag}"
     status = {
         "test_hooks": int(test_hooks),
+        "variant": tag,
+        "module": mod,
         "pycircuit": HAVE_PYCIRCUIT,
         "elaborated": False,
         "reason": None,
@@ -557,14 +641,14 @@ def elaborate(test_hooks: int = 0) -> dict:
         "verilog_via": None,
         "verilog_chars": 0,
         "entry": "_elab_hooks" if test_hooks else "_elab_product",
-        "pycc_invoke": "pycc <ub_csr.pyc> --emit=verilog --logic-depth=64 -o <ub_csr.v>",
+        "pycc_invoke": f"pycc <{mod}.pyc> --emit=verilog --logic-depth=64 -o <{mod}.v>",
         "commit": PYCIRCUIT_COMMIT,
     }
     if not HAVE_PYCIRCUIT:
         status["reason"] = "pycircuit not importable"
         return status
     try:
-        design = _compile_design(int(test_hooks))
+        design = _compile_design(int(test_hooks), tag)
         status["elaborated"] = True
         status["mlir_chars"] = len(design.emit_mlir())
         mods = list(design.modules())
@@ -578,7 +662,7 @@ def elaborate(test_hooks: int = 0) -> dict:
         )
         if status["pycc"]:
             try:
-                v = emit_verilog(bool(test_hooks))
+                v = emit_verilog(bool(test_hooks), variant=tag)
                 status["verilog_via"] = "pycc"
                 status["verilog_chars"] = len(v)
             except Exception as exc:  # pragma: no cover
@@ -590,22 +674,25 @@ def elaborate(test_hooks: int = 0) -> dict:
     return status
 
 
-def generate() -> tuple[Path, Path]:
-    product = emit_verilog(False)
-    hooks = emit_verilog(True)
-    PRODUCT_V.parent.mkdir(parents=True, exist_ok=True)
-    HOOKS_V.parent.mkdir(parents=True, exist_ok=True)
-    PRODUCT_V.write_text(product, encoding="utf-8")
-    HOOKS_V.write_text(hooks, encoding="utf-8")
-    return PRODUCT_V, HOOKS_V
+def generate():
+    written = []
+    for tag in VARIANTS:
+        dest_p = product_v(tag)
+        dest_h = hooks_v(tag)
+        dest_p.parent.mkdir(parents=True, exist_ok=True)
+        dest_h.parent.mkdir(parents=True, exist_ok=True)
+        dest_p.write_text(emit_verilog(False, variant=tag), encoding="utf-8")
+        dest_h.write_text(emit_verilog(True, variant=tag), encoding="utf-8")
+        written.extend((dest_p, dest_h))
+    return written
 
 
 def main() -> int:
-    p, h = generate()
-    print(f"wrote {p}")
-    print(f"wrote {h}")
-    print(elaborate(0))
-    print(elaborate(1))
+    for path in generate():
+        print(f"wrote {path}")
+    for tag in VARIANTS:
+        print(elaborate(0, variant=tag))
+        print(elaborate(1, variant=tag))
     return 0
 
 

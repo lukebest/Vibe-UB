@@ -27,6 +27,8 @@ if {[info exists ::env(QS_STUB_FILES)] && $::env(QS_STUB_FILES) ne ""} {
         read_verilog $f
     }
 }
+# Netlist may already contain qs_fbuf_* sky130 buf_4/buf_8 trees
+# (quick-synth default fanout buffering). STA is otherwise unchanged.
 read_verilog $netlist
 link_design $top
 

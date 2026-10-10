@@ -4,7 +4,7 @@
 | --- | --- |
 | 分册 | `docs/rules/verif_gate.md` |
 | 所有者 | 工具守门（验证负责人兼任，见 [TEAM.md](../TEAM.md) §4） |
-| 版本 | v0.3 (2026-10-10) |
+| 版本 | v0.4 (2026-10-10) |
 | 类别 | 每次提交的 lint / CDC / formal / 综合 / regmap / TB / emit / 端口 / 来源 / 等价 / spec-leak |
 | 配套 | [verification.md](verification.md)、[PROCESS.md](../PROCESS.md)、[CODING_STYLE.md](../CODING_STYLE.md) §7、[DECISIONS.md](../DECISIONS.md) D6 / D7 / D10 / D17 |
 
@@ -180,6 +180,7 @@ M1 单时钟 `core_clk`（SPEC §4.1）。`rst_n` 异步置位、同步释放，
 | GATE-CDC-003 | 异步复位进入点 | `always @(posedge … or negedge …)` 出现在白名单单元以外 | D6；CODING_STYLE §2 / §3 | 2026-10-10 |
 | GATE-CDC-004 | `rst_n` 入口 | 带 `rst_n` 的时序模块未实例化合法复位同步单元 | SPEC §4.2 | 2026-10-10 |
 | GATE-CDC-005 | 异步 / 非 `core_clk` 输入 | 命中 `async_input_regex` 的输入未进 2 级同步器 | CODING_STYLE §2 | 2026-10-10 |
+| GATE-CDC-006 | `ub_cmn_mem_1r1w` 时钟口 | 不是 `core_clk`（Xia） | SPEC §4.1 | 2026-10-10 |
 
 **失败判据：** 新叶子上出现未豁免的上述 id。legacy（当前手写 `clk` + `or negedge rst_n`）只报告，不拦合入。
 
@@ -205,7 +206,7 @@ M1 单时钟 `core_clk`（SPEC §4.1）。`rst_n` 异步置位、同步释放，
 | GATE-EMIT-002 | 非 legacy、非白名单手写叶子必须有 `rtl/<layer>/hooks/<module>.v` | SPEC §11 | 2026-10-10 |
 | GATE-EMIT-003 | 未上 `scripts/gate/handwritten.yml` 的手写 `.v` / `.sv` 记 `HANDWRITTEN_UNLISTED` | D6；§1.1 | 2026-10-10 |
 | GATE-EQY-001 | PRODUCT≡HOOKS。本环境 **eqy 装不上**，主工具是 Yosys `equiv_make` / `equiv_simple` / `equiv_induct` / `equiv_status -assert`。eqy 若在 PATH 再用。报告写明 `tool=yosys-equiv` 或 `tool=eqy`。按 SPEC §2.2 变体逐个跑；`_placeholder` 不做等价 | SPEC §11 (d)；设计 spike | 2026-10-10 |
-| GATE-EQY-002 | 无钩子叶子：端口一一对应后直接比对。有钩子模块：额外输入拉低、`tb_test_mode=0` 后再比对 | SPEC §11 (d)(f) | 2026-10-10 |
+| GATE-EQY-002 | 无钩子叶子：端口一一对应后直接比对。有钩子模块：`tb_test_mode=0`，并把 `tb_inj_*`、`tb_<inst>_bd_*`、`tb_<inst>_bd_vld_*` 拉低后再比对 | SPEC §11 (d)(f) | 2026-10-10 |
 | GATE-EQY-003 | 上层等价把超阈值的 `ub_cmn_mem_1r1w` 实例当黑盒，**两边同一份**；原语只对小变体做完整 PRODUCT≡HOOKS | 实现对齐 | 2026-10-10 |
 
 白名单手写与 `_placeholder` 变体跳过 emit / hooks / 等价。Yosys 缺失：`EQUIV_TOOL_MISSING`，拦截（不静默）。
@@ -216,7 +217,16 @@ SPEC §2.2：pycc 每组参数一份固定网表，模块名=文件名=`<叶子>
 
 ## 7. 端口一致性（独立 job）
 
-Xia 裁定（SPEC §11 (f)）。钩子清单：`scripts/gate/hooks_ports.yml`，按模块列出允许的额外端口。批准规则与 `waivers/` 相同。失败即拦。§10 点名的大存储阵列可以有 `tb_*` 后门，仍由本表登记。
+Xia 裁定（SPEC §11 (f)）。钩子清单：`scripts/gate/hooks_ports.yml`，按模块列出允许的额外端口。批准规则与 `waivers/` 相同。失败即拦。
+
+后门端口（只出现在 HOOKS，由 `tb_test_mode` 门控）统一命名：
+
+| 类 | 名字 | 说明 |
+| --- | --- | --- |
+| 后门 | `tb_<inst>_bd_*` | 存储 / 阵列后门 |
+| 预装 valid | `tb_<inst>_bd_vld_*` | 该后门的 valid 预装配套口 |
+
+两类都必须按 SPEC §10 登进本表。不在表上的 `tb_*` **拦截**。PRODUCT 网表不得带 `tb_*`。eqy 把这两类输入与 `tb_inj_*` / `tb_test_mode` 一并拉低。
 
 | 模块是否在表上 | HOOKS 端口 |
 | --- | --- |
@@ -226,8 +236,9 @@ Xia 裁定（SPEC §11 (f)）。钩子清单：`scripts/gate/hooks_ports.yml`，
 | ID | 规则 | 来源 | 日期 |
 | --- | --- | --- | --- |
 | GATE-HOOK-001 | 独立 job `hooks-port-consistency` 按表核对端口名与方向 | SPEC §10 / §11 (f) | 2026-10-10 |
-| GATE-HOOK-002 | 未上表叶子出现 `tb_*` / `tb_test_mode` 失败 | 同上 | 2026-10-10 |
+| GATE-HOOK-002 | 未上表 / 未按 §10 登记的 `tb_*` / `tb_test_mode` 失败 | 同上 | 2026-10-10 |
 | GATE-HOOK-003 | 上表模块缺 PRODUCT 口、缺表列额外口、或多出口失败 | 同上 | 2026-10-10 |
+| GATE-HOOK-004 | 后门必须是 `tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`；只在 HOOKS | Xia | 2026-10-10 |
 
 白名单手写、D10 leftover、`_placeholder` 变体不跑本检查。变体（`<叶子>_<标签>`）逐个核对。
 
@@ -243,6 +254,14 @@ Xia 裁定（SPEC §11 (f)）。钩子清单：`scripts/gate/hooks_ports.yml`，
 | 一致性检查 | `python3 scripts/gen_regmap.py --check` |
 
 生成器或 YAML 不存在则 skip 并打印原因。脚本顶部变量：`GEN_REGMAP`、`REGMAP_YAML`、`GEN_CMD`。默认 YAML：`docs/regmap/regmap.yaml`。
+
+`variants:` 表格式对齐 PR #11（`b2e57475`）：每 tag 含 `NUM_LANES` / `NUM_VL` / `SCR_PLACEHOLDER`。YAML 在树里时，门禁**额外**拦：
+
+| ID | 规则 | 门禁 |
+| --- | --- | --- |
+| GATE-REG-001 | 名字以 `product_` 开头的变体，`PARAM_VARIANT.SCR_PLACEHOLDER` 复位必须为 0 | **拦截** |
+| GATE-REG-002 | `SCR_PLACEHOLDER=1` 只能是非 PRODUCT 变体（标签由 Xia 定）；只跑 lint / TB；报告单列 | **只报告** |
+| GATE-REG-003 | 变体名里的 `_xN` / `_vlN` 必须分别等于表内 `NUM_LANES` / `NUM_VL` | **拦截** |
 
 ### tb-selfcheck 发现（不写死 `tb/models/tests`）
 
@@ -339,6 +358,9 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 | VER-GATE-009 | SPEC §2.2 变体逐个跑；`_placeholder` 只 lint/TB；PRODUCT 不得例化；源码须有 `PLACEHOLDER_SOURCE` | SPEC §2.2 | 2026-10-10 |
 | VER-GATE-010 | spec-leak：私有规范标记 / `fmt.py` / PDF / 违规 PNG/JPG 不得进公开仓库 | 隔离 | 2026-10-10 |
 | VER-GATE-011 | 记分板统计实际比对次数；结束时断言次数 `> 0` 且等于预期；审查项，不自动拦截 | 空测 / 全跳过 | 2026-10-10 |
+| VER-GATE-012 | 后门 `tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*` 只在 HOOKS、§10 登记、eqy 拉低；未登记 `tb_*` 拦截 | Xia | 2026-10-10 |
+| VER-GATE-013 | `product_` 变体 `SCR_PLACEHOLDER` 必须为 0；`=1` 非 PRODUCT 只 lint/TB；`NUM_VL`/`NUM_LANES` 与变体名一致 | PR #11 | 2026-10-10 |
+| VER-GATE-014 | `ub_cmn_mem_1r1w` 时钟口为 `core_clk` | Xia | 2026-10-10 |
 
 ---
 

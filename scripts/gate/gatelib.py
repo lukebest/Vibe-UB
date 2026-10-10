@@ -597,6 +597,60 @@ def load_hooks_ports() -> dict[str, list[str]]:
     return extra
 
 
+# Xia: HOOKS-only backdoors. tb_<inst>_bd_* and companion tb_<inst>_bd_vld_*.
+# Gated by tb_test_mode; must be on the SPEC §10 list (hooks_ports.yml).
+_TB_BD_VLD_RE = re.compile(r"^tb_[A-Za-z_][A-Za-z0-9_]*_bd_vld_")
+_TB_BD_RE = re.compile(r"^tb_[A-Za-z_][A-Za-z0-9_]*_bd_")
+
+
+def is_tb_port(name: str) -> bool:
+    return name == "tb_test_mode" or name.startswith("tb_")
+
+
+def is_tb_bd_vld_port(name: str) -> bool:
+    return bool(_TB_BD_VLD_RE.match(name))
+
+
+def is_tb_bd_port(name: str) -> bool:
+    return bool(_TB_BD_RE.match(name)) and not is_tb_bd_vld_port(name)
+
+
+def is_listed_hook_style(name: str) -> bool:
+    """Allowed tb_* shapes on the §10 / hooks_ports.yml list."""
+    return (
+        name == "tb_test_mode"
+        or name.startswith("tb_inj_")
+        or name.startswith("tb_obs_")
+        or is_tb_bd_port(name)
+        or is_tb_bd_vld_port(name)
+    )
+
+
+def is_eqy_tie_low_port(name: str) -> bool:
+    """HOOKS extra inputs tied to 0 for PRODUCT≡HOOKS (SPEC §11 (d)(f))."""
+    return (
+        name == "tb_test_mode"
+        or name.startswith("tb_inj_")
+        or is_tb_bd_port(name)
+        or is_tb_bd_vld_port(name)
+    )
+
+
+def hooks_extra_for(module: str, leaf: str | None = None) -> list[str] | None:
+    """Look up extra ports by variant module, then by untagged leaf."""
+    table = load_hooks_ports()
+    if module in table:
+        return table[module]
+    if leaf and leaf in table:
+        return table[leaf]
+    # ub_lmsm_x4 → ub_lmsm
+    if "_" in module:
+        stem = module.rsplit("_", 1)[0]
+        if stem in table:
+            return table[stem]
+    return None
+
+
 def find_module_inventory() -> Path | None:
     for path in INVENTORY_CANDIDATES:
         if path.is_file():

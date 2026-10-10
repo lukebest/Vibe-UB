@@ -12,6 +12,7 @@ allowed_clocks:
 forbidden_clocks:
   - pma_clk
 
+# Xia: ub_cmn_mem_1r1w (and <leaf>_<tag> variants) clock port is core_clk.
 clock_port_regex: "(^clk$|_clk$|^clock$)"
 reset_port_regex: "(^rst$|^rst_n$|_rst$|_rst_n$|^reset$|^rst_pyc$|^rst_n_sync$)"
 

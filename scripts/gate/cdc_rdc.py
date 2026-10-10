@@ -20,6 +20,7 @@ from gatelib import (
     discover_rtl,
     emit_report,
     handwritten_modules,
+    is_cmn_mem_module,
     is_placeholder_module,
     load_yaml,
     print_tool_versions,
@@ -142,6 +143,16 @@ def analyze_module(name: str, path: Path, text: str, rules: dict) -> list[Findin
                     message=f"clock port {clk!r} is not core_clk",
                 )
             )
+    if is_cmn_mem_module(name) and "core_clk" not in clocks:
+        findings.append(
+            Finding(
+                check="cdc",
+                module=name,
+                file=file,
+                rule="CMN_MEM_CLK",
+                message="ub_cmn_mem_1r1w clock port must be core_clk (Xia)",
+            )
+        )
 
     for sens_m in ALWAYS_ASYNC_RE.finditer(text):
         sens = sens_m.group(1)

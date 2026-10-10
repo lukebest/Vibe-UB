@@ -19,8 +19,11 @@ from gatelib import (
     discover_layers,
     discover_leaf_pairs,
     emit_report,
+    hooks_extra_for,
     is_handwritten_path,
     is_legacy_path,
+    is_listed_hook_style,
+    is_tb_port,
     load_hooks_ports,
     parse_ports,
     print_tool_versions,
@@ -42,6 +45,21 @@ def compare_ports(
     prod_dir = {n: d for d, n in prod}
     hook_dir = {n: d for d, n in hook}
     extra = list(allowed_extra or [])
+
+    prod_tb = [n for n in prod_names if is_tb_port(n)]
+    if prod_tb:
+        findings.append(
+            Finding(
+                check="hooks_ports",
+                module=module,
+                file=rel(product),
+                rule="HOOKS_PORT_ON_PRODUCT",
+                message=(
+                    f"tb_* ports {prod_tb} must only appear on HOOKS "
+                    "(gated by tb_test_mode; SPEC §10 / §11 (f))"
+                ),
+            )
+        )
 
     if allowed_extra is None:
         if hook_names != prod_names:
@@ -73,7 +91,7 @@ def compare_ports(
                             ),
                         )
                     )
-        forbidden = [n for n in hook_names if n == "tb_test_mode" or n.startswith("tb_")]
+        forbidden = [n for n in hook_names if is_tb_port(n)]
         if forbidden:
             findings.append(
                 Finding(
@@ -82,17 +100,45 @@ def compare_ports(
                     file=rel(hooks),
                     rule="HOOKS_PORT_UNEXPECTED",
                     message=(
-                        f"unlisted leaf has hook ports {forbidden} "
-                        "(SPEC §11 (f): no tb_test_mode / tb_*)"
+                        f"tb_* {forbidden} not on scripts/gate/hooks_ports.yml "
+                        "(SPEC §10 list; Xia: tb_<inst>_bd_* / tb_<inst>_bd_vld_*)"
                     ),
                 )
             )
         return findings
 
+    bad_style = [n for n in extra if is_tb_port(n) and not is_listed_hook_style(n)]
+    if bad_style:
+        findings.append(
+            Finding(
+                check="hooks_ports",
+                module=module,
+                file=rel(hooks),
+                rule="HOOKS_PORT_BAD_NAME",
+                message=(
+                    f"listed extras {bad_style} are not tb_test_mode / tb_inj_* / "
+                    f"tb_obs_* / tb_<inst>_bd_* / tb_<inst>_bd_vld_*"
+                ),
+            )
+        )
     expected = prod_names + extra
     missing_prod = [n for n in prod_names if n not in hook_dir]
     missing_extra = [n for n in extra if n not in hook_dir]
     unexpected = [n for n in hook_names if n not in expected]
+    unexpected_tb = [n for n in unexpected if is_tb_port(n)]
+    if unexpected_tb:
+        findings.append(
+            Finding(
+                check="hooks_ports",
+                module=module,
+                file=rel(hooks),
+                rule="HOOKS_PORT_UNEXPECTED",
+                message=(
+                    f"tb_* {unexpected_tb} not on the SPEC §10 list "
+                    "(hooks_ports.yml) for this module"
+                ),
+            )
+        )
     if missing_prod or missing_extra or unexpected:
         findings.append(
             Finding(
@@ -161,7 +207,7 @@ def main() -> int:
                 )
             )
             continue
-        extra = table.get(module)
+        extra = hooks_extra_for(module, leaf.get("leaf"))
         findings.extend(compare_ports(module, product, hooks, extra))
     return emit_report("hooks_ports", findings)
 

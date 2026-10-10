@@ -36,7 +36,8 @@ from gatelib import (
     is_cmn_mem_module,
     is_placeholder_module,
     large_cmn_mem_lib_files,
-    load_hooks_ports,
+    hooks_extra_for,
+    is_eqy_tie_low_port,
     read_cmn_mem_threshold_bits,
     looks_generated,
     parse_ports,
@@ -52,12 +53,16 @@ EMIT_CMD = [sys.executable, EMIT_SCRIPT]
 # --------------------------------------------------------------------------
 
 def write_hooks_wrapper(hooks_path: Path, module: str, dest: Path) -> list[str]:
-    """Wrap HOOKS so tb_test_mode=0 and tb_inj_* are tied low (SPEC §11)."""
+    """Wrap HOOKS: tb_test_mode=0 and extra inputs tied low (SPEC §11).
+
+    Tie-low: tb_test_mode, tb_inj_*, tb_<inst>_bd_*, tb_<inst>_bd_vld_*.
+    Observe (tb_obs_*) left open. Other ports exposed 1:1 with PRODUCT.
+    """
     ports = parse_ports(hooks_path)
     tied: list[str] = []
     exposed: list[tuple[str, str]] = []
     for kind, name in ports:
-        if name == "tb_test_mode" or name.startswith("tb_inj_"):
+        if is_eqy_tie_low_port(name):
             tied.append(name)
         elif name.startswith("tb_obs_"):
             tied.append(name)  # observe-only; leave unconnected on the wrapper
@@ -65,7 +70,7 @@ def write_hooks_wrapper(hooks_path: Path, module: str, dest: Path) -> list[str]:
             exposed.append((kind, name))
     lines = [
         f"// Auto-generated eqy wrapper: {module} hooks with tb_test_mode=0,",
-        "// all tb_inj_* tied low. Do not commit.",
+        "// tb_inj_* / tb_<inst>_bd_* / tb_<inst>_bd_vld_* tied low. Do not commit.",
         f"module {module}_eqy_hooks (",
     ]
     if exposed:
@@ -325,7 +330,6 @@ def main() -> int:
                 )
             )
 
-    table = load_hooks_ports()
     disc = discover_rtl()
     thresh = read_cmn_mem_threshold_bits()
     print(f"equiv: ub_cmn_mem_1r1w blackbox threshold={thresh} bits")
@@ -366,7 +370,7 @@ def main() -> int:
                 )
             )
             continue
-        extra = table.get(module)
+        extra = hooks_extra_for(module, leaf.get("leaf"))
         if is_cmn_mem_module(module) and cmn_mem_is_large(product, thresh=thresh):
             bits = cmn_mem_bits(product)
             print(

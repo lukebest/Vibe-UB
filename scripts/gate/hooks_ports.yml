@@ -5,8 +5,13 @@
 # Module not listed: HOOKS ports must equal PRODUCT (no tb_test_mode).
 # Module listed: HOOKS ports = PRODUCT ports + extra_ports (must include
 # tb_test_mode and the SPEC §10 tb_* for that module).
-# Xia exception: §10-named large storage arrays may have tb_* backdoor
-# ports; they still go on this table.
+#
+# Xia backdoor naming (HOOKS only, gated by tb_test_mode):
+#   tb_<inst>_bd_*        storage / array backdoor
+#   tb_<inst>_bd_vld_*    valid-preload companion for that backdoor
+# Both classes must be listed here (SPEC §10). Any other tb_* is blocked.
+# PRODUCT netlists must not carry tb_* ports.
+# eqy ties tb_test_mode / tb_inj_* / tb_<inst>_bd_* / tb_<inst>_bd_vld_* low.
 #
 # CODEOWNERS: /scripts/gate/ is gatekeeper-owned. Do not self-approve drafts.
 

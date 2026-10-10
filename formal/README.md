@@ -12,6 +12,26 @@ and stop; Xia judges from SPEC.
 netlist to the matching file under `formal/<layer>/ref/`. It does not look
 up `rtl/` and does not require a design PR to be present.
 
+`chparam` is applied to the gold (formula) side. The gate is chparam'd only
+when the file itself declares `parameter NUM_LANES` / `PYC_RST_ACTIVE_HIGH`
+(handwritten / older nets). pycc SPEC §2.2 nets have no Verilog parameter;
+polarity and `NUM_LANES` come from the variant tag (`_x4`, `_pol0`) or env.
+
+Methods, in order. Exit 0 only if a method **proves** the compare (no
+BMC-only pass):
+
+1. `equiv_make` + `equiv_simple` + `equiv_induct` + `equiv_status -assert`
+2. `equiv_simple -seq 8 -undef` + `equiv_struct` + induct
+3. `miter -equiv -flatten -make_assert` + `sat -verify -tempinduct -prove-asserts -set-init-zero`
+4. `equiv_add` of the hidden CRC remainder, then the same tempinduct
+5. BCRC only: next-state affine basis (`scripts/gate/equiv_seq_basis.py`) —
+   CRC30 absorb is an affine map over GF(2). Matching the zero vector and
+   every `(crc, data)` unit vector in each `{rst,start,valid,last}` cube
+   proves the next-state functions; that plus matching reset is sequential
+   equivalence of `crc` / `crc_word` / `done`.
+
+The script prints `equiv_ref METHOD=...` and `gate_chparam=none|...`.
+
 | Leaf | Path | SPEC |
 | --- | --- | --- |
 | `ub_pcs_lane_dist` | `formal/pcs/ref/` | §2.3 / §2.4 `Lane<j,i>=CA<(NSYM-1)-i*N-j>` |

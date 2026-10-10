@@ -26,6 +26,7 @@ LEAF       ?=
 NUM_LANES  ?= 4
 PYC_RST_ACTIVE_HIGH ?= 1
 REF        ?= 0
+GATE_NET   ?=
 
 export TEST_HOOKS
 export NUM_LANES
@@ -33,6 +34,7 @@ export PYC_RST_ACTIVE_HIGH
 export SIM
 export LEAF
 export REF
+export GATE_NET
 export COCOTB_REDUCED_LOG_FMT ?= 1
 export COCOTB_HDL_TIMEUNIT ?= 1ns
 export COCOTB_HDL_TIMEPRECISION ?= 1ps
@@ -131,6 +133,23 @@ endif
 
 VERILOG_INCLUDE_DIRS += $(TB_ROOT)/harness
 
+# Optional external PRODUCT netlist (e.g. a pycc head). Does not write rtl/.
+ifneq ($(GATE_NET),)
+DUT_RTL := $(abspath $(GATE_NET))
+ifeq ($(LEAF),ub_pyc_rst_adapt)
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_rst_adapt.sv $(DUT_RTL)
+else ifeq ($(LEAF),ub_pcs_lane_dist)
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_lane_dist.sv $(DUT_RTL)
+else ifeq ($(LEAF),ub_pcs_lane_dedist)
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_lane_dedist.sv $(DUT_RTL)
+else ifeq ($(LEAF),ub_dll_bcrc)
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_bcrc.sv $(DUT_RTL)
+else ifeq ($(LEAF),ub_dll_bcrc_check)
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_bcrc_check.sv $(DUT_RTL)
+endif
+VERILOG_INCLUDE_DIRS += $(dir $(DUT_RTL)) $(abspath $(dir $(DUT_RTL))/../common)
+endif
+
 # -DTB_TEST_HOOKS is only for the passthrough self-check harness, not leaf TBs.
 ifeq ($(LEAF),)
 ifeq ($(TEST_HOOKS),1)
@@ -143,10 +162,24 @@ endif
 endif
 
 ifeq ($(LEAF),ub_pyc_rst_adapt)
+RST_FIXED := 0
+ifneq ($(GATE_NET),)
+ifeq ($(shell grep -c 'parameter.*PYC_RST_ACTIVE_HIGH' $(GATE_NET)),0)
+RST_FIXED := 1
+endif
+endif
+ifeq ($(RST_FIXED),1)
+ifeq ($(SIM),verilator)
+EXTRA_ARGS += -DUB_RST_FIXED
+else
+COMPILE_ARGS += -DUB_RST_FIXED
+endif
+else
 ifeq ($(SIM),verilator)
 EXTRA_ARGS += -GPYC_RST_ACTIVE_HIGH=$(PYC_RST_ACTIVE_HIGH)
 else
 COMPILE_ARGS += -P$(TOPLEVEL).PYC_RST_ACTIVE_HIGH=$(PYC_RST_ACTIVE_HIGH)
+endif
 endif
 endif
 
@@ -200,6 +233,7 @@ selfcheck-both:
 leaf:
 	rm -rf sim_build
 	$(MAKE) SIM=$(SIM) TEST_HOOKS=$(TEST_HOOKS) LEAF=$(LEAF) REF=$(REF) \
+		GATE_NET=$(GATE_NET) \
 		NUM_LANES=$(NUM_LANES) PYC_RST_ACTIVE_HIGH=$(PYC_RST_ACTIVE_HIGH) sim
 
 leaf-batch1:

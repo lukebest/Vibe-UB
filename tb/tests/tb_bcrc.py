@@ -52,6 +52,7 @@ class BcrcLeafTest(LeafUvmTest):
         await self._reset_dut()
         await self.case_reset_quiet()
         await self.case_directed()
+        await self.case_onehot()
         await self.case_two_flit()
         await self.case_random()
         await self.case_tx_flag0()
@@ -90,6 +91,24 @@ class BcrcLeafTest(LeafUvmTest):
                 self.rec.pass_(f"directed_{kind}", TP)
         except Exception as exc:
             self.rec.fail("directed", TP, str(exc))
+            raise
+
+    async def case_onehot(self) -> None:
+        name = "onehot_payload_bits"
+        try:
+            for bit in range(16 * 8):
+                payload = [0] * 16
+                payload[bit // 8] = 1 << (bit % 8)
+                raw = [payload_flit(payload)]
+                attached = attach(raw)
+                done, word = await self._feed(attached)
+                exp = pack_word(crc30_of(raw), 0, 0)
+                self.check(1, done, f"onehot {bit} done")
+                self.check(exp, word, f"onehot {bit} crc_word")
+            sample_bcrc("onehot", 1, self.hooks)
+            self.rec.pass_(name, TP, f"bits={16 * 8}")
+        except Exception as exc:
+            self.rec.fail(name, TP, str(exc))
             raise
 
     async def case_two_flit(self) -> None:

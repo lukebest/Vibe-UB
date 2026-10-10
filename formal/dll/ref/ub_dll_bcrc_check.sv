@@ -1,8 +1,8 @@
 // Verification formula reference. Not product RTL.
 // SPEC §2.6: same CRC30 as ub_dll_bcrc; compare crc_recv[29:0] only.
 // error_flag_rx = crc_recv[30] (passthrough; not in the CRC). rsvd ignored.
-// Bit-serial loop (not an XOR matrix). 1-cycle to done / crc_ok.
-// Do not copy pycircuit/ or rtl/.
+// Result appears 1 cycle after last (SPEC §7) and holds until the next last.
+// Bit-serial loop (not an XOR matrix). Do not copy pycircuit/ or rtl/.
 `timescale 1ns / 1ps
 
 module ub_dll_bcrc_check (
@@ -21,6 +21,9 @@ module ub_dll_bcrc_check (
 );
 
   reg [31:0] recv_q;
+  reg        ok_q;
+  reg        fail_q;
+  reg        eflag_q;
 
   ub_dll_bcrc u_crc (
     .core_clk(core_clk),
@@ -40,8 +43,25 @@ module ub_dll_bcrc_check (
       recv_q <= crc_recv;
   end
 
-  assign crc_ok        = done & (crc_word[29:0] == recv_q[29:0]);
-  assign crc_fail      = done & (crc_word[29:0] != recv_q[29:0]);
-  assign error_flag_rx = done & recv_q[30];
+  wire cmp_ok   = (crc_word[29:0] == recv_q[29:0]);
+  wire cmp_fail = (crc_word[29:0] != recv_q[29:0]);
+  wire cmp_ef   = recv_q[30];
+
+  // Capture on the done cycle (old done in this block); hold otherwise.
+  always @(posedge core_clk) begin
+    if (rst_pyc) begin
+      ok_q    <= 1'b0;
+      fail_q  <= 1'b0;
+      eflag_q <= 1'b0;
+    end else if (done) begin
+      ok_q    <= cmp_ok;
+      fail_q  <= cmp_fail;
+      eflag_q <= cmp_ef;
+    end
+  end
+
+  assign crc_ok        = done ? cmp_ok : ok_q;
+  assign crc_fail      = done ? cmp_fail : fail_q;
+  assign error_flag_rx = done ? cmp_ef : eflag_q;
 
 endmodule

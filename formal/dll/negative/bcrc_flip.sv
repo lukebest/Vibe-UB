@@ -1,10 +1,6 @@
-// Verification formula reference. Not product RTL.
-// SPEC §2.6: CRC30 poly 30'h15A94AD5, init all-1s, no invert, no reorder.
-// Byte 0 = data_in[7:0]; each byte MSB first. Last flit: CRC bytes 0..15 only.
-// Pack {1'b0, ERROR_FLAG, crc[29:0]}; TX ERROR_FLAG hardwired 0.
-// Bit-serial loop (not an XOR matrix). 1-cycle to crc_word / done.
-// start is a re-init strobe and does not absorb this beat (SPEC §2.6 stream).
-// Do not copy pycircuit/ or rtl/.
+// Negative fixture only: SPEC CRC30 with crc_word[0] inverted.
+// Used to prove scripts/gate/equiv_ref.sh returns non-zero.
+// Not a reference. Not product RTL.
 `timescale 1ns / 1ps
 
 module ub_dll_bcrc (
@@ -47,19 +43,25 @@ module ub_dll_bcrc (
   endfunction
 
   wire [29:0] nxt = crc30_absorb(crc, data_in, last);
-  // Named next-state (basis / pairing). Same mux as the registers.
-  wire [29:0] crc_n  = rst_pyc ? INIT :
-                       (start ? INIT :
-                        (valid_in ? nxt : crc));
-  wire [31:0] word_n = rst_pyc ? 32'b0 :
-                       ((valid_in && last && !start) ? {2'b00, nxt} : crc_word);
-  wire        done_n = rst_pyc ? 1'b0 :
-                       (valid_in && last && !start);
 
   always @(posedge core_clk) begin
-    crc      <= crc_n;
-    crc_word <= word_n;
-    done     <= done_n;
+    if (rst_pyc) begin
+      crc      <= INIT;
+      crc_word <= 32'b0;
+      done     <= 1'b0;
+    end else if (start) begin
+      crc      <= INIT;
+      done     <= 1'b0;
+    end else if (valid_in) begin
+      crc <= nxt;
+      done <= 1'b0;
+      if (last) begin
+        crc_word <= {1'b0, 1'b0, nxt} ^ 32'h1;
+        done     <= 1'b1;
+      end
+    end else begin
+      done <= 1'b0;
+    end
   end
 
 endmodule

@@ -5,7 +5,7 @@
 | --- | --- |
 | 配套规格 | [SPEC.md](SPEC.md) |
 | 规范基线 | UB Base Spec Rev 2.0，附录 D **子集**（见 [SPEC_INDEX.md](SPEC_INDEX.md)） |
-| 总线 | [SPEC.md](SPEC.md) §3.2.3：32-bit 整字，无 `csr_wstrb`；16-bit 字节地址，4 字节对齐；读固定 1 拍；未映射读 0/`csr_err=1`，写忽略/`csr_err=1` |
+| 总线 | [SPEC.md](SPEC.md) §3.2.3：32-bit 整字，无 `csr_wstrb`；16-bit 字节地址，4 字节对齐；读固定 1 拍；写响应下一拍 `csr_rvalid=0` 且 `csr_err` 有效；未映射读 0/`csr_err=1`，写忽略/`csr_err=1` |
 | 字节序 | 小端；位 0 为 LSB |
 
 职责与流程见 [TEAM.md](TEAM.md)、[PROCESS.md](PROCESS.md)。

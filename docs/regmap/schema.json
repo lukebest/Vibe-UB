@@ -94,6 +94,9 @@
         "full_word_writes_only": { "type": "boolean", "const": true },
         "wstrb": { "type": "boolean", "const": false },
         "read_latency_cycles": { "type": "integer", "const": 1 },
+        "write_latency_cycles": { "type": "integer", "const": 1 },
+        "write_rvalid": { "type": "integer", "const": 0 },
+        "write_err_valid": { "type": "boolean", "const": true },
         "spec_ref": { "type": "string" },
         "unmapped": {
           "type": "object",
@@ -122,6 +125,8 @@
       "properties": {
         "full_word_writes_only": { "type": "boolean" },
         "read_latency_cycles": { "type": "integer" },
+        "write_rvalid_next_cycle": { "type": "integer", "const": 0 },
+        "write_err_valid_next_cycle": { "type": "boolean" },
         "unmapped_csr_err": { "type": "boolean" },
         "no_read_clear": { "type": "boolean" },
         "no_rw_write_clear": { "type": "boolean" },

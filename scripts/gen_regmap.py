@@ -87,6 +87,7 @@ def emit_regmap_md(data: dict[str, Any]) -> str:
         f"{bus['data_width_bits']}-bit 整字，无 `csr_wstrb`；"
         f"{bus['addr_width_bits']}-bit 字节地址，{bus['alignment_bytes']} 字节对齐；"
         f"读固定 {bus['read_latency_cycles']} 拍；"
+        f"写响应下一拍 `csr_rvalid={bus.get('write_rvalid', 0)}` 且 `csr_err` 有效；"
         f"未映射读 {bus['unmapped']['read_data']}/`csr_err={bus['unmapped']['read_csr_err']}`，"
         f"写忽略/`csr_err={bus['unmapped']['write_csr_err']}` |"
     )
@@ -523,8 +524,7 @@ def emit_ral(data: dict[str, Any]) -> str:
     lines = [
         f'"""UB M1 uvm-python register model. {BANNER}',
         "",
-        "PR #6 tb/ tree is not on main yet. This file lives at gen/tb_ral/ub_regmodel.py",
-        "and should move to tb/ral/ub_regmodel.py when that tree lands.",
+        "Lives at tb/ral/ub_regmodel.py (PR #6 tb/ is on main).",
         "",
         "Assumptions: uvm-python (tpoikela/uvm-python / lukebest/uvm-python) UVMReg,",
         "UVMRegField.configure(parent, size, lsb_pos, access, volatile, reset,",
@@ -676,9 +676,9 @@ def emit_ral(data: dict[str, Any]) -> str:
 def emit_csr_init() -> str:
     return (
         f'"""ub_csr package. {BANNER}"""\n'
-        "from .ub_csr_regs import PORT_RST_PULSE_CYCLES, elaborate, emit_verilog\n"
+        "from .ub_csr_regs import PORT_RST_PULSE_CYCLES, elaborate, emit_verilog, generate\n"
         "\n"
-        "__all__ = [\"PORT_RST_PULSE_CYCLES\", \"elaborate\", \"emit_verilog\"]\n"
+        "__all__ = [\"PORT_RST_PULSE_CYCLES\", \"elaborate\", \"emit_verilog\", \"generate\"]\n"
     )
 
 
@@ -690,12 +690,13 @@ def emit_gen_init() -> str:
 # CLI
 # ---------------------------------------------------------------------------
 
-# Official generated paths (docs/regmap/README.md). PR #6 tb/ is not on main:
-# uvm-python RAL is gen/tb_ral/ub_regmodel.py and moves to tb/ral/ later.
+# Official generated paths (docs/regmap/README.md).
 OUTPUT_PATHS = (
     "docs/REGMAP.md",
     "rtl/csr/ub_csr_regs.py",
-    "gen/tb_ral/ub_regmodel.py",
+    "rtl/csr/ub_csr.v",
+    "rtl/csr/hooks/ub_csr.v",
+    "tb/ral/ub_regmodel.py",
     "sw/include/ub_regs.h",
     "sw/hal/ub_regs_access.h",
     "sw/hal/ub_regs_access.c",
@@ -704,9 +705,17 @@ OUTPUT_PATHS = (
 
 COMPANION_PATHS = (
     "rtl/csr/__init__.py",
-    "gen/tb_ral/__init__.py",
+    "tb/ral/__init__.py",
     "model/__init__.py",
 )
+
+
+def emit_csr_verilog(data: dict[str, Any], test_hooks: bool) -> str:
+    ns: dict[str, Any] = {
+        "__file__": str(REPO_ROOT / "rtl" / "csr" / "ub_csr_regs.py"),
+    }
+    exec(compile(emit_ub_csr_regs(data), "<ub_csr_regs>", "exec"), ns)
+    return ns["emit_verilog"](test_hooks)
 
 
 def render_all(data: dict[str, Any]) -> dict[str, str]:
@@ -714,8 +723,10 @@ def render_all(data: dict[str, Any]) -> dict[str, str]:
         "docs/REGMAP.md": emit_regmap_md(data),
         "rtl/csr/ub_csr_regs.py": emit_ub_csr_regs(data),
         "rtl/csr/__init__.py": emit_csr_init(),
-        "gen/tb_ral/ub_regmodel.py": emit_ral(data),
-        "gen/tb_ral/__init__.py": emit_gen_init(),
+        "rtl/csr/ub_csr.v": emit_csr_verilog(data, False),
+        "rtl/csr/hooks/ub_csr.v": emit_csr_verilog(data, True),
+        "tb/ral/ub_regmodel.py": emit_ral(data),
+        "tb/ral/__init__.py": emit_gen_init(),
         "model/regs.py": emit_py_constants(data),
         "model/__init__.py": emit_gen_init(),
         "sw/include/ub_regs.h": emit_c_header(data),

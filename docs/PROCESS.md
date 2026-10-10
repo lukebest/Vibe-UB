@@ -49,7 +49,7 @@
 | 下游 | 路径 | 用途 |
 | --- | --- | --- |
 | (a) pyCircuit 寄存器读写逻辑 | `rtl/csr/ub_csr_regs.py` | 设计侧 CSR 实现 |
-| (b) uvm-python 寄存器模型 | `gen/tb_ral/ub_regmodel.py`（PR #6 `tb/` 未合入前；日后迁 `tb/ral/`） | 验证侧 |
+| (b) uvm-python 寄存器模型 | `tb/ral/ub_regmodel.py` | 验证侧 |
 | (c) 固件驱动 | `sw/include/ub_regs.h`、`sw/hal/ub_regs_access.{h,c}` | 原型固件的寄存器访问层 |
 | (d) Python 常量 | `model/regs.py` | 验证 / 模型共用 |
 

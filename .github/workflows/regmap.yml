@@ -13,10 +13,21 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install
-        run: pip install pyyaml pytest
+        run: pip install pyyaml pytest "git+https://github.com/lukebest/pyCircuit@43cc5918e3d09ecc0c814cabef6c1384cb9980ae"
       - name: Validate YAML
         run: python3 scripts/gen_regmap.py --validate-only
       - name: Pytest
         run: pytest -q scripts/tests
       - name: Check generated outputs
         run: python3 scripts/gen_regmap.py --check
+      - name: Elaborate CSR (TEST_HOOKS=0/1)
+        run: |
+          python3 -c "import runpy; ns=runpy.run_path('rtl/csr/ub_csr_regs.py');
+          s0=ns['elaborate'](0); s1=ns['elaborate'](1); print(s0); print(s1);
+          assert s0['elaborated'] and s1['elaborated']"
+      - name: Verilator lint CSR
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y verilator
+          verilator --lint-only -Wall rtl/csr/ub_csr.v
+          verilator --lint-only -Wall rtl/csr/hooks/ub_csr.v

@@ -14,6 +14,9 @@ meta:
     full_word_writes_only: true
     wstrb: false
     read_latency_cycles: 1
+    write_latency_cycles: 1
+    write_rvalid: 0
+    write_err_valid: true
     unmapped:
       read_data: 0
       read_csr_err: 1
@@ -48,6 +51,8 @@ meta:
 global_rules:
   full_word_writes_only: true
   read_latency_cycles: 1
+  write_rvalid_next_cycle: 0
+  write_err_valid_next_cycle: true
   unmapped_csr_err: true
   no_read_clear: true
   no_rw_write_clear: true
@@ -58,6 +63,7 @@ global_rules:
     - 无 `csr_wstrb`；仅 32-bit 整字写。
     - 16-bit 字节地址，4 字节对齐；未对齐按未映射处理。
     - 读固定 1 拍：请求的下一拍 `csr_rvalid`/`csr_rdata`/`csr_err`。
+    - 写响应：下一拍 `csr_rvalid=0`，`csr_err` 有效（SPEC §3.2.3）。
     - 未映射：读回 0 且 `csr_err=1`；写忽略且 `csr_err=1`。
     - 计数器饱和到全 1。无读清、无 RW 写清。
     - "`PORT_RST` 写 1 自清，产生 16 拍 `core_clk` 脉冲；不复位 CSR 配置、计数、IRQ、TEST。"

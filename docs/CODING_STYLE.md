@@ -119,6 +119,6 @@
 ## 10. 寄存器表单一来源
 
 `docs/regmap/regmap.yaml` 是 CSR 的唯一可编辑源。`docs/REGMAP.md` 与
-`rtl/csr/ub_csr_regs.py` / RAL / 固件头 / `model/regs.py` 均由
-`python3 scripts/gen_regmap.py` 生成，禁止手改。约定与端口拆分见
-[regmap/README.md](regmap/README.md)。
+`rtl/csr/ub_csr_regs.py` / `rtl/csr/ub_csr.v` / `tb/ral/ub_regmodel.py` /
+固件头 / `model/regs.py` 均由 `python3 scripts/gen_regmap.py` 生成，禁止手改。
+约定与端口拆分见 [regmap/README.md](regmap/README.md)。

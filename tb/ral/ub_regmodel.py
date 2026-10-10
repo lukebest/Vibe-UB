@@ -1,7 +1,6 @@
 """UB M1 uvm-python register model. GENERATED — edit docs/regmap/regmap.yaml
 
-PR #6 tb/ tree is not on main yet. This file lives at gen/tb_ral/ub_regmodel.py
-and should move to tb/ral/ub_regmodel.py when that tree lands.
+Lives at tb/ral/ub_regmodel.py (PR #6 tb/ is on main).
 
 Assumptions: uvm-python (tpoikela/uvm-python / lukebest/uvm-python) UVMReg,
 UVMRegField.configure(parent, size, lsb_pos, access, volatile, reset,

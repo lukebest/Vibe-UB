@@ -120,10 +120,15 @@ def test_cnt_clr_bits_0_through_8():
 
 
 def test_global_rules():
-    rules = load_regmap()["global_rules"]
+    data = load_regmap()
+    rules = data["global_rules"]
+    bus = data["meta"]["bus"]
     assert rules["full_word_writes_only"] is True
     assert rules["read_latency_cycles"] == 1
     assert rules["unmapped_csr_err"] is True
+    assert rules["write_rvalid_next_cycle"] == 0
+    assert bus["write_rvalid"] == 0
+    assert bus["write_latency_cycles"] == 1
 
 
 def test_csr_yaml_driven_ports_and_hooks_split():
@@ -147,3 +152,14 @@ def test_csr_yaml_driven_ports_and_hooks_split():
     ):
         assert token in v0, token
     assert "|(irq_sticky & ~irq_mask_w)" in v0
+    assert "csr_rvalid <= req_fire & ~csr_wr" in v0
+    assert "write cycle: next csr_rvalid=0" in v0
+
+
+def test_ral_lives_under_tb_ral():
+    from gen_regmap import OUTPUT_PATHS
+
+    assert "tb/ral/ub_regmodel.py" in OUTPUT_PATHS
+    assert "gen/tb_ral/ub_regmodel.py" not in OUTPUT_PATHS
+    assert "rtl/csr/ub_csr.v" in OUTPUT_PATHS
+    assert "rtl/csr/hooks/ub_csr.v" in OUTPUT_PATHS

@@ -129,6 +129,10 @@ def validate_schema_lite(data: dict[str, Any]) -> list[str]:
         errors.append("bus.wstrb must be false")
     if bus.get("read_latency_cycles") != 1:
         errors.append("bus.read_latency_cycles must be 1")
+    if bus.get("write_rvalid", 0) != 0:
+        errors.append("bus.write_rvalid must be 0 (SPEC §3.2.3 write next-cycle)")
+    if bus.get("write_latency_cycles", 1) != 1:
+        errors.append("bus.write_latency_cycles must be 1")
     unmapped = bus.get("unmapped") or {}
     if unmapped.get("read_data") != 0 or unmapped.get("read_csr_err") != 1:
         errors.append("unmapped read must be data=0 csr_err=1")
@@ -139,6 +143,8 @@ def validate_schema_lite(data: dict[str, Any]) -> list[str]:
         errors.append("global_rules.full_word_writes_only must be true")
     if rules.get("read_latency_cycles") != 1:
         errors.append("global_rules.read_latency_cycles must be 1")
+    if rules.get("write_rvalid_next_cycle", 0) != 0:
+        errors.append("global_rules.write_rvalid_next_cycle must be 0")
     if rules.get("unmapped_csr_err") is not True:
         errors.append("global_rules.unmapped_csr_err must be true")
     return errors

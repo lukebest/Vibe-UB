@@ -14,7 +14,7 @@
 - `docs/PROCESS.md`：每模块节拍、工具流水线、REGMAP 单一来源、规则库每周版本、每周复盘指标、PHY 先行、过渡安排（D17）。
 - `docs/rules/`：architect / design / verification / backend 规则库骨架（v0.1）。
 - `docs/DECISIONS.md` D17：团队分工与流程（Luke Liu via Firstmate，2026-10-10 16:48 Asia/Shanghai）。
-- 寄存器表单一来源 `docs/regmap/regmap.yaml` + `scripts/gen_regmap.py`：生成 `docs/REGMAP.md`、`rtl/csr/ub_csr_regs.py`、`gen/tb_ral/ub_regmodel.py`、`sw/include/ub_regs.h`、`sw/hal/ub_regs_access.{h,c}`、`model/regs.py`。检查：`python3 scripts/gen_regmap.py --check`。CI：`.github/workflows/regmap.yml`。
+- 寄存器表单一来源 `docs/regmap/regmap.yaml` + `scripts/gen_regmap.py`：生成 `docs/REGMAP.md`、`rtl/csr/ub_csr_regs.py`、`rtl/csr/ub_csr.v`、`rtl/csr/hooks/ub_csr.v`、`tb/ral/ub_regmodel.py`、`sw/include/ub_regs.h`、`sw/hal/ub_regs_access.{h,c}`、`model/regs.py`。检查：`python3 scripts/gen_regmap.py --check`。CI：`.github/workflows/regmap.yml`。RAL 已迁到 `tb/ral/`（PR #6 `tb/` 已合入）；`gen/tb_ral/` 删除。写响应下一拍 `csr_rvalid=0` 写入 YAML 总线规则（SPEC §3.2.3）。
 
 ### Changed
 

@@ -148,7 +148,7 @@ WINDOWS = (
 )
 
 IRQ = {'enable': {'reg': 'CTRL', 'field': 'IRQ_EN'}, 'status_reg': 'IRQ_STATUS', 'mask': {'reg': 'IRQ_MASK', 'field': 'MASK'}, 'output': 'irq', 'polarity': 'high', 'reset_masked': True, 'note': 'REGMAP: IRQ_EN=1 and any unmasked IRQ_STATUS bit. MASK bit 1 = block. Reset IRQ_MASK=all-1, IRQ_EN=0. Port `irq` is active-high.'}
-RULES = {'full_word_writes_only': True, 'read_latency_cycles': 1, 'unmapped_csr_err': True, 'no_read_clear': True, 'no_rw_write_clear': True, 'sticky_access': 'W1C', 'counter_access': 'RO + CNT_CLR', 'reserved_bits': '未实现的保留位读 0、写忽略。'}
+RULES = {'full_word_writes_only': True, 'read_latency_cycles': 1, 'write_rvalid_next_cycle': 0, 'write_err_valid_next_cycle': True, 'unmapped_csr_err': True, 'no_read_clear': True, 'no_rw_write_clear': True, 'sticky_access': 'W1C', 'counter_access': 'RO + CNT_CLR', 'reserved_bits': '未实现的保留位读 0、写忽略。'}
 PORT_RST_PULSE_CYCLES = 16
 
 
@@ -252,7 +252,6 @@ def emit_verilog(test_hooks: bool) -> str:
     w(f"  wire sel_test = {test_sels};")
     w("  wire wr_ok_fn   = wr_fire & sel_fn;")
     w("  wire wr_ok_test = wr_fire & sel_test & test_active;")
-    w("  wire wr_ok      = wr_ok_fn | wr_ok_test;")
     w("")
 
     # storage declarations
@@ -416,7 +415,10 @@ def emit_verilog(test_hooks: bool) -> str:
     w("      csr_rdata  <= 32'h0;")
     w("      csr_err    <= 1'b0;")
     w("    end else begin")
-    w("      csr_rvalid <= req_fire & ~csr_wr; // 1-cycle read; write rvalid=0")
+    wrv = RULES.get("write_rvalid_next_cycle", 0)
+    if wrv != 0:
+        raise ValueError("SPEC §3.2.3 requires write next-cycle csr_rvalid=0")
+    w("      csr_rvalid <= req_fire & ~csr_wr; // write cycle: next csr_rvalid=0 (SPEC §3.2.3)")
     w("      csr_rdata  <= rdata_n;")
     w("      csr_err    <= req_fire ? err_n : 1'b0;")
     w("    end")
@@ -439,49 +441,137 @@ def _qname(reg: str, field: str) -> str:
     return f"q_{reg.lower()}_{field.lower()}"
 
 
+try:
+    from pycircuit import Circuit, compile, module, u  # type: ignore
+    HAVE_PYCIRCUIT = True
+except ImportError:  # pragma: no cover - frontend optional
+    HAVE_PYCIRCUIT = False
+    Circuit = None  # type: ignore
+    compile = None  # type: ignore
+    module = None  # type: ignore
+    u = None  # type: ignore
+
+
+def _csr_circuit(m, test_hooks: int) -> None:
+    """Port-accurate pyc4.0 boundary. PRODUCT .v is emit_verilog (no pycc)."""
+    clk = m.clock("core_clk")
+    rst = m.reset("rst_pyc")
+    req = m.input("csr_req", width=1)
+    wr = m.input("csr_wr", width=1)
+    m.input("csr_addr", width=16)
+    m.input("csr_wdata", width=32)
+    seen_in: set[str] = set()
+    for f in FIELDS:
+        hp = f.get("hw_port")
+        if hp and hp not in seen_in:
+            seen_in.add(hp)
+            m.input(hp, width=int(f["width"]))
+        ep = f.get("event_port")
+        if ep and ep not in seen_in:
+            seen_in.add(ep)
+            m.input(ep, width=1)
+        ip = f.get("increment_port")
+        if ip and ip not in seen_in:
+            seen_in.add(ip)
+            m.input(ip, width=1)
+    if test_hooks:
+        m.input("tb_test_mode", width=1)
+    ready = m.out("csr_ready_q", clk=clk, rst=rst, width=1, init=u(1, 1))
+    ready.set(u(1, 1))
+    m.output("csr_ready", ready)
+    rvalid = m.out("csr_rvalid_q", clk=clk, rst=rst, width=1, init=u(1, 0))
+    rvalid.set(m.and_(req, m.not_(wr)))  # write next-cycle rvalid=0
+    m.output("csr_rvalid", rvalid)
+    rdata = m.out("csr_rdata_q", clk=clk, rst=rst, width=32, init=u(32, 0))
+    rdata.set(u(32, 0))
+    m.output("csr_rdata", rdata)
+    err = m.out("csr_err_q", clk=clk, rst=rst, width=1, init=u(1, 0))
+    err.set(u(1, 0))
+    m.output("csr_err", err)
+    seen_out: set[str] = set()
+    for f in FIELDS:
+        po = f.get("pulse_output")
+        if po and po not in seen_out:
+            seen_out.add(po)
+            m.output(po, u(1, 0))
+        co = f.get("config_output")
+        if co and co not in seen_out:
+            seen_out.add(co)
+            wdt = int(f["width"])
+            rstv = 0 if f["reset"] is None else int(f["reset"])
+            q = m.out("elab_" + co, clk=clk, rst=rst, width=wdt, init=u(wdt, rstv))
+            q.set(q.out())
+            m.output(co, q)
+    irq_name = IRQ.get("output", "irq")
+    if irq_name not in seen_out:
+        m.output(irq_name, u(1, 0))
+
+
+if HAVE_PYCIRCUIT:
+    @module(name="ub_csr")
+    def _elab_product(m: Circuit) -> None:
+        _csr_circuit(m, 0)
+
+    @module(name="ub_csr")
+    def _elab_hooks(m: Circuit) -> None:
+        _csr_circuit(m, 1)
+else:  # pragma: no cover
+    _elab_product = None
+    _elab_hooks = None
+
+
 def elaborate(test_hooks: int = 0) -> dict:
-    """Import/elaborate with pyc4.0 if present. Does not require pyCircuit."""
+    """Elaborate TEST_HOOKS=0/1 via pycircuit.compile(). PRODUCT .v is emit_verilog."""
+    import shutil
+
     status = {
         "test_hooks": int(test_hooks),
-        "pycircuit": False,
+        "pycircuit": HAVE_PYCIRCUIT,
         "elaborated": False,
         "reason": None,
         "verilog_chars": len(emit_verilog(bool(test_hooks))),
+        "pycc": shutil.which("pycc") is not None,
+        "modules": [],
+        "mlir_chars": 0,
     }
-    try:
-        from pycircuit import Circuit, module, u  # type: ignore
-    except ImportError as exc:
-        status["reason"] = f"pycircuit not importable: {exc}"
+    if not HAVE_PYCIRCUIT:
+        status["reason"] = "pycircuit not importable"
         return status
-    status["pycircuit"] = True
-
-    @module
-    def build(m: Circuit) -> None:
-        clk = m.clock("core_clk")
-        rst = m.reset("rst_pyc")
-        _ = (clk, rst, u)
-        m.input("csr_req", width=1)
-        ready = m.out("csr_ready_q", clk=clk, rst=rst, width=1, init=u(1, 1))
-        ready.set(u(1, 1))
-        m.output("csr_ready", ready)
-
+    fn = _elab_hooks if test_hooks else _elab_product
     try:
-        _ = build
+        design = compile(fn)
         status["elaborated"] = True
-        status["reason"] = "pycircuit imported; @module build() constructed"
-    except Exception as exc:  # pragma: no cover
-        status["reason"] = f"pycircuit imported but elaborate failed: {exc}"
+        status["mlir_chars"] = len(design.emit_mlir())
+        status["modules"] = [cm.sym_name for cm in design.modules()]
+        status["reason"] = (
+            "compile() Design (frontend MLIR). PRODUCT Verilog is emit_verilog; "
+            "pycc/LLVM 19 is required to lower Circuit→.v and is not on PATH."
+        )
+    except Exception as exc:
+        status["reason"] = f"compile failed: {type(exc).__name__}: {exc}"
     return status
 
 
-def main() -> int:
+def generate() -> tuple[Path, Path]:
+    product = emit_verilog(False)
+    hooks = emit_verilog(True)
+    if "`ifdef" in product or "`ifdef" in hooks:
+        raise RuntimeError("generated Verilog must not use ifdef TEST_HOOKS")
+    if "input  wire        tb_test_mode" in product:
+        raise RuntimeError("PRODUCT netlist must not contain tb_test_mode port")
     PRODUCT_V.parent.mkdir(parents=True, exist_ok=True)
     HOOKS_V.parent.mkdir(parents=True, exist_ok=True)
-    PRODUCT_V.write_text(emit_verilog(False), encoding="utf-8")
-    HOOKS_V.write_text(emit_verilog(True), encoding="utf-8")
-    print(f"wrote {PRODUCT_V}")
-    print(f"wrote {HOOKS_V}")
+    PRODUCT_V.write_text(product, encoding="utf-8")
+    HOOKS_V.write_text(hooks, encoding="utf-8")
+    return PRODUCT_V, HOOKS_V
+
+
+def main() -> int:
+    p, h = generate()
+    print(f"wrote {p}")
+    print(f"wrote {h}")
     print(elaborate(0))
+    print(elaborate(1))
     return 0
 
 

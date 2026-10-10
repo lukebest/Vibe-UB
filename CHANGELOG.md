@@ -29,3 +29,5 @@
 - `LMSM_CTRL.START` 更名为 `CTRL.LMSM_START`（REGMAP `0x0000` bit1）。关闭 `STATUS.RETRY_REQ_ST` / `RETRY_ACK_ST` 与 `PARAM_PHY.NUM_LANES_{TX,RX}` 编码（二进制 1/2/4/8）；保留值 RTL 不产出、TB assert。
 - `docs/TEAM.md`、`docs/PROCESS.md`：按 D18 写全层级范围；PROCESS §6 为「全层级推进」。
 - `docs/TEAM.md`、`docs/PROCESS.md`：按 D19 写入三条轨道、轨道所有权，以及「设计-B」/「验证-B」、「设计-C」/「验证-C」新角色。
+- `docs/CODING_STYLE.md` §10：统一存储原语 `ub_cmn_mem_1r1w`（`DEPTH`/`WIDTH`；`clk`；阵列无复位；1R1W `we/waddr/wdata` + `re/raddr/rdata`；读 1 拍寄存、同址 read-old — Xia 提案，规范未裁定）。pyCircuit 行为模型、pycc 生成、门禁 stub 名单；换宏不改口。线 B RTP 重传/重排、TA 未决与线 C UMMU/decoder 大表必须例化。
+- SPEC §10.5 + CODING_STYLE §4：§10 点名存储允许 HOOKS-only backdoor `tb_<inst>_bd_we/addr/wdata` 与 `tb_<inst>_bd_re/rdata`，`tb_test_mode` 门控；eqy 接低。其它叶子内部缓冲不得加钩子。不改 TEAM/PROCESS/DECISIONS；不改 `regmap.yaml`。

@@ -810,8 +810,21 @@ Retry 深度下界公式见 UB-DL §4.7.3.2（含 FEC 120/128 与 RTT）。M1 25
 | --- | --- |
 | force / deposit FSM 当前态或非法态 | 禁止。默认分支用 [CODING_STYLE.md](CODING_STYLE.md) 的 **具名 waiver** 覆盖。到达 `Link_Active` 必须走真实转移，并用 `LMSM_TMR_SCALE` 缩短等待 |
 | PCS RX unpack 中 `n==0 && have` 的 drain 分支 | **待定：验证确认端口可达性，否则删除分支或 waiver**。不为此加产品钩子 |
-| CRC / FEC / deskew / 缓冲等叶子内部状态 | 不在产品顶层加钩子。叶子端口或 wrapper 共仿真观察 |
+| CRC / FEC / deskew / 缓冲等叶子内部状态 | 不在产品顶层加钩子。叶子端口或 wrapper 共仿真观察。**例外：** 下表点名的存储阵列 |
 | 内部信号 `force` / `deposit` | 禁止。只允许端口、`tb_*`、寄存器 |
+
+**存储 backdoor 例外（仅下表点名阵列）：** HOOKS 网表可出预载 / 回读口 `tb_<inst>_bd_we`、`tb_<inst>_bd_addr`、`tb_<inst>_bd_wdata` 与 `tb_<inst>_bd_re`、`tb_<inst>_bd_rdata`。仅 `TEST_HOOKS=1`；`tb_test_mode` 门控（为 0 时不介入：写忽略、读数据保持 0）。PRODUCT 无这些口。eqy：`tb_test_mode=0` 且 backdoor 输入接低。**不得**再给其它叶子内部缓冲加钩子。口宽随表项格式；格式未关前 **未知**。阵列本体例化 `ub_cmn_mem_1r1w`（[CODING_STYLE.md](CODING_STYLE.md) §10）。
+
+| 点名阵列 | 线 | `inst` 建议 | 备注 |
+| --- | --- | --- | --- |
+| RTP 重传缓冲 | B | `tp_rtp_retry` | 表格式未关 |
+| RTP 重排缓冲 | B | `tp_rtp_reorder` | 表格式未关 |
+| TA 未决表 | B | `ta_outstanding` | 表格式未关 |
+| UMMU 配置表 | C | `mem_cfg` | §9.4.2.1；格式未关 |
+| UMMU TCT | C | `mem_tct` | §9.4.2.2；格式未关 |
+| UMMU MATT | C | `mem_matt` | §9.4.3；格式未关 |
+| UMMU MAPT | C | `mem_mapt` | §9.4.4；格式未关 |
+| UB decoder 表 | C | `mem_dec` | §9.5；格式未关 |
 
 ---
 

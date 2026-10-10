@@ -9,7 +9,8 @@
 
 module ub_pcs_fec_syndrome_ref #(
     parameter [8:0] PRIM_POLY = 9'h11D,
-    parameter integer CW_HIGH_FIRST = 1
+    parameter integer CW_HIGH_FIRST = 1,
+    parameter integer ROOT_BASE = 0
 ) (
     input  wire [1023:0] cw_in,
     output wire [63:0]   syndromes
@@ -61,7 +62,7 @@ module ub_pcs_fec_syndrome_ref #(
         reg [7:0] s [0:7];
         begin
             for (j = 0; j < 8; j = j + 1) begin
-                aj = alpha_pow(j);
+                aj = alpha_pow(j + ROOT_BASE);
                 acc = 8'h00;
                 // High-first Horner: ((r127*aj + r126)*aj + ... ) + r0.
                 for (si = 0; si < 128; si = si + 1) begin

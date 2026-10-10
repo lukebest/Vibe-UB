@@ -3,6 +3,7 @@
 VARIANT selects the toplevel:
   enc_ref / syn_ref           — must match the golden
   enc_bad_coeff / enc_rev_order / enc_poly11b — must mismatch
+  syn_poly11b / syn_bad_root  — must mismatch (scoreboard FAIL)
 
 Compare counts are per symbol (GATE-TB-SB-001). T=2 extra-syndrome check
 is exercised on the syndrome ref (S4..S7 of a T=2-corrected word). Bypass
@@ -179,12 +180,24 @@ def _write_report(payload: dict) -> None:
             "",
             "## Self-test by directory",
             "",
-            "- `tb/fec_ref/`: 5 Icarus+cocotb runs (enc_ref, syn_ref, enc_bad_coeff, enc_rev_order, enc_poly11b).",
+            "- `tb/fec_ref/`: 7 Icarus+cocotb runs (enc_ref, syn_ref, enc_bad_coeff, enc_rev_order, enc_poly11b, syn_poly11b, syn_bad_root).",
             f"- encoder symbol compares: {payload['enc_n_compare']} (JSON 8 + one-hot 120 + extra-random 8 + T=2 incrementing).",
             f"- syndrome symbol compares: {payload['syn_n_compare']} (clean CWs + JSON two_errors + T=2 corrected S0..S7).",
             "",
         ]
     )
+    equiv_status = REPORT_DIR / "equiv_status.txt"
+    if equiv_status.is_file():
+        lines.extend(
+            [
+                "## Formula-ref Yosys equiv",
+                "",
+                "```",
+                equiv_status.read_text(encoding="utf-8").rstrip(),
+                "```",
+                "",
+            ]
+        )
     legacy = REPORT_DIR / "legacy_equiv.txt"
     if legacy.is_file():
         lines.extend(
@@ -207,10 +220,16 @@ def _write_report(payload: dict) -> None:
 @cocotb.test()
 async def test_formula_ref(dut):
     variant = os.environ.get("FEC_REF_VARIANT", "enc_ref")
-    expect_fail = variant.startswith("enc_bad") or variant.startswith("enc_rev") or variant.startswith("enc_poly")
+    expect_fail = (
+        variant.startswith("enc_bad")
+        or variant.startswith("enc_rev")
+        or variant.startswith("enc_poly")
+        or variant.startswith("syn_poly")
+        or variant.startswith("syn_bad")
+    )
 
     if variant.startswith("syn"):
-        await _run_syndrome(dut, variant, expect_fail=False)
+        await _run_syndrome(dut, variant, expect_fail=expect_fail)
     else:
         await _run_encoder(dut, variant, expect_fail=expect_fail)
 
@@ -227,6 +246,10 @@ async def _run_encoder(dut, variant: str, *, expect_fail: bool) -> None:
     if expect_fail:
         _record_fake(variant, sb)
     else:
+        print(
+            f"{variant}: PASS n_compare={sb.n_compare} n_mismatch={sb.n_mismatch}",
+            flush=True,
+        )
         _merge_counts({
             "enc_variant": sb.name,
             "enc_n_compare": sb.n_compare,
@@ -281,8 +304,19 @@ async def _run_syndrome(dut, variant: str, *, expect_fail: bool) -> None:
     for i, a in enumerate(act):
         sb.compare(0, a, f"{variant} t2_corrected S{i}")
 
-    _merge_counts({"syn_variant": sb.name, "syn_n_compare": sb.n_compare,
-                   "syn_n_mismatch": sb.n_mismatch, "first_mismatch": sb.first})
+    if expect_fail:
+        _record_fake(variant, sb)
+    else:
+        print(
+            f"{variant}: PASS n_compare={sb.n_compare} n_mismatch={sb.n_mismatch}",
+            flush=True,
+        )
+        _merge_counts({
+            "syn_variant": sb.name,
+            "syn_n_compare": sb.n_compare,
+            "syn_n_mismatch": sb.n_mismatch,
+            "first_mismatch": sb.first,
+        })
     sb.check(expect_fail=expect_fail)
 
 
@@ -319,6 +353,7 @@ def _record_fake(variant: str, sb: Scoreboard) -> None:
         f"{variant}: n_compare={sb.n_compare} n_mismatch={sb.n_mismatch} "
         f"first={sb.first}"
     )
+    print(line, flush=True)
     prev = _load_prev()
     lines = list(prev.get("fake_fail_lines") or [])
     if line not in lines:

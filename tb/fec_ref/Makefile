@@ -38,6 +38,12 @@ VERILOG_SOURCES := $(REF_DIR)/ub_pcs_fec_enc_ref.sv $(FALSE_DIR)/ub_pcs_fec_enc_
 else ifeq ($(FEC_REF_VARIANT),enc_poly11b)
 TOPLEVEL := ub_pcs_fec_enc_ref_poly11b
 VERILOG_SOURCES := $(REF_DIR)/ub_pcs_fec_enc_ref.sv $(FALSE_DIR)/ub_pcs_fec_enc_ref_poly11b.sv
+else ifeq ($(FEC_REF_VARIANT),syn_poly11b)
+TOPLEVEL := ub_pcs_fec_syndrome_ref_poly11b
+VERILOG_SOURCES := $(REF_DIR)/ub_pcs_fec_syndrome_ref.sv $(FALSE_DIR)/ub_pcs_fec_syndrome_ref_poly11b.sv
+else ifeq ($(FEC_REF_VARIANT),syn_bad_root)
+TOPLEVEL := ub_pcs_fec_syndrome_ref_bad_root
+VERILOG_SOURCES := $(REF_DIR)/ub_pcs_fec_syndrome_ref.sv $(FALSE_DIR)/ub_pcs_fec_syndrome_ref_bad_root.sv
 else
 $(error unknown FEC_REF_VARIANT=$(FEC_REF_VARIANT))
 endif
@@ -57,3 +63,5 @@ selfcheck:
 	$(call run_one,enc_bad_coeff)
 	$(call run_one,enc_rev_order)
 	$(call run_one,enc_poly11b)
+	$(call run_one,syn_poly11b)
+	$(call run_one,syn_bad_root)

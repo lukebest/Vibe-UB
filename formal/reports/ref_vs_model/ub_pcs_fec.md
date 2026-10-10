@@ -23,12 +23,27 @@ None (refs match the golden on every counted symbol).
 - enc_bad_coeff: n_compare=17536 n_mismatch=1049 first={'ctx': 'enc_bad_coeff json:all_0x55 sym120', 'expected': 220, 'actual': 140}
 - enc_rev_order: n_compare=17536 n_mismatch=1078 first={'ctx': 'enc_rev_order json:incrementing sym120', 'expected': 40, 'actual': 7}
 - enc_poly11b: n_compare=17536 n_mismatch=1078 first={'ctx': 'enc_poly11b json:all_0x55 sym120', 'expected': 220, 'actual': 229}
+- syn_poly11b: n_compare=1104 n_mismatch=954 first={'ctx': 'syn_poly11b json:all_0x55 S1', 'expected': 0, 'actual': 246}
+- syn_bad_root: n_compare=1104 n_mismatch=144 first={'ctx': 'syn_bad_root json:all_0x55 S7', 'expected': 0, 'actual': 97}
 
 ## Self-test by directory
 
-- `tb/fec_ref/`: 5 Icarus+cocotb runs (enc_ref, syn_ref, enc_bad_coeff, enc_rev_order, enc_poly11b).
+- `tb/fec_ref/`: 7 Icarus+cocotb runs (enc_ref, syn_ref, enc_bad_coeff, enc_rev_order, enc_poly11b, syn_poly11b, syn_bad_root).
 - encoder symbol compares: 17536 (JSON 8 + one-hot 120 + extra-random 8 + T=2 incrementing).
 - syndrome symbol compares: 1104 (clean CWs + JSON two_errors + T=2 corrected S0..S7).
+
+## Formula-ref Yosys equiv
+
+```
+equiv: not run (timeout)
+equiv: not run (timeout) [ub_pcs_fec_enc_self]
+equiv: not run (timeout) [ub_pcs_fec_enc_false_ub_pcs_fec_enc_ref_bad_coeff]
+equiv: not run (timeout) [ub_pcs_fec_enc_false_ub_pcs_fec_enc_ref_poly11b]
+equiv: not run (timeout) [ub_pcs_fec_enc_false_ub_pcs_fec_enc_ref_rev_order]
+equiv: not run (timeout) [ub_pcs_fec_syndrome_self]
+equiv: not run (timeout) [ub_pcs_fec_syndrome_false_ub_pcs_fec_syndrome_ref_bad_root]
+equiv: not run (timeout) [ub_pcs_fec_syndrome_false_ub_pcs_fec_syndrome_ref_poly11b]
+```
 
 ## Legacy RTL (`rtl/pcs/`) — informational
 
@@ -40,3 +55,4 @@ legacy ub_pcs_fec_syndrome: TIMEOUT loading rtl (legacy; not blocking)
 Yosys 0.33 times out unrolling the per-symbol combo loop; Icarus is the
 passing path. Legacy encoder ports are sequential (`clk`/`valid_*`);
 the formula ref is combinational. Not blocking.
+

@@ -19,6 +19,14 @@ tb/reports/cov_func/**
 tb/reports/cov_line/**
 !tb/reports/**/.gitkeep
 
+# Tool-gate scratch
+scripts/gate/out/
+.pycircuit-src/
+.pycircuit_out/
+.pycircuit-venv/
+formal/**/*.sby_*
+*.sbydir/
+
 # Impl quick-synth: never commit PDK / liberty / local work dirs
 .cache/sky130/
 scripts/impl/.cache/

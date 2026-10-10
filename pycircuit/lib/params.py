@@ -16,7 +16,7 @@ PRECODE_EN = 0  # SPEC §9; PMA, not this batch
 TEST_HOOKS = 0  # SPEC §10: no hooks on these leaves
 F_CORE_HZ = 80_570_000  # ≈ 2.578125e9 / 32; SPEC §4.1 / §9
 
-# PCS 8-bit stripe (SPEC §2.4, UB-PHY §3.2.2.3; bit order SPEC §3.3)
+# PCS 8-bit stripe (SPEC §2.4 cites UB-PHY §3.2.2.3 Lane<j,i>=CA<(N-1)-i*LaneNum-j>; bit order SPEC §3.3)
 SYM_W = 8
 
 # Scrambler — closed widths only (SPEC §2.4 / §9)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Minimal generator + golden self-check (not a verification TB).
 
-Proves emit() runs. Lane stripe is involutive. CRC30 golden uses SPEC
+Proves emit() runs. Lane dist is UB-PHY §3.2.2.3 (involutive + TB cosim). CRC30 golden uses SPEC
 §2.6 byte-0 / MSB-first-per-byte and skips the last-flit BCRC field.
 Scrambler involution uses *explicit* elaboration-only OPEN tokens
 (SPEC §13) — not Switch, not product defaults.
@@ -66,14 +66,16 @@ def crc_flit(c: int, flit: int, *, last: bool = False) -> int:
 
 
 def lane_dist(data: int, num_lanes: int, pma_w: int, sym_w: int) -> int:
+    """UB-PHY §3.2.2.3 CodecNum=1 on this cycle's NSYM-symbol window."""
     nsym = num_lanes * (pma_w // sym_w)
     out = 0
     mask = (1 << sym_w) - 1
-    for s in range(nsym):
-        lane = s % num_lanes
-        pos = s // num_lanes
-        sym = (data >> (s * sym_w)) & mask
-        out |= sym << (lane * pma_w + pos * sym_w)
+    spl = pma_w // sym_w
+    for i in range(spl):
+        for j in range(num_lanes):
+            src = (nsym - 1) - i * num_lanes - j
+            sym = (data >> (src * sym_w)) & mask
+            out |= sym << (j * pma_w + i * sym_w)
     return out
 
 
@@ -81,12 +83,64 @@ def lane_dedist(data: int, num_lanes: int, pma_w: int, sym_w: int) -> int:
     nsym = num_lanes * (pma_w // sym_w)
     out = 0
     mask = (1 << sym_w) - 1
-    for s in range(nsym):
-        lane = s % num_lanes
-        pos = s // num_lanes
-        sym = (data >> (lane * pma_w + pos * sym_w)) & mask
-        out |= sym << (s * sym_w)
+    spl = pma_w // sym_w
+    for i in range(spl):
+        for j in range(num_lanes):
+            src = (nsym - 1) - i * num_lanes - j
+            sym = (data >> (j * pma_w + i * sym_w)) & mask
+            out |= sym << (src * sym_w)
     return out
+
+
+def _pack_symbol_major(symbols: list[int], sym_w: int) -> int:
+    word = 0
+    for s, val in enumerate(symbols):
+        word |= (val & ((1 << sym_w) - 1)) << (s * sym_w)
+    return word
+
+
+def _cosim_vs_tb_model() -> None:
+    """Bit-exact vs tb.models.ub_pcs_lane_dist (tb/ not modified)."""
+    root = HERE.parent
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    from tb.models.ub_pcs_lane_dist import UbPcsLaneDist, UbPcsLaneDistConfig
+
+    for nlane in (1, 2, 4, 8):
+        nsym = nlane * (P.PMA_W // P.SYM_W)
+        ca = [(s * 17 + nlane) & 0xFF for s in range(nsym)]
+        cfg = UbPcsLaneDistConfig(n_symbols=nsym)
+        tb = UbPcsLaneDist(nlane, cfg)
+        lanes = tb.distribute(ca)
+        words = tb.pack_lane_words(lanes)
+        tb_out = 0
+        for j, lane_words in enumerate(words):
+            tb_out |= lane_words[0] << (j * P.PMA_W)
+        rtl_in = _pack_symbol_major(ca, P.SYM_W)
+        rtl_out = lane_dist(rtl_in, nlane, P.PMA_W, P.SYM_W)
+        assert rtl_out == tb_out, f"window cosim mismatch x{nlane}"
+        back = lane_dedist(rtl_out, nlane, P.PMA_W, P.SYM_W)
+        assert back == rtl_in
+
+    # Full RS(128) codeword vs TB, high-end windows (first-on-wire first).
+    nlane = 4
+    n = 128
+    win = nlane * (P.PMA_W // P.SYM_W)
+    ca = list(range(n))
+    tb = UbPcsLaneDist(nlane)
+    packed = tb.pack_lane_words(tb.distribute(ca))
+    nwords = n // win
+    for k in range(nwords):
+        window = ca[n - win * (k + 1) : n - win * k]
+        rtl_out = lane_dist(_pack_symbol_major(window, P.SYM_W), nlane, P.PMA_W, P.SYM_W)
+        tb_out = 0
+        for j in range(nlane):
+            tb_out |= packed[j][k] << (j * P.PMA_W)
+        assert rtl_out == tb_out, f"RS128 cosim mismatch word {k}"
+    assert packed[0][0] & 0xFF == 127
+    assert (packed[1][0] & 0xFF) == 126
+    assert (packed[2][0] & 0xFF) == 125
+    assert (packed[3][0] & 0xFF) == 124
 
 
 def _ports_block(text: str) -> str:
@@ -146,11 +200,18 @@ def main() -> int:
 
     for nlane in (1, 4, 8):
         width = nlane * P.PMA_W
+        nsym = nlane * (P.PMA_W // P.SYM_W)
         sample = (0x0123456789ABCDEF0123456789ABCDEF) & ((1 << width) - 1)
         striped = lane_dist(sample, nlane, P.PMA_W, P.SYM_W)
         back = lane_dedist(striped, nlane, P.PMA_W, P.SYM_W)
         assert back == sample, f"lane dist/dedist failed for x{nlane}"
-        assert (striped & 0xFF) == (sample & 0xFF)
+        # First-on-wire Lane<j,0> = CA<(NSYM-1)-j>
+        for j in range(nlane):
+            exp = (sample >> (((nsym - 1) - j) * P.SYM_W)) & 0xFF
+            got = (striped >> (j * P.PMA_W)) & 0xFF
+            assert got == exp, f"first-on-wire x{nlane} lane{j}"
+
+    _cosim_vs_tb_model()
 
     taps = ELAB_SCR_TAPS
     st = ELAB_LFSR_INIT
@@ -179,7 +240,7 @@ def main() -> int:
 
     print(
         "selfcheck ok: "
-        f"{len(paths)} leaves @ rtl/<block>/, lane involution, "
+        f"{len(paths)} leaves @ rtl/<block>/, lane UB-PHY+TB cosim, "
         f"CRC30 byte-MSB-first + last-flit skip, scramble involution "
         f"(ELAB_SCR_TAPS={ELAB_SCR_TAPS:#x} ELAB_LFSR_INIT={ELAB_LFSR_INIT:#x})"
     )

@@ -1,4 +1,4 @@
-"""ub_pcs_lane_dedist — inverse of ub_pcs_lane_dist (SPEC §2.4; UB-PHY §3.2.2.5 / §3.2.3)."""
+"""ub_pcs_lane_dedist — inverse of ub_pcs_lane_dist (SPEC §2.4; UB-PHY §3.2.2.3 / §3.2.5)."""
 
 from __future__ import annotations
 

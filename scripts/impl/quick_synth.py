@@ -859,7 +859,7 @@ def pick_raddr_port(ports: list[dict[str, Any]]) -> dict[str, Any] | None:
 def count_instances(verilog: str, mod: str) -> int:
     return len(
         re.findall(
-            rf"\b{re.escape(mod)}\s+(?:#\s*\([^;]*?\))?\s+\w+\s*\(",
+            rf"\b{re.escape(mod)}(?:\s+#\s*\([^;]*\))?\s+\w+\s*\(",
             verilog,
         )
     )
@@ -1230,7 +1230,7 @@ def detect_anomalies(r: dict[str, Any], src_text: str, yosys_log: str) -> list[s
     a: list[str] = []
     if r.get("latches_generic"):
         a.append("latch_inferred: " + ", ".join(r["latches_generic"][:8]))
-    if r.get("mem_generic") and not r.get("sram_blackbox"):
+    if r.get("mem_generic") and not r.get("sram_blackbox") and not r.get("sram_flopped"):
         a.append("inferred_memory: " + ", ".join(r["mem_generic"][:8]))
     if r.get("comb_loops"):
         a.append(f"comb_loop_count={r['comb_loops']}")
@@ -1253,7 +1253,7 @@ def detect_anomalies(r: dict[str, Any], src_text: str, yosys_log: str) -> list[s
         a.append("near_zero_cells_after_map (module optimized away)")
     elif sequential_src and flops == 0 and cells is not None and cells <= 2:
         a.append("near_zero_cells_after_map (possible unused/undriven sweep)")
-    if area is not None and area > 20000:
+    if area is not None and area > 20000 and not r.get("sram_flopped"):
         a.append(f"unexpectedly_large_area {area:.1f} um^2")
     if cells is not None and cells > 8000:
         a.append(f"unexpectedly_large_cell_count {cells}")
@@ -1387,6 +1387,14 @@ def self_check() -> int:
     expect(not is_placeholder_name("ub_pcs_scrambler"), "non-placeholder")
     expect(is_library_cell("ub_cmn_mem_1r1w_d128w64"), "mem is library cell")
     expect(not is_library_cell("ub_pcs_lane_dist_x4"), "leaf is not library")
+    expect(
+        count_instances(
+            "  ub_cmn_mem_1r1w_d128w64 u_mem (\n    .clk(clk)\n  );\n",
+            "ub_cmn_mem_1r1w_d128w64",
+        )
+        == 1,
+        "count_instances single-space inst",
+    )
 
     d, w, src = parse_mem_dims("ub_cmn_mem_1r1w_d128w64", None)
     expect((d, w) == (128, 64) and "tag" in src, f"tag dims {d}x{w} {src}")

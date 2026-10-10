@@ -15,7 +15,8 @@
 - `docs/rules/`：architect / design / verification / backend 规则库骨架（v0.1）。
 - `docs/DECISIONS.md` D17：团队分工与流程（Luke Liu via Firstmate，2026-10-10 16:48 Asia/Shanghai）。
 - `docs/DECISIONS.md` D18：全层级范围，作为完整 UB 控制器（Luke Liu via Firstmate，2026-10-10 17:04 Asia/Shanghai）；D18 取代 D2 的分阶段范围。
-- `docs/arch/MODULE_INVENTORY.md`：77 模块（S12 / M33 / L32；M1 覆盖 20）。列含 **线 A/B/C**（D19）；可选标延后；优先通路标 ★。其余列：钩子、数据通路、时钟复位+频率、存储深×宽（SRAM）、软件可见面。
+- `docs/DECISIONS.md` D19：三线并行与新增角色（Luke Liu via Firstmate，2026-10-10 17:22 Asia/Shanghai）。
+- `docs/arch/MODULE_INVENTORY.md`：77 模块（S12 / M33 / L32；M1 覆盖 20）。列含 **线 A/B/C**（D19）；可选标延后；优先通路标 ★。其余列：钩子、数据通路、时钟复位+频率、存储深×宽（SRAM / 行为 stub 时序）、软件可见面。
 - `docs/arch/LAYER_CONTRACTS.md`：§1–§3（DLL↔NW / NW↔TP / TP↔TA）先写最详，卡线 A/B；§4 TA↔FUN；§5–§7 线 C。DLL↔NW 锁 160 b、1 flit/拍。
 - `docs/arch/TRADEOFFS.md`：PM 四项标 **已定 D19**（3 线 A/B/C；LS 优先通路；必做先；附录 M10 后）。保留影响面/S/M/L；Sky130 代理至 PR #9 工艺。截止 Tue 2026-10-13。不改 DECISIONS/TEAM/PROCESS。
 
@@ -30,4 +31,5 @@
 - 模块名对齐 CODING_STYLE §5：`pcs_fec_enc`→`ub_pcs_fec_enc`，`pcs_fec_dec`→`ub_pcs_fec_dec`，`pcs_scrambler`→`ub_pcs_scrambler`，`pcs_descrambler`→`ub_pcs_descrambler`，`pcs_lane_dist`→`ub_pcs_lane_dist`，`pcs_lane_dedist`→`ub_pcs_lane_dedist`，`pcs_amctl_tx`→`ub_pcs_amctl_tx`，`pcs_amctl_rx`→`ub_pcs_amctl_rx`，`pcs_deskew`→`ub_pcs_deskew`，`segmenter`→`ub_dll_segmenter`，`reassembler`→`ub_dll_reassembler`，BCRC TX/RX→`ub_dll_bcrc` / `ub_dll_bcrc_check`，credit/VL/retry→`ub_dll_credit` / `ub_dll_vl` / `ub_dll_retry`。
 - `LMSM_CTRL.START` 更名为 `CTRL.LMSM_START`（REGMAP `0x0000` bit1）。关闭 `STATUS.RETRY_REQ_ST` / `RETRY_ACK_ST` 与 `PARAM_PHY.NUM_LANES_{TX,RX}` 编码（二进制 1/2/4/8）；保留值 RTL 不产出、TB assert。
 - `docs/TEAM.md`、`docs/PROCESS.md`：按 D18 写全层级范围；PROCESS §6 为「全层级推进」。
+- `docs/TEAM.md`、`docs/PROCESS.md`：按 D19 写入三条轨道、轨道所有权，以及「设计-B」/「验证-B」、「设计-C」/「验证-C」新角色。
 - `docs/SPEC.md` §1 / `docs/SPEC_INDEX.md` Phase 列：D18 全控制器；D19 线 A/B/C + 优先通路；§1.4 按线写里程碑草案。不改 TEAM/PROCESS/DECISIONS；不改 `regmap.yaml`。不展开 PR #9 的 §6/§13 针脚。

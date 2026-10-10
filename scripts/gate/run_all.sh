@@ -6,6 +6,7 @@ set -u
 source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
 jobs=(
+  spec-leak
   rtl-emit-consistency
   equiv
   pycircuit-provenance

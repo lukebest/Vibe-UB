@@ -140,6 +140,9 @@ def main() -> int:
         product = REPO_ROOT / leaf["product"]
         hooks = REPO_ROOT / leaf["hooks"]
         module = leaf["module"]
+        if leaf.get("placeholder"):
+            print(f"hooks-ports skip {module}: _placeholder (lint/TB only)")
+            continue
         if not product.is_file():
             continue
         if is_handwritten_path(product):

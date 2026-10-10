@@ -20,6 +20,7 @@ from gatelib import (
     discover_rtl,
     emit_report,
     handwritten_modules,
+    is_placeholder_module,
     load_yaml,
     print_tool_versions,
     rel,
@@ -263,6 +264,9 @@ def main() -> int:
         print("cdc-rdc: no RTL modules; PASS")
         return emit_report("cdc", [])
     for unit in disc["modules"]:
+        if is_placeholder_module(unit.module):
+            print(f"cdc-rdc skip {unit.module}: _placeholder (lint/TB only)")
+            continue
         raw = unit.file.read_text(encoding="utf-8", errors="replace")
         text = strip_verilog_comments(raw)
         # Analyze just this module body when the file has one module.

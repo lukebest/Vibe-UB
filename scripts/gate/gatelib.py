@@ -5,6 +5,7 @@ Kept stdlib-first. PyYAML is optional but used when present (scripts/gate/requir
 
 from __future__ import annotations
 
+import ast
 import fnmatch
 import json
 import os
@@ -24,6 +25,8 @@ HANDWRITTEN_LIST = LISTS_DIR / "handwritten.yml"
 BLACKBOX_LIST = LISTS_DIR / "blackbox.yml"
 HOOKS_PORTS_LIST = LISTS_DIR / "hooks_ports.yml"
 MIGRATE_LIST = LISTS_DIR / "pycircuit_migrate.txt"
+LEAK_ALLOW_LIST = LISTS_DIR / "leak_allow.yml"
+PLACEHOLDER_MARK = "PLACEHOLDER_SOURCE"
 INVENTORY_CANDIDATES = (
     REPO_ROOT / "docs" / "arch" / "MODULE_INVENTORY.yml",
     REPO_ROOT / "docs" / "arch" / "MODULE_INVENTORY.yaml",
@@ -179,8 +182,11 @@ def print_tool_versions(needed: Iterable[str]) -> None:
         "yosys": ("yosys_lock", ["yosys", "-V"]),
         "eqy": ("eqy_lock", ["eqy", "--version"]),
         "sby": ("sby_lock", ["sby", "--version"]),
-        "pycc": ("pycc_lock", ["pycc", "--version"]),
-        "python": ("", [sys.executable, "--version"]),
+        "pycc": ("llvm_lock", ["pycc", "--version"]),
+        "python": ("python_lock", [sys.executable, "--version"]),
+        "llvm": ("llvm_lock", ["llvm-config-19", "--version"]),
+        "cmake": ("cmake_lock", ["cmake", "--version"]),
+        "ninja": ("ninja_lock", ["ninja", "--version"]),
     }
     print("=== tool versions (TOOLCHAIN.lock vs actual) ===")
     for name in needed:
@@ -269,6 +275,12 @@ def _file_for_class(path_text: str) -> str:
 
 def classify_finding(finding: Finding) -> Finding:
     if finding.bucket == "report":
+        return finding
+    if finding.check == "spec_leak" or finding.rule in {
+        "PLACEHOLDER_INSTANTIATED",
+        "PLACEHOLDER_SOURCE_MISSING",
+    }:
+        finding.bucket = "new"
         return finding
     path = Path(REPO_ROOT / _file_for_class(finding.file))
     if is_handwritten_path(path):
@@ -717,6 +729,26 @@ def emit_report(check: str, findings: list[Finding]) -> int:
     elif not roster:
         print("(none)")
     pending = list_pending_waivers()
+    placeholders = [
+        leaf
+        for leaf in discover_pycircuit_leaves() + discover_product_leaves()
+        if leaf.get("placeholder")
+    ]
+    if placeholders:
+        print()
+        print("## SPEC §2.2 _placeholder (lint/TB only; not PRODUCT; not synth)")
+        print("| module | layer | file |")
+        print("| --- | --- | --- |")
+        seen_ph: set[str] = set()
+        for leaf in placeholders:
+            key = str(leaf.get("module"))
+            if key in seen_ph:
+                continue
+            seen_ph.add(key)
+            print(
+                f"| {leaf.get('module')} | {leaf.get('layer')} | "
+                f"{leaf.get('product') or leaf.get('source') or ''} |"
+            )
     if report:
         print()
         print("## Report-only (non-blocking; inventory / timing / pycc emit / combo depth)")
@@ -770,7 +802,8 @@ def read_migrate_roster() -> list[dict[str, str]]:
             if low.startswith("main"):
                 group, status = "main", ""
             elif "pr #11" in low:
-                group, status = "PR #11", "待 Xia 核实"
+                group = "PR #11"
+                status = "已迁" if "已迁" in body else "待 Xia 核实"
             elif body.upper().startswith("PR #"):
                 group = body.split("—")[0].split("-")[0].strip()
                 status = ""
@@ -1010,25 +1043,253 @@ def discover_rtl() -> dict[str, Any]:
     }
 
 
-def discover_pycircuit_leaves() -> list[dict[str, str]]:
-    """Leaves from pycircuit/<layer>/*.py (layer names not hard-coded)."""
+VARIANT_TABLE_NAMES = {
+    "VARIANTS",
+    "TAGS",
+    "PARAM_SETS",
+    "EMIT_TAGS",
+    "PARAM_VARIANTS",
+    "VARIANT_TABLE",
+    "EMIT_VARIANTS",
+}
+
+
+def is_placeholder_module(name: str) -> bool:
+    return name.endswith("_placeholder") or "_placeholder_" in name
+
+
+def is_placeholder_path(path: Path) -> bool:
+    return is_placeholder_module(Path(path).stem)
+
+
+def variant_module_name(leaf: str, tag: str | None) -> str:
+    """SPEC §2.2: <leaf>_<tag>; single parameter set has no tag."""
+    if tag is None:
+        return leaf
+    t = str(tag).strip()
+    if t in {"", "default", "-", "none"}:
+        return leaf
+    t = t.lstrip("_")
+    return f"{leaf}_{t}"
+
+
+def _const_to_py(node: ast.AST) -> Any:
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Dict):
+        out: dict[Any, Any] = {}
+        for k, v in zip(node.keys, node.values):
+            if k is None:
+                continue
+            out[_const_to_py(k)] = _const_to_py(v)
+        return out
+    if isinstance(node, ast.List):
+        return [_const_to_py(x) for x in node.elts]
+    if isinstance(node, ast.Tuple):
+        return tuple(_const_to_py(x) for x in node.elts)
+    return None
+
+
+def parse_variant_table(path: Path) -> list[dict[str, Any]]:
+    """Read the tag → params table from a leaf source (SPEC §2.2).
+
+    Missing table → one untagged variant. Tag `placeholder` / `_placeholder`
+    becomes module `<leaf>_placeholder`.
+    """
+    if not path.is_file():
+        return [{"tag": None, "params": {}, "placeholder": False}]
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except SyntaxError:
+        return [{"tag": None, "params": {}, "placeholder": False}]
+    table: Any = None
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        for tgt in node.targets:
+            if isinstance(tgt, ast.Name) and tgt.id in VARIANT_TABLE_NAMES:
+                table = _const_to_py(node.value)
+                break
+        if table is not None:
+            break
+    if not table:
+        return [{"tag": None, "params": {}, "placeholder": False}]
+    rows: list[dict[str, Any]] = []
+    if isinstance(table, dict):
+        items = list(table.items())
+    elif isinstance(table, (list, tuple)):
+        items = []
+        for item in table:
+            if isinstance(item, dict) and "tag" in item:
+                items.append((item.get("tag"), item.get("params") or {}))
+            elif isinstance(item, str):
+                items.append((item, {}))
+    else:
+        return [{"tag": None, "params": {}, "placeholder": False}]
+    if len(items) == 1 and (items[0][0] in {None, "", "default"}):
+        return [{"tag": None, "params": items[0][1] or {}, "placeholder": False}]
+    for tag, params in items:
+        tag_s = None if tag in {None, ""} else str(tag)
+        ph = bool(tag_s and "placeholder" in tag_s)
+        rows.append({"tag": tag_s, "params": params if isinstance(params, dict) else {}, "placeholder": ph})
+    return rows or [{"tag": None, "params": {}, "placeholder": False}]
+
+
+def discover_rtl_variants(layer: str, leaf: str) -> list[str]:
+    """Committed PRODUCT modules for a leaf: <leaf>.v and <leaf>_*.v."""
+    layer_dir = REPO_ROOT / "rtl" / layer
+    if not layer_dir.is_dir():
+        return []
+    names: list[str] = []
+    for path in sorted(layer_dir.iterdir()):
+        if not path.is_file() or path.suffix.lower() not in RTL_SOURCE_SUFFIXES:
+            continue
+        if path.stem == leaf or path.stem.startswith(f"{leaf}_"):
+            names.append(path.stem)
+    return names
+
+
+def discover_pycircuit_leaves() -> list[dict[str, Any]]:
+    """Leaves from pycircuit/<layer>/*.py, expanded per SPEC §2.2 variant."""
     root = REPO_ROOT / "pycircuit"
     skip_py = {"__init__.py", "emit.py", "selfcheck.py"}
-    leaves: list[dict[str, str]] = []
+    leaves: list[dict[str, Any]] = []
     for layer in discover_layers(root):
         for path in sorted((root / layer).glob("*.py")):
             if path.name in skip_py:
                 continue
-            leaves.append(
-                {
-                    "layer": layer,
-                    "module": path.stem,
-                    "source": rel(path),
-                    "product": f"rtl/{layer}/{path.stem}.v",
-                    "hooks": f"rtl/{layer}/hooks/{path.stem}.v",
-                }
-            )
+            table = parse_variant_table(path)
+            rtl_names = discover_rtl_variants(layer, path.stem)
+            planned = [variant_module_name(path.stem, row["tag"]) for row in table]
+            modules = list(dict.fromkeys(planned + rtl_names))
+            if not modules:
+                modules = [path.stem]
+            for module in modules:
+                tag = None
+                params: dict[str, Any] = {}
+                placeholder = is_placeholder_module(module)
+                for row in table:
+                    if variant_module_name(path.stem, row["tag"]) == module:
+                        tag = row["tag"]
+                        params = row["params"]
+                        placeholder = placeholder or bool(row["placeholder"])
+                        break
+                if module != path.stem and tag is None and module.startswith(f"{path.stem}_"):
+                    tag = module[len(path.stem) + 1 :]
+                leaves.append(
+                    {
+                        "layer": layer,
+                        "leaf": path.stem,
+                        "module": module,
+                        "tag": tag,
+                        "params": params,
+                        "placeholder": placeholder,
+                        "source": rel(path),
+                        "product": f"rtl/{layer}/{module}.v",
+                        "hooks": f"rtl/{layer}/hooks/{module}.v",
+                    }
+                )
     return leaves
+
+
+def load_leak_allow() -> list[dict[str, Any]]:
+    return _load_approved_list(LEAK_ALLOW_LIST, "entries", "LEAK_ALLOW")
+
+
+def is_leak_allowed(path: Path) -> bool:
+    rel_path = rel(path)
+    for entry in load_leak_allow():
+        pat = str(entry.get("file") or entry.get("path") or "").replace("\\", "/")
+        if not pat:
+            continue
+        if rel_path == pat or fnmatch.fnmatch(rel_path, pat):
+            return True
+    return False
+
+
+def placeholder_mark_present(path: Path) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return PLACEHOLDER_MARK in text
+
+
+def collect_placeholder_policy_findings(check: str = "emit") -> list[Finding]:
+    """_placeholder must not be instantiated by PRODUCT; source needs a mark."""
+    findings: list[Finding] = []
+    disc = discover_rtl()
+    inst_map: dict[str, set[str]] = disc.get("instantiations") or {}
+    defined: dict[str, RtlUnit] = disc.get("defined") or {}
+    for parent, children in inst_map.items():
+        unit = defined.get(parent)
+        if unit is None:
+            continue
+        if is_placeholder_path(unit.file) or is_hooks_path(unit.file):
+            continue
+        for child in sorted(children):
+            if not is_placeholder_module(child):
+                continue
+            findings.append(
+                Finding(
+                    check=check,
+                    module=parent,
+                    file=rel(unit.file),
+                    rule="PLACEHOLDER_INSTANTIATED",
+                    message=(
+                        f"PRODUCT netlist instantiates placeholder cell {child}; "
+                        f"_placeholder is lint/TB only (SPEC §2.2)"
+                    ),
+                )
+            )
+    seen_src: set[str] = set()
+    for leaf in discover_pycircuit_leaves():
+        if not leaf.get("placeholder"):
+            continue
+        src = REPO_ROOT / leaf["source"]
+        key = rel(src)
+        if key in seen_src:
+            continue
+        seen_src.add(key)
+        if src.is_file() and not placeholder_mark_present(src):
+            findings.append(
+                Finding(
+                    check=check,
+                    module=leaf["module"],
+                    file=key,
+                    rule="PLACEHOLDER_SOURCE_MISSING",
+                    message=(
+                        "placeholder source must name its origin "
+                        f"(constant or comment {PLACEHOLDER_MARK})"
+                    ),
+                )
+            )
+    for leaf in discover_product_leaves():
+        if not leaf.get("placeholder"):
+            continue
+        prod = REPO_ROOT / leaf["product"]
+        src = None
+        for pyc in discover_pycircuit_leaves():
+            if pyc.get("module") == leaf["module"] or pyc.get("leaf") == leaf.get("leaf"):
+                if pyc.get("placeholder"):
+                    src = REPO_ROOT / pyc["source"]
+                    break
+        if src and src.is_file():
+            continue
+        if prod.is_file() and not placeholder_mark_present(prod):
+            findings.append(
+                Finding(
+                    check=check,
+                    module=leaf["module"],
+                    file=rel(prod),
+                    rule="PLACEHOLDER_SOURCE_MISSING",
+                    message=(
+                        "placeholder netlist has no pycircuit source mark; "
+                        f"add {PLACEHOLDER_MARK} in the source (or this file)"
+                    ),
+                )
+            )
+    return findings
 
 
 def discover_leaf_pairs() -> list[dict[str, str]]:
@@ -1189,12 +1450,14 @@ def collect_stub_findings(check: str = "lint") -> list[Finding]:
     return collect_blackbox_findings(check)
 
 
-def discover_product_leaves() -> list[dict[str, str]]:
+def discover_product_leaves() -> list[dict[str, Any]]:
     """PRODUCT files at rtl/<layer>/<module>.v (not hooks/, not whitelist cells)."""
     rtl_root = REPO_ROOT / "rtl"
-    leaves: list[dict[str, str]] = []
+    leaves: list[dict[str, Any]] = []
     for layer in discover_layers(rtl_root):
         layer_dir = rtl_root / layer
+        if not layer_dir.is_dir():
+            continue
         for path in sorted(layer_dir.iterdir()):
             if not path.is_file() or path.suffix.lower() not in RTL_SOURCE_SUFFIXES:
                 continue
@@ -1203,7 +1466,11 @@ def discover_product_leaves() -> list[dict[str, str]]:
             leaves.append(
                 {
                     "layer": layer,
+                    "leaf": path.stem,
                     "module": path.stem,
+                    "tag": None,
+                    "params": {},
+                    "placeholder": is_placeholder_path(path),
                     "product": rel(path),
                     "hooks": f"rtl/{layer}/hooks/{path.stem}.v",
                 }

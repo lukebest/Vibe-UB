@@ -29,6 +29,8 @@ from gatelib import (
     is_handwritten_path,
     is_legacy_path,
     iter_rtl_sources,
+    collect_placeholder_policy_findings,
+    is_placeholder_module,
     load_hooks_ports,
     looks_generated,
     parse_ports,
@@ -120,7 +122,7 @@ def run_equiv(
     hooks: Path,
     extra_ports: list[str] | None,
 ) -> Finding | None:
-    """Prove PRODUCT≡HOOKS. Primary: eqy. Fallback: Yosys equiv_*."""
+    """Prove PRODUCT≡HOOKS. Primary: Yosys equiv_*. eqy if available."""
     work = OUT_DIR / "eqy" / module
     work.mkdir(parents=True, exist_ok=True)
     gold_top = module
@@ -137,7 +139,20 @@ def run_equiv(
 
     eqy_bin = shutil_which("eqy")
     yosys_bin = shutil_which("yosys")
-    if eqy_bin:
+    # This environment cannot install eqy. Yosys equiv_* is the primary path.
+    if yosys_bin and not eqy_bin:
+        tool = "yosys-equiv"
+        ys = work / f"{module}_equiv.ys"
+        ys.write_text(
+            _yosys_equiv_script(product, gold_top, gate_reads, gate_top) + "\n",
+            encoding="utf-8",
+        )
+        print(
+            f"--- EQUIV tool=yosys-equiv {module} ({kind}); "
+            "equiv_make/equiv_simple/equiv_induct/equiv_status -assert ---"
+        )
+        proc = run_cmd(["yosys", "-s", str(ys)], cwd=work, timeout=180)
+    elif eqy_bin:
         tool = "eqy"
         eqy_file = work / f"{module}.eqy"
         eqy_file.write_text(
@@ -161,27 +176,14 @@ def run_equiv(
         )
         print(f"--- EQUIV tool=eqy {module} ({kind}) ---")
         proc = run_cmd(["eqy", "-f", str(eqy_file)], cwd=work, timeout=180)
-    elif yosys_bin:
-        tool = "yosys-equiv"
-        ys = work / f"{module}_equiv.ys"
-        ys.write_text(
-            _yosys_equiv_script(product, gold_top, gate_reads, gate_top) + "\n",
-            encoding="utf-8",
-        )
-        print(
-            f"--- EQUIV tool=yosys-equiv {module} ({kind}); "
-            "eqy not on PATH, fallback equiv_make/equiv_simple/"
-            "equiv_induct/equiv_status -assert ---"
-        )
-        proc = run_cmd(["yosys", "-s", str(ys)], cwd=work, timeout=180)
     else:
-        print(f"--- EQUIV tool=NONE {module}: eqy and yosys both missing ---")
+        print(f"--- EQUIV tool=NONE {module}: yosys and eqy both missing ---")
         return Finding(
             check="emit",
             module=module,
             file=rel(product),
             rule="EQUIV_TOOL_MISSING",
-            message="eqy not on PATH and yosys not on PATH; cannot prove PRODUCT≡hooks",
+            message="yosys not on PATH (eqy also missing); cannot prove PRODUCT≡hooks",
         )
 
     text = proc.stdout or ""
@@ -233,6 +235,8 @@ def main() -> int:
     )
 
     findings: list[Finding] = []
+    if not args.equiv_only:
+        findings.extend(collect_placeholder_policy_findings("emit"))
     emit_path = REPO_ROOT / EMIT_SCRIPT
     if args.equiv_only:
         print("equiv-only: skip emit+diff")
@@ -299,6 +303,9 @@ def main() -> int:
         product = REPO_ROOT / leaf["product"]
         hooks = REPO_ROOT / leaf["hooks"]
         module = leaf["module"]
+        if leaf.get("placeholder") or is_placeholder_module(module):
+            print(f"placeholder skip {module}: lint/TB only (not PRODUCT, no equiv)")
+            continue
         if product.is_file() and is_handwritten_path(product):
             print(f"eqy/hooks skip {module}: handwritten whitelist")
             continue

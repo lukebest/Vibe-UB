@@ -8,7 +8,14 @@ export GATE_DIR REPO_ROOT
 export PYTHONPATH="$GATE_DIR${PYTHONPATH:+:$PYTHONPATH}"
 cd "$REPO_ROOT"
 
-if [[ -d "$REPO_ROOT/.venv" ]]; then
+if [[ -d "$REPO_ROOT/.pycircuit-venv" ]]; then
+  # shellcheck disable=SC1091
+  source "$REPO_ROOT/.pycircuit-venv/bin/activate"
+  if [[ -d "$REPO_ROOT/.pycircuit_out/toolchain/install/bin" ]]; then
+    export PATH="$REPO_ROOT/.pycircuit_out/toolchain/install/bin:$PATH"
+    export PYC_TOOLCHAIN_ROOT="$REPO_ROOT/.pycircuit_out/toolchain/install"
+  fi
+elif [[ -d "$REPO_ROOT/.venv" ]]; then
   # shellcheck disable=SC1091
   source "$REPO_ROOT/.venv/bin/activate"
 fi

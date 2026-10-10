@@ -19,6 +19,22 @@ env:
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
+  spec-leak:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch origin/main for PR-diff scan
+        run: git fetch origin main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install gate Python
+        run: pip install -r scripts/gate/requirements.txt
+      - name: spec-leak
+        run: scripts/gate/spec_leak.sh
+
   rtl-emit-consistency:
     runs-on: ubuntu-24.04
     steps:
@@ -26,11 +42,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install Yosys / eqy (best effort) + gate Python
+      - name: Install Yosys + gate Python
         run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys || true
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y eqy || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys
           pip install -r scripts/gate/requirements.txt
       - name: rtl-emit-consistency
         run: scripts/gate/rtl_emit_consistency.sh
@@ -42,13 +57,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install Yosys / eqy (best effort) + gate Python
+      - name: Install Yosys (eqy is not packaged here)
         run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys || true
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y eqy || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys
           pip install -r scripts/gate/requirements.txt
-      - name: equiv (eqy / Yosys equiv_* fallback)
+      - name: equiv (Yosys equiv_*; eqy if present)
         run: scripts/gate/equiv.sh
 
   pycircuit-provenance:
@@ -58,6 +72,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Cache pyc / pycc build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .pycircuit-src
+            .pycircuit_out
+            .pycircuit-venv
+          key: pyc-${{ runner.os }}-${{ hashFiles('TOOLCHAIN.lock', 'scripts/gate/setup_pycircuit.sh') }}
       - name: Install gate Python
         run: pip install -r scripts/gate/requirements.txt
       - name: pycircuit-provenance

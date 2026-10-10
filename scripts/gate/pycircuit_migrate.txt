@@ -28,7 +28,7 @@ pycircuit/pcs/ub_pcs_scrambler.py
 # PR #7
 pycircuit/lmsm/ub_lmsm.py
 
-# PR #11 — 待 Xia 核实
+# PR #11 — 已迁
 pycircuit/csr/ub_csr_regs.py
 
 # PR #12

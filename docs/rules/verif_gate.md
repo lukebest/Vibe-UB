@@ -5,7 +5,7 @@
 | 分册 | `docs/rules/verif_gate.md` |
 | 所有者 | 工具守门（验证负责人兼任，见 [TEAM.md](../TEAM.md) §4） |
 | 版本 | v0.2 (2026-10-10) |
-| 类别 | 每次提交的 lint / CDC / formal / 综合结构检查 / regmap / TB 自检 / emit / 端口一致性 / 来源 / 等价 |
+| 类别 | 每次提交的 lint / CDC / formal / 综合 / regmap / TB / emit / 端口 / 来源 / 等价 / spec-leak |
 | 配套 | [verification.md](verification.md)、[PROCESS.md](../PROCESS.md)、[CODING_STYLE.md](../CODING_STYLE.md) §7、[DECISIONS.md](../DECISIONS.md) D6 / D7 / D10 / D17 |
 
 规则条目格式：ID / 规则 / 来源 / 日期。本分册额外写清失败判据与豁免流程。
@@ -32,7 +32,9 @@ make gate
 
 ## 0.1 三线与自动发现
 
-层名从目录发现，脚本不写死 `pcs` / `dll` / `lmsm` / `csr`。枚举必须包含 `cmn`（Xia：统一存储叶子 `ub_cmn_mem_1r1w`）。B/C 以后加 `pycircuit/<layer>/`、`rtl/<layer>/`、`formal/<iface>/`、`tb/<layer>/` 即可被扫到。不扫 `rtl/gen/`。
+层名从目录发现，脚本不写死 `pcs` / `dll` / `lmsm` / `csr`。枚举必须包含 `cmn`（Xia / PR #21：统一存储叶子 `ub_cmn_mem_1r1w`）。B/C 以后加 `pycircuit/<layer>/`、`rtl/<layer>/`、`formal/<iface>/`、`tb/<layer>/` 即可被扫到。不扫 `rtl/gen/`。
+
+SPEC §2.2 变体：同一叶子多组参数 → `rtl/<layer>/<叶子>_<标签>.v`；单组不加标签；`_placeholder` 只 lint/TB。
 
 | 线 | 检查 | 路径 |
 | --- | --- | --- |
@@ -54,7 +56,7 @@ make gate
 | --- | --- | --- |
 | 新叶子 | 不在 `scripts/gate/legacy.txt`，或文件头表明由 pyCircuit 生成 | **拦截**（未豁免即 FAIL） |
 | D10 legacy | 路径匹配 `scripts/gate/legacy.txt`，且不是 pyCircuit 重写 | **只报告不拦截** |
-| 迁移待办 | `scripts/gate/pycircuit_migrate.txt`：main、PR #5 / #7 / #12，以及 PR #11 的 `pycircuit/csr/ub_csr_regs.py`（状态「待 Xia 核实」） | **只报告不拦截** |
+| 迁移待办 | `scripts/gate/pycircuit_migrate.txt`：main、PR #5 / #7 / #12，以及 PR #11 的 `pycircuit/csr/ub_csr_regs.py`（状态「已迁」） | **只报告不拦截** |
 | report-only | 桩时序 vs MODULE_INVENTORY、组合逻辑级数、pycc emit | **只报告不拦截** |
 
 D10 判定见 [DECISIONS.md](../DECISIONS.md) D10。`scripts/gate/legacy.txt` 是可配置名单（精确路径或 glob）。从名单删路径 = 该文件改为拦截，须守门人书面批准（CODEOWNERS 覆盖 `/scripts/gate/*.txt`）。
@@ -97,6 +99,31 @@ Xia：统一存储原语 `ub_cmn_mem_1r1w` 走 pycc 生成，源码 `pycircuit/c
 | 同地址冲突 | `old` 或 `new` |
 
 自动对照是 **report-only**（`STUB_TIMING`）。清单尚未有条目、库存文件尚未落地时，打印原因并跳过对照。
+
+### 1.3 spec-leak（私有规范不得进公开仓库）
+
+扫描仓库全部文件（含相对 `origin/main` 的 PR diff）。出现以下任一即 **拦截**：
+
+| 类 | 模式 |
+| --- | --- |
+| 字符串 | `vibe-ub-spec-private`、`/workspace/vibe-ub-c/`、`/workspace/vibe-ub-b/`、`ch9_fields`、`spec-answers`、`ch9-answers` |
+| 标记 | `GENERATED FROM ch9_fields` |
+| 文件名 | `fmt.py` |
+| 文件 | `*.pdf` |
+
+Allowlist：`scripts/gate/leak_allow.yml`（守门人批准，与 `waivers/` 同一套）。**本检查脚本**（`scripts/gate/spec_leak.py`）和 **本分册里的模式列表**必须登记在 allowlist，否则自检失败。
+
+| ID | 规则 | 来源 | 日期 |
+| --- | --- | --- | --- |
+| GATE-LEAK-001 | 上表模式出现在未放行文件即失败 | 私有规范隔离 | 2026-10-10 |
+
+spec-leak finding 一律按新叶子拦截，不用 `legacy.txt` 放行。
+
+### 1.4 `_placeholder` 变体（SPEC §2.2）
+
+- 只跑 lint 与 TB；不算 PRODUCT；不进 synth-check / 实现综合输入
+- 任何 PRODUCT 网表（`rtl/<layer>/` 下非 placeholder 文件）**不得例化** placeholder 模块，发现即拦（`PLACEHOLDER_INSTANTIATED`）
+- placeholder 源码必须有占位出处标记：注释或常量 `PLACEHOLDER_SOURCE`（`PLACEHOLDER_SOURCE_MISSING`）
 
 ---
 
@@ -172,10 +199,12 @@ M1 单时钟 `core_clk`（SPEC §4.1）。`rst_n` 异步置位、同步释放，
 | GATE-EMIT-001 | 若存在 `scripts/emit_rtl.py`，先 emit 再 `git diff rtl/`；漂移失败 | CODING_STYLE §1 | 2026-10-10 |
 | GATE-EMIT-002 | 非 legacy、非白名单手写叶子必须有 `rtl/<layer>/hooks/<module>.v` | SPEC §11 | 2026-10-10 |
 | GATE-EMIT-003 | 未上 `scripts/gate/handwritten.yml` 的手写 `.v` / `.sv` 记 `HANDWRITTEN_UNLISTED` | D6；§1.1 | 2026-10-10 |
-| GATE-EQY-001 | PRODUCT≡HOOKS。主工具 **eqy**（版本见 `TOOLCHAIN.lock` `eqy_lock`）。CI 安装 eqy。eqy 不在 PATH 时回退 Yosys `equiv_make` / `equiv_simple` / `equiv_induct` / `equiv_status -assert`（与设计 PR #12 叶子等价同一套）。报告必须写明 `tool=eqy` 或 `tool=yosys-equiv` | SPEC §11 (d) | 2026-10-10 |
+| GATE-EQY-001 | PRODUCT≡HOOKS。本环境 **eqy 装不上**，主工具是 Yosys `equiv_make` / `equiv_simple` / `equiv_induct` / `equiv_status -assert`。eqy 若在 PATH 再用。报告写明 `tool=yosys-equiv` 或 `tool=eqy`。按 SPEC §2.2 变体逐个跑；`_placeholder` 不做等价 | SPEC §11 (d)；设计 spike | 2026-10-10 |
 | GATE-EQY-002 | 无钩子叶子：端口一一对应后直接比对。有钩子模块：额外输入拉低、`tb_test_mode=0` 后再比对 | SPEC §11 (d)(f) | 2026-10-10 |
 
-白名单手写跳过 emit / hooks / 等价。`eqy` 与 Yosys 都缺失：`EQUIV_TOOL_MISSING`，拦截（不静默）。
+白名单手写与 `_placeholder` 变体跳过 emit / hooks / 等价。Yosys 缺失：`EQUIV_TOOL_MISSING`，拦截（不静默）。
+
+SPEC §2.2：pycc 每组参数一份固定网表，模块名=文件名=`<叶子>_<标签>`，单组参数不加标签。标签表在叶子源码里，`scripts/emit_rtl.py` 遍历生成。门禁发现、emit、端口一致性、等价按变体逐个跑。
 
 ---
 
@@ -194,7 +223,7 @@ Xia 裁定（SPEC §11 (f)）。钩子清单：`scripts/gate/hooks_ports.yml`，
 | GATE-HOOK-002 | 未上表叶子出现 `tb_*` / `tb_test_mode` 失败 | 同上 | 2026-10-10 |
 | GATE-HOOK-003 | 上表模块缺 PRODUCT 口、缺表列额外口、或多出口失败 | 同上 | 2026-10-10 |
 
-白名单手写与 D10 leftover 不跑本检查。
+白名单手写、D10 leftover、`_placeholder` 变体不跑本检查。变体（`<叶子>_<标签>`）逐个核对。
 
 ---
 
@@ -220,6 +249,24 @@ Xia 裁定（SPEC §11 (f)）。钩子清单：`scripts/gate/hooks_ports.yml`，
 
 Icarus 是仿真过 / 不过（D7）。门禁脚本不修改 `model/`、`tb/models/`。
 
+### 8.0 成对模块 TB（审查项，不自动拦截）
+
+A 线 lane dist 漏检：只跑分发→收集自环，映射方向反了也能过。
+
+成对模块（分发/收集、编码/解码、加扰/解扰、TX/RX）的 TB **必须**：
+
+| 要求 | 说明 |
+| --- | --- |
+| 每一侧单独对 `model/` 参考逐位比对 | 分发对分发参考、收集对收集参考；不得只用对侧互锁 |
+| 带能锁定方向的定向用例 | 至少 one-hot 扫描与递增数据，能暴露条带方向 / 比特序反了 |
+| 自环只作补充 | loopback / 分发再收集不得作为唯一检查 |
+
+| ID | 规则 | 来源 | 日期 | 门禁 |
+| --- | --- | --- | --- | --- |
+| GATE-TB-PAIR-001 | 成对模块每一侧独立 vs `model/` 逐位比对，并带 one-hot / 递增定向用例；自环不能当唯一检查 | A 线 lane dist 漏检 | 2026-10-10 | **审查清单，不自动拦截** |
+
+PR 审查清单见 §11。本条不写自动 finding，避免误杀尚未补齐的 D10 台。
+
 ---
 
 ## 8.1 pycircuit-provenance
@@ -228,10 +275,12 @@ Icarus 是仿真过 / 不过（D7）。门禁脚本不修改 `model/`、`tb/mode
 | --- | --- | --- | --- |
 | GATE-PROV-001 | `pycircuit/<layer>/*.py` 叶子必须 `import pycircuit`（`ast.Import` / `ast.ImportFrom`） | PM | 2026-10-10 |
 | GATE-PROV-002 | 只扫代码里的字符串常量与 f-string（`JoinedStr`）；跳过注释和模块 / 类 / 函数 docstring。命中 `module ` / `endmodule` / `always @` 即失败 | PM | 2026-10-10 |
-| GATE-PROV-003 | pycc 重生成 PRODUCT + HOOKS 与提交的 `.v` 逐字节比较；装不上只报告。安装入口 `scripts/gate/setup_pycircuit.sh`（可替换），版本只在 `TOOLCHAIN.lock` 维护一处 | PM | 2026-10-10 |
+| GATE-PROV-003 | `scripts/gate/setup_pycircuit.sh` 按设计已跑通的步骤安装（clone pin、apt LLVM/MLIR 19、`flows/scripts/pyc build`、venv + `pip install -e`）。版本只在 `TOOLCHAIN.lock` 一处。CI 缓存 pyc 产物。装好后 pycc 重生成与提交 `.v` 逐字节比对 **拦截**；装不上静态检查仍拦、emit 比对只报告 | 设计 spike | 2026-10-10 |
 | GATE-PROV-004 | 白名单手写 SV 不受此项约束。`ub_cmn_mem_1r1w` 按普通叶子检查 | Xia | 2026-10-10 |
+| GATE-PROV-005 | 参数变体按 SPEC §2.2 逐个发现与比对。`_placeholder` 变体只跑 lint 与 TB，报告标出，不算 PRODUCT | SPEC §2.2 | 2026-10-10 |
+| GATE-PROV-006 | PRODUCT 网表不得例化 `_placeholder`；placeholder 源码必须有 `PLACEHOLDER_SOURCE` | SPEC §2.2 | 2026-10-10 |
 
-违规报告「迁移待办」栏列出 main、PR #5、#7、#12，以及 PR #11 的 `pycircuit/csr/ub_csr_regs.py`（状态「待 Xia 核实」）。
+违规报告「迁移待办」栏列出 main、PR #5、#7、#12，以及 PR #11 的 `pycircuit/csr/ub_csr_regs.py`（状态「已迁」）。
 
 ---
 
@@ -244,7 +293,7 @@ Icarus 是仿真过 / 不过（D7）。门禁脚本不修改 `model/`、`tb/mode
 3. 脚本**只认带批准人且批准人是守门人**的条目；`TODO` / 空 / 非守门人 / `draft` 一律忽略。
 4. `.github/CODEOWNERS` 把 `waivers/`、`scripts/gate/*.yml`、`scripts/gate/*.txt`、`.github/workflows/gate.yml` 的审批指给仓库 owner `lukebest`。
 
-`scripts/gate/handwritten.yml`、`scripts/gate/blackbox.yml`、`scripts/gate/hooks_ports.yml` 的条目字段与豁免相同：路径或模块、原因、批准人、日期、复查条件。`waivers/pending/` 草稿只展示。
+`scripts/gate/handwritten.yml`、`scripts/gate/blackbox.yml`、`scripts/gate/hooks_ports.yml`、`scripts/gate/leak_allow.yml` 的条目字段与豁免相同：路径或模块、原因、批准人、日期、复查条件。`waivers/pending/` 草稿只展示。
 
 D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告-only。新叶子一律拦截，只能走本流程豁免。
 
@@ -261,5 +310,24 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 | VER-GATE-003 | legacy 只报告；新叶子拦截 | D10 | 2026-10-10 |
 | VER-GATE-004 | 工具版本对照 `TOOLCHAIN.lock`，对不上要明文打印 | D7 / D16 | 2026-10-10 |
 | VER-GATE-005 | 手写 SV / stub\|macro / 钩子端口三份 `scripts/gate/` 清单 | D6；SPEC §11 | 2026-10-10 |
-| VER-GATE-006 | 等价主工具 eqy，回退 Yosys equiv_*，报告写明工具 | SPEC §11 (d) | 2026-10-10 |
+| VER-GATE-006 | 等价主工具 Yosys equiv_*；eqy 可用再用 | SPEC §11 (d) | 2026-10-10 |
 | VER-GATE-007 | `ub_cmn_mem_1r1w` 是 `cmn` 普通叶子；`blackbox.yml` 无 `primitive` | Xia | 2026-10-10 |
+| VER-GATE-008 | 成对模块 TB 两侧独立 vs `model/` + 定向用例；审查项，不自动拦截 | A 线 lane dist | 2026-10-10 |
+| VER-GATE-009 | SPEC §2.2 变体逐个跑；`_placeholder` 只 lint/TB；PRODUCT 不得例化；源码须有 `PLACEHOLDER_SOURCE` | SPEC §2.2 | 2026-10-10 |
+| VER-GATE-010 | spec-leak：私有规范标记 / `fmt.py` / PDF 不得进公开仓库 | 隔离 | 2026-10-10 |
+
+---
+
+## 11. PR 审查清单（人工，不自动拦截）
+
+合入前审查人勾选。门禁脚本不根据本清单 FAIL。
+
+### 成对模块 TB（GATE-TB-PAIR-001）
+
+适用于分发/收集、编码/解码、加扰/解扰、TX/RX：
+
+- [ ] 每一侧都有独立的 `model/` 参考逐位比对（不是只跑 A→B 自环）
+- [ ] 有能锁定方向的定向用例（one-hot 扫描、递增数据）
+- [ ] 自环 / loopback 若存在，只作补充，不是唯一检查
+
+A 线 lane dist 反例：只做分发再收集自环时，条带方向反了仍能过。

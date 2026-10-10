@@ -15,6 +15,7 @@ from gatelib import (
     blackbox_lib_files,
     discover_rtl,
     emit_report,
+    is_placeholder_path,
     print_tool_versions,
     rel,
     run_cmd,
@@ -29,6 +30,8 @@ HOOKS_DIR_PARTS = {"hooks", "hooks1"}
 
 
 def is_product(path: Path) -> bool:
+    if is_placeholder_path(path):
+        return False
     parts = {p.lower() for p in path.parts}
     return not (parts & HOOKS_DIR_PARTS)
 

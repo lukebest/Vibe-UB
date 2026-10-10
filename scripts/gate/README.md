@@ -8,10 +8,11 @@ Lists live in this directory (`legacy.txt`, `handwritten.yml`, `blackbox.yml`,
 
 | Script | Job |
 | --- | --- |
+| `spec_leak.sh` | Private-spec leak scan (allowlist `leak_allow.yml`) |
 | `rtl_emit_consistency.sh` | Line A: emit + `git diff rtl/` + hooks + PRODUCT≡HOOKS |
-| `equiv.sh` | Visible eqy job (`--equiv-only`; Yosys `equiv_*` fallback) |
-| `pycircuit_provenance.sh` | AST provenance (blocking) + pycc emit (report-only) |
-| `setup_pycircuit.sh` | Replaceable pyc4.0/pycc/LLVM 19 entry (pins in `TOOLCHAIN.lock`) |
+| `equiv.sh` | PRODUCT≡HOOKS per variant (Yosys `equiv_*` primary; eqy if present) |
+| `pycircuit_provenance.sh` | AST provenance + pycc emit (blocking once toolchain is installed) |
+| `setup_pycircuit.sh` | Design spike recipe (clone pin, apt LLVM 19, `pyc build`, venv) |
 | `hooks_port_consistency.sh` | Independent HOOKS vs PRODUCT ports |
 | `lint.sh` | Verilator `--lint-only -Wall` + unlisted stub/macro |
 | `synth_check.sh` | Yosys synth, latch / multi-drive / combo-loop; `-lib` for blackbox.yml; combo depth report |

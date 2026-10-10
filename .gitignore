@@ -21,5 +21,8 @@ tb/reports/cov_line/**
 
 # Tool-gate scratch
 scripts/gate/out/
+.pycircuit-src/
+.pycircuit_out/
+.pycircuit-venv/
 formal/**/*.sby_*
 *.sbydir/

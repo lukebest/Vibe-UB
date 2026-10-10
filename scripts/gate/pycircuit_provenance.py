@@ -24,6 +24,7 @@ from gatelib import (
     OUT_DIR,
     REPO_ROOT,
     Finding,
+    collect_placeholder_policy_findings,
     discover_pycircuit_leaves,
     emit_report,
     is_handwritten_path,
@@ -158,28 +159,51 @@ def run_setup() -> str:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     if not SETUP_SCRIPT.is_file():
         return "setup script missing"
-    proc = run_cmd(["bash", str(SETUP_SCRIPT)], timeout=300)
+    proc = run_cmd(["bash", str(SETUP_SCRIPT)], timeout=600)
     print(proc.stdout or "")
     if SETUP_LOG.is_file():
         return SETUP_LOG.read_text(encoding="utf-8", errors="replace")
     return proc.stdout or ""
 
 
-def try_pycc_emit(leaf: dict[str, str]) -> list[Finding]:
-    """Report-only: regenerate PRODUCT/HOOKS with pycc and byte-compare."""
-    findings: list[Finding] = []
-    pycc = shutil_which("pycc")
-    if not pycc:
-        prefix = REPO_ROOT / ".pycircuit_out" / "toolchain" / "install" / "bin" / "pycc"
-        if prefix.is_file():
-            pycc = str(prefix)
-            os.environ["PATH"] = f"{prefix.parent}:{os.environ.get('PATH', '')}"
-            os.environ.setdefault(
-                "PYC_TOOLCHAIN_ROOT", str(prefix.parent.parent)
-            )
+def _pycc_bin() -> str | None:
+    found = shutil_which("pycc")
+    if found:
+        return found
+    prefix = REPO_ROOT / ".pycircuit_out" / "toolchain" / "install" / "bin" / "pycc"
+    if prefix.is_file():
+        os.environ["PATH"] = f"{prefix.parent}:{os.environ.get('PATH', '')}"
+        os.environ.setdefault("PYC_TOOLCHAIN_ROOT", str(prefix.parent.parent))
+        return str(prefix)
+    return None
+
+
+def _venv_python() -> str:
+    venv = REPO_ROOT / ".pycircuit-venv" / "bin" / "python"
+    return str(venv) if venv.is_file() else sys.executable
+
+
+def toolchain_ready() -> bool:
+    if _pycc_bin() is None:
+        return False
+    proc = run_cmd([_venv_python(), "-c", "import pycircuit"], timeout=30)
+    return proc.returncode == 0
+
+
+def try_pycc_emit(leaf: dict, ready: bool) -> list[Finding]:
+    """Regenerate PRODUCT/HOOKS with pycc and byte-compare.
+
+    Blocking when the toolchain installed; report-only if setup failed.
+    """
+    bucket = "new" if ready else "report"
+    suffix = "" if ready else " (report-only; toolchain not installed)"
     src = REPO_ROOT / leaf["source"]
     if not src.is_file() or is_handwritten_path(src):
-        return findings
+        return []
+    if leaf.get("placeholder"):
+        print(f"pycc skip {leaf['module']}: _placeholder (lint/TB only)")
+        return []
+    pycc = _pycc_bin()
     if not pycc:
         return [
             Finding(
@@ -187,46 +211,74 @@ def try_pycc_emit(leaf: dict[str, str]) -> list[Finding]:
                 module=leaf["module"],
                 file=leaf["source"],
                 rule="PYCC_UNAVAILABLE",
-                message="pycc not on PATH after setup_pycircuit.sh (report-only)",
-                bucket="report",
+                message="pycc not on PATH after setup_pycircuit.sh" + suffix,
+                bucket=bucket,
             )
         ]
     work = OUT_DIR / "pycc" / leaf["layer"] / leaf["module"]
     work.mkdir(parents=True, exist_ok=True)
-    argv = [
-        pycc,
+    mlir = work / "out.mlir"
+    py = _venv_python()
+    emit_argv = [
+        py,
+        "-m",
+        "pycircuit.cli",
+        "emit",
         str(src),
-        "--out-dir",
-        str(work),
-        "--target",
-        "verilog",
+        "-o",
+        str(mlir),
+        "--project-root",
+        str(src.parent),
     ]
-    print(f"--- pycc emit {leaf['source']} ---")
-    proc = run_cmd(argv, timeout=120)
-    print("\n".join((proc.stdout or "").strip().splitlines()[-30:] or [""]))
+    for key, val in (leaf.get("params") or {}).items():
+        emit_argv.extend(["--param", f"{key}={val}"])
+    print(f"--- pycc emit {leaf['source']} variant={leaf['module']} ---")
+    proc = run_cmd(emit_argv, timeout=120)
+    print("\n".join((proc.stdout or "").strip().splitlines()[-20:] or [""]))
     if proc.returncode != 0:
-        return [
-            Finding(
-                check="provenance",
-                module=leaf["module"],
-                file=leaf["source"],
-                rule="PYCC_EMIT_FAIL",
-                message=f"pycc exited {proc.returncode} (report-only)",
-                bucket="report",
-            )
-        ]
+        # Fall back to a direct pycc invocation if the CLI entry is missing.
+        proc = run_cmd([pycc, str(src), "-o", str(work / "direct.v")], timeout=120)
+        print("\n".join((proc.stdout or "").strip().splitlines()[-20:] or [""]))
+        if proc.returncode != 0:
+            return [
+                Finding(
+                    check="provenance",
+                    module=leaf["module"],
+                    file=leaf["source"],
+                    rule="PYCC_EMIT_FAIL",
+                    message=f"pycc/cli emit exited {proc.returncode}{suffix}",
+                    bucket=bucket,
+                )
+            ]
+    else:
+        vlog = work / f"{leaf['module']}.v"
+        proc = run_cmd(
+            [pycc, str(mlir), "--emit=verilog", "--include-primitives=0", "-o", str(vlog)],
+            timeout=120,
+        )
+        print("\n".join((proc.stdout or "").strip().splitlines()[-20:] or [""]))
+        if proc.returncode != 0:
+            return [
+                Finding(
+                    check="provenance",
+                    module=leaf["module"],
+                    file=leaf["source"],
+                    rule="PYCC_EMIT_FAIL",
+                    message=f"pycc mlir→verilog exited {proc.returncode}{suffix}",
+                    bucket=bucket,
+                )
+            ]
+    findings: list[Finding] = []
     for kind, dest in (("product", leaf["product"]), ("hooks", leaf["hooks"])):
         committed = REPO_ROOT / dest
         generated = None
-        candidates = list(work.rglob(f"{leaf['module']}.v"))
+        candidates = list(work.rglob("*.v"))
         if kind == "hooks":
             hooks_cands = [p for p in candidates if "hooks" in {x.lower() for x in p.parts}]
-            generated = hooks_cands[0] if hooks_cands else (candidates[0] if candidates else None)
+            generated = hooks_cands[0] if hooks_cands else None
         else:
-            product_cands = [
-                p for p in candidates if "hooks" not in {x.lower() for x in p.parts}
-            ]
-            generated = product_cands[0] if product_cands else (candidates[0] if candidates else None)
+            named = [p for p in candidates if p.name == f"{leaf['module']}.v"]
+            generated = named[0] if named else (candidates[0] if candidates else None)
         if generated is None or not committed.is_file():
             findings.append(
                 Finding(
@@ -234,8 +286,8 @@ def try_pycc_emit(leaf: dict[str, str]) -> list[Finding]:
                     module=leaf["module"],
                     file=dest,
                     rule="PYCC_EMIT_MISSING",
-                    message=f"pycc did not produce a {kind} netlist to compare (report-only)",
-                    bucket="report",
+                    message=f"pycc did not produce a {kind} netlist to compare{suffix}",
+                    bucket=bucket,
                 )
             )
             continue
@@ -246,41 +298,59 @@ def try_pycc_emit(leaf: dict[str, str]) -> list[Finding]:
                     module=leaf["module"],
                     file=dest,
                     rule="PYCC_EMIT_DIFF",
-                    message=f"pycc {kind} netlist differs from committed {dest} (report-only)",
-                    bucket="report",
+                    message=f"pycc {kind} netlist differs from committed {dest}{suffix}",
+                    bucket=bucket,
                 )
             )
     return findings
 
 
 def main() -> int:
-    print_tool_versions(["python", "pycc"])
+    print_tool_versions(["python", "pycc", "llvm"])
     print(
         "pycircuit pin: lukebest/pyCircuit pyc4.0 "
-        "43cc5918e3d09ecc0c814cabef6c1384cb9980ae"
+        "(commit and package version in TOOLCHAIN.lock)"
     )
     leaves = discover_pycircuit_leaves()
-    print(f"discovered pycircuit leaves: {len(leaves)}")
+    print(f"discovered pycircuit variants: {len(leaves)}")
+    seen_src: set[str] = set()
     for leaf in leaves:
         tag = "migrate" if is_migrate_path(REPO_ROOT / leaf["source"]) else "new"
-        print(f"  [{tag}] {leaf['source']}")
+        ph = " placeholder" if leaf.get("placeholder") else ""
+        print(f"  [{tag}{ph}] {leaf['source']} -> {leaf['module']}")
+        seen_src.add(leaf["source"])
 
     findings: list[Finding] = []
-    for leaf in leaves:
-        if Path(leaf["source"]).name in SKIP_PY:
+    findings.extend(collect_placeholder_policy_findings("provenance"))
+    for source in sorted(seen_src):
+        if Path(source).name in SKIP_PY:
             continue
+        leaf = next(L for L in leaves if L["source"] == source)
         findings.extend(static_check(leaf))
 
-    print("=== pycc setup (report-only emit path) ===")
+    print("=== pycc setup (blocking emit compare when SETUP_OK=1) ===")
     log = run_setup()
-    if "BLOCKER" in log:
+    ready = "SETUP_OK=1" in log or toolchain_ready()
+    if "BLOCKER" in log and not ready:
         print("setup blockers recorded in scripts/gate/out/pycircuit_setup.log")
-    for leaf in leaves:
-        if Path(leaf["source"]).name in SKIP_PY:
-            continue
-        findings.extend(try_pycc_emit(leaf))
     if not leaves:
         print("no pycircuit/<layer>/*.py leaves on this branch")
+    elif not ready:
+        findings.append(
+            Finding(
+                check="provenance",
+                module="*",
+                file="scripts/gate/setup_pycircuit.sh",
+                rule="PYCC_UNAVAILABLE",
+                message="toolchain setup did not finish; pycc emit compare is report-only",
+                bucket="report",
+            )
+        )
+    else:
+        for leaf in leaves:
+            if Path(leaf["source"]).name in SKIP_PY:
+                continue
+            findings.extend(try_pycc_emit(leaf, ready=True))
     return emit_report("provenance", findings)
 
 

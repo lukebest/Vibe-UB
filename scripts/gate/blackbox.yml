@@ -1,0 +1,26 @@
+# Behavioral stubs / future SRAM macros under rtl/.
+# Same approval rules as waivers/: approver must be a verification
+# gatekeeper in waivers/approvers.yml.
+#
+# kind:
+#   stub  — behavioral model standing in for an unselected SRAM macro
+#   macro — reserved for the real SRAM macro once it is selected
+#
+# Xia: ub_cmn_mem_1r1w is a normal pycc-generated leaf
+# (pycircuit/cmn/ → rtl/cmn/), not a blackbox. Do not register it here.
+# It is discovered, provenance-checked, pycc-regenerated, and eqy'd
+# like any other leaf. formal/cmn/*.sby is auto-discovered.
+#
+# Schema (every entry; missing field or empty approver fails the job):
+#   module, file, kind, replaces, depth, width, ports (1RW|1R1W),
+#   read_latency, rw_conflict (old|new), reset, macro, reason,
+#   registrant, approver
+# Optional: valid_outside (required true when reset says the array is
+# not reset; otherwise RDC fails).
+#
+# Synth treats listed modules as `read_verilog -lib` blackboxes.
+# Lint still lints the stub file. Timing vs MODULE_INVENTORY is report-only.
+#
+# CODEOWNERS: this file is gatekeeper-owned. Do not self-approve drafts.
+
+entries: []

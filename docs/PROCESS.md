@@ -36,7 +36,7 @@
 | formal | 等价与关键断言 |
 | 快速综合 | 面积 / 时序趋势，供设计迭代 |
 
-工具守门（轨道 A 验证负责人兼任，服务全部轨道）定检查规则、批准豁免。豁免书面记录，格式为 ID / 检查项 / 模块 / 理由 / 批准人 / 日期；清单文件 `docs/WAIVERS.md` 为后续（FUTURE）。现有具名 waiver 实践见 [CODING_STYLE.md](CODING_STYLE.md) §7（如 `CRD_UF`）。
+工具守门（轨道 A 验证负责人兼任，服务全部轨道）定检查规则、批准豁免。豁免书面记录，格式为 ID / 检查项 / 模块 / 理由 / 批准人 / 日期；清单在 `waivers/*.yml`。现有具名 waiver 实践见 [CODING_STYLE.md](CODING_STYLE.md) §7（如 `CRD_UF`）。
 
 流水线实现列为待办，由后续独立 PR 完成；本文件只定流程。
 

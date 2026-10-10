@@ -8,12 +8,13 @@
 
 ## 1. 生成与网表
 
-- 源码是 Python（pyCircuit）。提交的产品 `.v` 必须能从当前 Python **再现**。
+- 源码是 Python（pyCircuit）。提交的产品 `.v` 必须能从当前 Python **再现**。**例外（PM；对齐验证）：** 超过 [impl_quick_synth.md](rules/impl_quick_synth.md) 黑盒阈值（默认 4096 bit）的变体 **不**提交 `.v`。每层 `rtl/<layer>/manifest.yml`，每变体一条：变体名、参数、pycc 版本、PRODUCT sha256、HOOKS sha256。门禁按 `TOOLCHAIN.lock` 安装 pycc，经 `scripts/emit_rtl.py` 再生，核 sha256 与端口；PRODUCT 与 HOOKS 除模块名外字节相同。超阈值 `.v` 入库 **拒绝**；manifest 再生失败 **拒绝**。细则见 [verif_gate.md](rules/verif_gate.md)。其余生成 `.v` 仍提交。见 SPEC §2.2、§11 (f)。
+- pycc 运行库原语（如 `pyc_reg.v`，以及运行时发出、而非叶子生成的任何 `pyc_*`）只放 **`rtl/pyc_lib/`**，从 `TOOLCHAIN.lock` 钉死的 pyCircuit 版本原样拷贝，**不得改**。其它 `rtl/<layer>/` 与 `hooks/` **不得**含 `pyc_*` 原语文件；各层 filelist 引用 `rtl/pyc_lib/`。`` `include `` 运行库文件时，lint / 综合 / 门禁用 `-I rtl/pyc_lib`。门禁（与钉死版本逐字节相同；别处出现 `pyc_*` 则拒绝）见 [verif_gate.md](rules/verif_gate.md)（验证所有）。见 SPEC §2.2。
 - `TEST_HOOKS` 在 **Python 生成期** 展开，产出两套 Verilog。规则见 [SPEC.md](SPEC.md) **§11**，此处不重复例外：
   - **PRODUCT**（`TEST_HOOKS=0`）：无 `tb_*` 端口；lint / CDC / 综合 / 实现 / FPGA **只认这一套**。
   - **HOOKS**（`TEST_HOOKS=1`）：须过 lint 与 CDC，**不得**实现。回归与行覆盖率在此网上跑（`tb_test_mode` 为 0 与 1）；覆盖率分母含钩子 mux，钩子代码不另开 waiver。
   - PRODUCT 另跑与钩子无关的 smoke。
-  - 形式等价（Yosys eqy 或同等开源工具）：PRODUCT vs HOOKS（`tb_test_mode=0` 且全部 `tb_inj_*` 接复位值）必须等价，否则阻断交付。
+  - 形式等价：规范工具是 Yosys **`equiv`**（版本见 `TOOLCHAIN.lock`）；eqy 可安装后可作为可选补充。只比 PRODUCT 已有端口（`tb_<inst>_obs_*` 不参加）。HOOKS 侧 `tb_test_mode=0`，全部 `tb_*` 钩子输入接低（含 `tb_inj_*` 复位值与 §10 点名存储的 `tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`）。必须等价，否则阻断交付。见 SPEC §11 (d)。
 - 禁止在生成 Verilog 里再用 `` `ifdef TEST_HOOKS `` 做第二套分叉。
 
 ---
@@ -50,9 +51,11 @@
 - 注入与观察 **只允许**：
   1. 顶层功能端口；
   2. [SPEC.md](SPEC.md) §10 列出的 `tb_inj_*` / `tb_obs_*`（且 `TEST_HOOKS=1` 与 `tb_test_mode` 门控）；
-  3. [REGMAP.md](REGMAP.md) 寄存器（测试窗仅 `tb_test_mode=1` 生效）。
+  3. [REGMAP.md](REGMAP.md) 寄存器（测试窗仅 `tb_test_mode=1` 生效）；
+  4. **例外（backdoor）：** SPEC §10 **点名**的存储阵列，HOOKS 网表上的 `tb_<inst>_bd_*`（阵列 we/addr/wdata/re/rdata + 原语外 valid flop 的 `tb_<inst>_bd_vld_*`；`tb_test_mode` 门控）。PRODUCT 无这些口。等价检查：`tb_test_mode=0` 且全部 `tb_<inst>_bd_*` 输入接低。
+  5. **例外（叶子只读观察）：** SPEC §10 **按叶子登记**的 `tb_<inst>_obs_*`。仅 HOOKS；只出不进；**不受** `tb_test_mode` 门控；不回灌功能。等价检查只比 PRODUCT 已有端口，观察口不参加。PRODUCT 与 quick-synth 不受影响。禁止用 keep 类属性钉内部名。未在 §10 登记的 `tb_*` 门禁拒绝。
 - 禁止 force / deposit FSM 当前态或非法态。默认分支用 **具名 waiver** 覆盖（见 §7）。到达 `Link_Active` 必须走真实转移，用 `LMSM_TMR_SCALE` 缩短超时。
-- 叶子内部（CRC / FEC / deskew / 缓冲）走叶子端口或 wrapper 共仿真，不加产品钩子。
+- 叶子内部（CRC / FEC / deskew / 缓冲）走叶子端口或 wrapper 共仿真，不加产品钩子。**除此例外外，不得**再给叶子内部缓冲加钩子。
 - PCS RX unpack `n==0 && have`：**待定**（验证确认端口可达性，否则删分支或 waiver）。
 
 ---
@@ -61,12 +64,12 @@
 
 | 对象 | 约定 |
 | --- | --- |
-| 模块 / Python 生成单元 | `ub_<层>_<功能>`，小写+下划线。例：`ub_dll`、`ub_pcs`、`ub_lmsm`、`ub_csr` |
-| 一个模块一个文件 | 生成后放 `rtl/`（按层分子目录：`rtl/dll/`、`rtl/pcs/`、`rtl/lmsm/`、`rtl/csr/`） |
+| 模块 / Python 生成单元 | `ub_<层>_<功能>`，小写+下划线。例：`ub_dll`、`ub_pcs`、`ub_lmsm`、`ub_csr`。公共存储原语：`ub_cmn_mem_1r1w`（§10） |
+| 一个模块一个文件 | 叶子生成后放 `rtl/`（按层分子目录：`rtl/dll/`、`rtl/pcs/`、`rtl/lmsm/`、`rtl/csr/`）。运行库 `pyc_*` 只放 `rtl/pyc_lib/`，见 §1 / SPEC §2.2 |
 | 时钟 | `core_clk`（M1 唯一时钟） |
 | 复位 | 顶层 `rst_n`（低有效，异步置位）；`rst_n_sync`；业务 `rst_pyc`（`pyc_reg` 原生极性，见 SPEC §4.2） |
 | 数据流 | `valid` / `ready`；源到宿前缀如 `dll2pcs_*`、`pcs2dll_*` |
-| 测试钩子 | 仅 `tb_inj_*`、`tb_obs_*`、`tb_test_mode` |
+| 测试钩子 | `tb_inj_*`、`tb_obs_*`、`tb_test_mode`；§10 点名存储 `tb_<inst>_bd_*`（含 `bd_vld_*`）；§10 按叶子登记的 `tb_<inst>_obs_*`（仅 HOOKS，只出） |
 | 参数 | `UPPER_SNAKE`，与 SPEC §9 标识符一致 |
 | 常量 / 枚举 | `UPPER_SNAKE` |
 | 禁止 | 与验证旧名 `vibe_*` 混用产品模块名（映射见 SPEC §10） |
@@ -105,6 +108,7 @@
 - `pyc_cdc_sync`：1-bit。
 - `pyc_async_fifo`：多 bit 跨时钟。
 - 同时钟 `valid`/`ready` 或 CSR `req`/`ready`。
+- 大缓冲 / 大表：`ub_cmn_mem_1r1w`（§10）。不得另发明第二套阵列口。
 
 不要引入「跨时钟单拍 req-ack」再回头找原语。
 
@@ -116,10 +120,45 @@
 
 ---
 
-## 10. 寄存器表单一来源
+## 10. 统一存储原语（`ub_cmn_mem_1r1w`）
+
+大缓冲与大表 **必须** 例化本原语，不得各写一套阵列。命名 `ub_<层>_<功能>`：层 = `cmn`，功能 = `mem_1r1w`。
+
+**时序默认（Xia 架构提案；规范未裁定 / spec silent）：** 读 1 拍寄存、同址同拍 read-old。规范若另给时序，以规范为准并改本口说明。
+
+| 项 | 约定 |
+| --- | --- |
+| 参数 | `DEPTH`、`WIDTH`（`UPPER_SNAKE`） |
+| 时钟 | `core_clk`（与现有叶子同名；**不是** `clk`） |
+| 复位 | **阵列无复位口**（无 `rst_n` / `rst_pyc`）；内容上电后保持，不清零。有效位在原语外，用 `rst_pyc` 同步复位 flop（与现有叶子业务寄存器相同） |
+| 写口 | `we`、`waddr`、`wdata` |
+| 读口 | `re`、`raddr`、`rdata` |
+| 读时序 | `rdata` **寄存输出**，读延迟 **1 拍** |
+| 同址同拍 | 同一拍对同一地址既读又写：读出口返回 **旧数据**（read-old） |
+| 端口形态 | 1R1W（独立读写口） |
+
+**实现：** pyCircuit **行为模型**，用 pyCircuit API 搭建，经 **pycc** 生成 Verilog。列入门禁 **stub 名单**（验证维护，与 `waivers/` 并列）。随后可换成 SRAM 宏，**不改端口、不改测试**。本原语不是手写 SV，不进 §3 白名单。
+
+**必须例化本原语的阵列：**
+
+| 线 | 阵列 |
+| --- | --- |
+| B | RTP 重传缓冲、重排（reorder）缓冲、TA 未决表 |
+| C | UMMU TLB way `mem_tlb_w0`…`mem_tlb_w3`；decoder bank `mem_dec_b0`…`mem_dec_b7`；`mem_dec_tlb`。页表与 MAPT 在系统内存，不例化本原语；PLB 为 FF，不列 |
+
+其它标 SRAM / 行为 stub 的大缓冲（如线 A `ub_dll_retry`）**应当**用同一原语，避免第二套 stub 口。
+
+HOOKS 上的 backdoor 只允许 SPEC §10 点名的阵列，口名 `tb_<inst>_bd_*`（阵列口 + `tb_<inst>_bd_vld_*`）与门控见 SPEC §10.5 与上文 §4。PRODUCT 无 `tb_*`。
+
+---
+
+## 11. 寄存器表单一来源
 
 `docs/regmap/regmap.yaml` 是 CSR 的唯一可编辑源。`docs/REGMAP.md` 与
-`pycircuit/csr/ub_csr_regs.py` / `tb/ral/ub_regmodel.py` /
+`pycircuit/csr/ub_csr.py` / `tb/ral/ub_regmodel.py` /
 固件头 / `model/regs.py` 均由 `python3 scripts/gen_regmap.py` 生成，禁止手改。
-Verilog 由 `scripts/emit_rtl.py` 写入 `rtl/csr/`（PR #5 合入后注册本叶）。
+Verilog 由 `scripts/emit_rtl.py` 写入 `rtl/csr/ub_csr_<tag>.v`（PRODUCT）与
+`rtl/csr/hooks/ub_csr_<tag>.v`（HOOKS）。叶名是 `ub_csr`（SPEC §2.2
+`<leaf>_<tag>`）。网表 `` `include "pyc_reg.v" ``，lint / 综合 / 门禁用
+`-I rtl/pyc_lib`（SPEC §2.2 单副本；`rtl/pyc_lib/` 尚未合入 main）。
 约定与端口拆分见 [regmap/README.md](regmap/README.md)。

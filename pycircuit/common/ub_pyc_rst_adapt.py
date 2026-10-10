@@ -5,7 +5,7 @@ active-high (``if (rst)`` in runtime/verilog/pyc_reg.v), so this leaf
 is a single inverter. If a future library pin is already active-low,
 this module degenerates to a wire (parameter ``PYC_RST_ACTIVE_HIGH``).
 
-No TEST_HOOKS (SPEC §10 does not list this leaf). Combo, 0-cycle.
+SPEC §10 lists no hook ports; HOOKS netlist is identical. Combo, 0-cycle.
 """
 
 from __future__ import annotations
@@ -13,10 +13,11 @@ from __future__ import annotations
 MODULE = "ub_pyc_rst_adapt"
 
 
-def emit_verilog(*, pyc_rst_active_high: int = 1) -> str:
+def emit_verilog(test_hooks: bool = False, *, pyc_rst_active_high: int = 1) -> str:
+    th = 1 if test_hooks else 0
     return f"""// GENERATED from pycircuit/common/ub_pyc_rst_adapt.py — do not edit.
 // Reproduce: make emit
-// SPEC §4.2 / CODING_STYLE §2. TEST_HOOKS=0 (no §10 hooks on this leaf).
+// SPEC §4.2 / CODING_STYLE §2. TEST_HOOKS={th} (SPEC §10 lists no hook ports).
 // pyc_reg native polarity is active-high; invert rst_n_sync → rst_pyc.
 
 module {MODULE} #(

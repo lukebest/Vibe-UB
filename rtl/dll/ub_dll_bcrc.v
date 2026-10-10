@@ -1,6 +1,7 @@
 // GENERATED from pycircuit/dll/ub_dll_bcrc.py — do not edit.
 // Reproduce: make emit
-// SPEC §2.6 / UB-DL §4.3.2.2.4 / §4.7.2 / §7. TEST_HOOKS=0.
+// SPEC §2.6 / UB-DL §4.3.2.2.4 / §4.7.2 / §7. TEST_HOOKS=0
+// (SPEC §10 lists no hook ports on this leaf).
 // BCRC generator. Registers: posedge core_clk, sync active-high rst_pyc.
 // Poly/init/no-invert/MSB-first-per-byte/packing from SPEC (not Switch).
 // TX ERROR_FLAG hardwired 0 (SPEC §7).

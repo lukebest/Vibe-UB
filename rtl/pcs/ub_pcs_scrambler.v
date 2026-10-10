@@ -1,7 +1,8 @@
 // GENERATED from pycircuit/pcs/ub_pcs_scrambler.py — do not edit.
 // Reproduce: make emit
 // SPEC §2.4 / UB-PHY §3.2.2.4 / §3.2.6 / §3.3 / §3.4.3.6 / §3.4.3.7.
-// TEST_HOOKS=0. pyc_reg: posedge core_clk, sync active-high rst_pyc.
+// TEST_HOOKS=0 (SPEC §10 lists no hook ports on this leaf).
+// pyc_reg: posedge core_clk, sync active-high rst_pyc.
 // PRECODE_EN=0 (PMA; SPEC §9) — this leaf does not precode.
 //
 // Fibonacci LFSR: output = MSB; feedback = XOR of s[k]&SCR_TAPS[k];

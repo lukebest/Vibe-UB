@@ -5,7 +5,7 @@
 ### Added
 
 - Leaf batch 1 uvm-python TBs (`tb/` only): `ub_rst_sync`, `ub_pyc_rst_adapt`, `ub_pcs_lane_dist` / `ub_pcs_lane_dedist` / collect loopback, `ub_dll_bcrc` / `ub_dll_bcrc_check`. Dual `TEST_HOOKS=0/1` filelists; goldens via `tb/vibe_uvm/golden.py` (`model/` then `tb/models`). `TEST_HOOKS=1` prefers `rtl/<block>/hooks/`, else PRODUCT; whitelist `ub_rst_sync` has no hooks copy. Leaves with no SPEC §10 hooks: wrapper ports match PRODUCT (no `tb_*`, no hook agent). Scrambler leaves not in this batch (SPEC §13).
-- M1 RTL leaf batch 1 (pyCircuit): whitelist `ub_rst_sync`; generated `ub_pyc_rst_adapt`, `ub_pcs_scrambler` / `ub_pcs_descrambler`, `ub_pcs_lane_dist` / `ub_pcs_lane_dedist`, `ub_dll_bcrc` / `ub_dll_bcrc_check`. PRODUCT at `rtl/<block>/<module>.v` (SPEC §2.2 / CODING_STYLE §5). `TEST_HOOKS=0`; SPEC §10 lists no hooks on these leaves.
+- M1 RTL leaf batch 1 (pyCircuit): whitelist `ub_rst_sync`; generated `ub_pyc_rst_adapt`, `ub_pcs_scrambler` / `ub_pcs_descrambler`, `ub_pcs_lane_dist` / `ub_pcs_lane_dedist`, `ub_dll_bcrc` / `ub_dll_bcrc_check`. PRODUCT at `rtl/<block>/<module>.v` and HOOKS at `rtl/<block>/hooks/<module>.v` (SPEC §2.2 / CODING_STYLE §5 / §11). SPEC §10 lists no hook ports on these leaves (HOOKS ≡ PRODUCT). Whitelist `ub_rst_sync.sv` has no hooks copy.
 - `TOOLCHAIN.lock` + `tb/` uvm-python 骨架、golden-model 接口、双网表自检入口（叠在 M1 SPEC 上；不改 `rtl/` / SPEC 类文档）。
 - TB 模型按 CODING_STYLE §5 命名：`ub_dll_bcrc` 已按 SPEC §2.6 写全；`ub_pcs_scrambler` 已按已定项实现，抽头与 `AMCTL.LID`→种子为必填参数（SPEC §13，无默认）；`ub_pcs_lane_dist` 已实现。无 LMB/LTB golden。
 - `tb/vibe_uvm/ub_csr_map.py` + harness：`CNT_CLR` `0x0224` bit0–8（含 `CNT_CRD_UF`）；`APPD_LMSM_ST` `0x1E00`；`APPD_PORT_ERR` `0x1F00`；TEST 窗按 SPEC §3.2.3 / §10 / §11、REGMAP §2.4。`CTRL.LMSM_START`、`RETRY_*_ST` 与 `NUM_LANES_*` 合法编码及保留值 TB assert。
@@ -17,6 +17,7 @@
 - `docs/rules/`：architect / design / verification / backend 规则库骨架（v0.1）。
 - `docs/DECISIONS.md` D17：团队分工与流程（Luke Liu via Firstmate，2026-10-10 16:48 Asia/Shanghai）。
 - `docs/DECISIONS.md` D18：全层级范围，作为完整 UB 控制器（Luke Liu via Firstmate，2026-10-10 17:04 Asia/Shanghai）；D18 取代 D2 的分阶段范围。
+- `docs/DECISIONS.md` D19：三线并行与新增角色（Luke Liu via Firstmate，2026-10-10 17:22 Asia/Shanghai）。
 
 ### Changed
 
@@ -29,3 +30,4 @@
 - 模块名对齐 CODING_STYLE §5：`pcs_fec_enc`→`ub_pcs_fec_enc`，`pcs_fec_dec`→`ub_pcs_fec_dec`，`pcs_scrambler`→`ub_pcs_scrambler`，`pcs_descrambler`→`ub_pcs_descrambler`，`pcs_lane_dist`→`ub_pcs_lane_dist`，`pcs_lane_dedist`→`ub_pcs_lane_dedist`，`pcs_amctl_tx`→`ub_pcs_amctl_tx`，`pcs_amctl_rx`→`ub_pcs_amctl_rx`，`pcs_deskew`→`ub_pcs_deskew`，`segmenter`→`ub_dll_segmenter`，`reassembler`→`ub_dll_reassembler`，BCRC TX/RX→`ub_dll_bcrc` / `ub_dll_bcrc_check`，credit/VL/retry→`ub_dll_credit` / `ub_dll_vl` / `ub_dll_retry`。
 - `LMSM_CTRL.START` 更名为 `CTRL.LMSM_START`（REGMAP `0x0000` bit1）。关闭 `STATUS.RETRY_REQ_ST` / `RETRY_ACK_ST` 与 `PARAM_PHY.NUM_LANES_{TX,RX}` 编码（二进制 1/2/4/8）；保留值 RTL 不产出、TB assert。
 - `docs/TEAM.md`、`docs/PROCESS.md`：按 D18 写全层级范围；PROCESS §6 为「全层级推进」。
+- `docs/TEAM.md`、`docs/PROCESS.md`：按 D19 写入三条轨道、轨道所有权，以及「设计-B」/「验证-B」、「设计-C」/「验证-C」新角色。

@@ -15,7 +15,7 @@ Closed by SPEC:
     reseed). Same-cycle seed_load wins over LFSR advance (AMCTL beat has
     en=0). Leaf does not invent EDF/SDF ports — SPEC §2.4 leaf table.
   - 1-cycle latency (§5)
-  - sync rst_pyc; no TEST_HOOKS (§10)
+  - sync rst_pyc; SPEC §10 lists no hook ports (HOOKS netlist identical)
 
 OPEN per SPEC §13.2 (no product default, not authoritative):
   - PRBS23 tap mask ``SCR_TAPS`` (bit k = include s[k] in Fibonacci XOR;
@@ -35,6 +35,7 @@ MODULE = "ub_pcs_scrambler"
 
 
 def emit_verilog(
+    test_hooks: bool = False,
     *,
     data_w: int = P.DATA_W_SCR,
     scr_w: int = P.SCR_W,
@@ -43,6 +44,7 @@ def emit_verilog(
 ) -> str:
     return _emit_scramble_module(
         MODULE,
+        test_hooks=test_hooks,
         data_w=data_w,
         scr_w=scr_w,
         amctl_lid_w=amctl_lid_w,
@@ -53,16 +55,19 @@ def emit_verilog(
 def _emit_scramble_module(
     name: str,
     *,
+    test_hooks: bool = False,
     data_w: int,
     scr_w: int,
     amctl_lid_w: int,
     seed_slots: int,
 ) -> str:
     seed_map_w = scr_w * seed_slots
+    th = 1 if test_hooks else 0
     return f"""// GENERATED from pycircuit/pcs/{name}.py — do not edit.
 // Reproduce: make emit
 // SPEC §2.4 / UB-PHY §3.2.2.4 / §3.2.6 / §3.3 / §3.4.3.6 / §3.4.3.7.
-// TEST_HOOKS=0. pyc_reg: posedge core_clk, sync active-high rst_pyc.
+// TEST_HOOKS={th} (SPEC §10 lists no hook ports on this leaf).
+// pyc_reg: posedge core_clk, sync active-high rst_pyc.
 // PRECODE_EN=0 (PMA; SPEC §9) — this leaf does not precode.
 //
 // Fibonacci LFSR: output = MSB; feedback = XOR of s[k]&SCR_TAPS[k];

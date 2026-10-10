@@ -15,6 +15,7 @@ MODULE = "ub_dll_bcrc_check"
 
 
 def emit_verilog(
+    test_hooks: bool = False,
     *,
     flit_w: int = P.FLIT_W,
     crc_w: int = P.BCRC_W,
@@ -24,6 +25,7 @@ def emit_verilog(
     return _emit_bcrc(
         MODULE,
         check=True,
+        test_hooks=test_hooks,
         flit_w=flit_w,
         crc_w=crc_w,
         poly=poly,

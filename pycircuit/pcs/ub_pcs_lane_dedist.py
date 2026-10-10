@@ -9,9 +9,17 @@ MODULE = "ub_pcs_lane_dedist"
 
 
 def emit_verilog(
+    test_hooks: bool = False,
     *,
     num_lanes: int = P.NUM_LANES_DEFAULT,
     pma_w: int = P.PMA_W,
     sym_w: int = P.SYM_W,
 ) -> str:
-    return _emit_lane(MODULE, dist=False, num_lanes=num_lanes, pma_w=pma_w, sym_w=sym_w)
+    return _emit_lane(
+        MODULE,
+        dist=False,
+        test_hooks=test_hooks,
+        num_lanes=num_lanes,
+        pma_w=pma_w,
+        sym_w=sym_w,
+    )

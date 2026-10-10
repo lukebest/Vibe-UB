@@ -13,7 +13,7 @@ FLIT_W = 160
 NUM_LANES_DEFAULT = 4  # bring-up target; RTL parameter to 8 (SPEC §9)
 NUM_LANES_MAX = 8
 PRECODE_EN = 0  # SPEC §9; PMA, not this batch
-TEST_HOOKS = 0  # SPEC §10: no hooks on these leaves
+TEST_HOOKS = 0  # PRODUCT default; HOOKS emit uses test_hooks=True (SPEC §10: no ports)
 F_CORE_HZ = 80_570_000  # ≈ 2.578125e9 / 32; SPEC §4.1 / §9
 
 # PCS 8-bit stripe (SPEC §2.4 cites UB-PHY §3.2.2.3 Lane<j,i>=CA<(N-1)-i*LaneNum-j>; bit order SPEC §3.3)

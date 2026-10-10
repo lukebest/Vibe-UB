@@ -14,7 +14,7 @@ cycle's NSYM-symbol window; SPEC does not copy the table):
 (lane 0 at LSB). ``NUM_LANES`` default 4 (bring-up; param to 8, SPEC §9).
 ``PMA_W`` default 32 (SPEC §9). ``SYM_W`` default 8.
 
-dist/dedist are inverses. No clock / reset. No TEST_HOOKS.
+dist/dedist are inverses. No clock / reset. SPEC §10 lists no hook ports.
 """
 
 from __future__ import annotations
@@ -25,15 +25,31 @@ MODULE = "ub_pcs_lane_dist"
 
 
 def emit_verilog(
+    test_hooks: bool = False,
     *,
     num_lanes: int = P.NUM_LANES_DEFAULT,
     pma_w: int = P.PMA_W,
     sym_w: int = P.SYM_W,
 ) -> str:
-    return _emit_lane(MODULE, dist=True, num_lanes=num_lanes, pma_w=pma_w, sym_w=sym_w)
+    return _emit_lane(
+        MODULE,
+        dist=True,
+        test_hooks=test_hooks,
+        num_lanes=num_lanes,
+        pma_w=pma_w,
+        sym_w=sym_w,
+    )
 
 
-def _emit_lane(name: str, *, dist: bool, num_lanes: int, pma_w: int, sym_w: int) -> str:
+def _emit_lane(
+    name: str,
+    *,
+    dist: bool,
+    test_hooks: bool = False,
+    num_lanes: int,
+    pma_w: int,
+    sym_w: int,
+) -> str:
     if pma_w % sym_w != 0:
         raise ValueError("PMA_W must be a multiple of SYM_W")
     if dist:
@@ -50,9 +66,11 @@ def _emit_lane(name: str, *, dist: bool, num_lanes: int, pma_w: int, sym_w: int)
             "inverse of ub_pcs_lane_dist (UB-PHY §3.2.2.3); "
             "symbol0 / lane0 at LSB (SPEC §3.3)"
         )
+    th = 1 if test_hooks else 0
     return f"""// GENERATED from pycircuit/pcs/{name}.py — do not edit.
 // Reproduce: make emit
-// SPEC §2.4 / §3.3 / UB-PHY §3.2.2.3 / §3.2.5. TEST_HOOKS=0.
+// SPEC §2.4 / §3.3 / UB-PHY §3.2.2.3 / §3.2.5. TEST_HOOKS={th}
+// (SPEC §10 lists no hook ports on this leaf).
 // 8-bit FEC symbols. {comment}. Combo, 0-cycle.
 
 module {name} #(

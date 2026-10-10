@@ -1,6 +1,8 @@
-# M1 leaf RTL (batch 1). PRODUCT netlist = TEST_HOOKS=0.
-# Layout: SPEC §2.2 / CODING_STYLE §5 — rtl/<block>/<module>.v
-# HOOKS would be rtl/<block>/hooks/<module>.v; SPEC §10 lists none here.
+# M1 leaf RTL (batch 1).
+# PRODUCT = TEST_HOOKS=0 → rtl/<block>/<module>.v
+# HOOKS   = TEST_HOOKS=1 → rtl/<block>/hooks/<module>.v
+# SPEC §10 lists no hook ports here, so HOOKS == PRODUCT (header only).
+# Whitelist ub_rst_sync.sv is handwritten: no hooks/ copy (CODING_STYLE §3).
 
 PY ?= python3
 RTL := rtl
@@ -17,25 +19,34 @@ LEAVES := \
 	$(RTL)/dll/ub_dll_bcrc.v \
 	$(RTL)/dll/ub_dll_bcrc_check.v
 
+HOOKS := \
+	$(RTL)/common/hooks/ub_pyc_rst_adapt.v \
+	$(RTL)/pcs/hooks/ub_pcs_scrambler.v \
+	$(RTL)/pcs/hooks/ub_pcs_descrambler.v \
+	$(RTL)/pcs/hooks/ub_pcs_lane_dist.v \
+	$(RTL)/pcs/hooks/ub_pcs_lane_dedist.v \
+	$(RTL)/dll/hooks/ub_dll_bcrc.v \
+	$(RTL)/dll/hooks/ub_dll_bcrc_check.v
+
 # OPEN SPEC §13 scrambler items have no product default (syntax stubs are 0).
 # Lint / Yosys must pass explicit elaboration tokens. Source of truth:
 # pycircuit/lib/elab_open.py — not old PR #5 / Switch (tap 17, seed 2'b01).
 SCR_OPEN_G = $(shell $(PY) -c "import sys; sys.path.insert(0,'pycircuit'); from lib.elab_open import verilator_gflags; print(verilator_gflags())")
 SCR_OPEN_CH = $(shell $(PY) -c "import sys; sys.path.insert(0,'pycircuit'); from lib.elab_open import yosys_chparam_cmd; print(yosys_chparam_cmd())")
 
-.PHONY: all emit selfcheck lint synth clean
+.PHONY: all emit selfcheck lint synth equiv clean
 
-all: emit selfcheck lint
+all: emit selfcheck lint equiv
 
 emit:
-	$(PY) pycircuit/emit.py
+	$(PY) scripts/emit_rtl.py
 
 selfcheck:
 	$(PY) pycircuit/selfcheck.py
 
 lint: emit
 	@err=0; \
-	for f in $(WHITELIST) $(LEAVES); do \
+	for f in $(WHITELIST) $(LEAVES) $(HOOKS); do \
 	  gflags=""; \
 	  case $$f in \
 	    *ub_pcs_scrambler.v|*ub_pcs_descrambler.v) gflags="$(SCR_OPEN_G)" ;; \
@@ -51,17 +62,21 @@ lint: emit
 	if $(VERILATOR) --lint-only -Wall -GNUM_LANES=8 $(RTL)/pcs/ub_pcs_lane_dist.v; then echo OK; else echo FAIL; err=1; fi; \
 	echo "==== verilator --lint-only -Wall -GNUM_LANES=8 $(RTL)/pcs/ub_pcs_lane_dedist.v ===="; \
 	if $(VERILATOR) --lint-only -Wall -GNUM_LANES=8 $(RTL)/pcs/ub_pcs_lane_dedist.v; then echo OK; else echo FAIL; err=1; fi; \
+	echo "==== verilator --lint-only -Wall -GNUM_LANES=8 $(RTL)/pcs/hooks/ub_pcs_lane_dist.v ===="; \
+	if $(VERILATOR) --lint-only -Wall -GNUM_LANES=8 $(RTL)/pcs/hooks/ub_pcs_lane_dist.v; then echo OK; else echo FAIL; err=1; fi; \
+	echo "==== verilator --lint-only -Wall -GNUM_LANES=8 $(RTL)/pcs/hooks/ub_pcs_lane_dedist.v ===="; \
+	if $(VERILATOR) --lint-only -Wall -GNUM_LANES=8 $(RTL)/pcs/hooks/ub_pcs_lane_dedist.v; then echo OK; else echo FAIL; err=1; fi; \
 	exit $$err
 
 synth: emit
 	@err=0; \
-	for f in $(WHITELIST) $(LEAVES); do \
+	for f in $(WHITELIST) $(LEAVES) $(HOOKS); do \
 	  top=$$(basename $$f | sed 's/\.[sv]*$$//'); \
 	  ch=""; \
 	  case $$f in \
 	    *ub_pcs_scrambler.v|*ub_pcs_descrambler.v) ch="$(SCR_OPEN_CH); " ;; \
 	  esac; \
-	  echo "==== yosys read/synth $$top ===="; \
+	  echo "==== yosys read/synth $$f (top $$top) ===="; \
 	  if $(YOSYS) -q -p "read_verilog -sv $$f; $${ch}hierarchy -check -top $$top; proc; opt; stat"; then \
 	    echo OK; \
 	  else \
@@ -70,5 +85,8 @@ synth: emit
 	done; \
 	exit $$err
 
+equiv: emit
+	$(PY) scripts/equiv_product_hooks.py --no-emit
+
 clean:
-	@echo "PRODUCT leaves are the committed rtl/<block>/*.v; not removed."
+	@echo "PRODUCT/HOOKS leaves are the committed rtl/<block>/*.v; not removed."

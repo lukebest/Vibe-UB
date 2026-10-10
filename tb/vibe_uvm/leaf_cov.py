@@ -30,7 +30,7 @@ def sample_rst_adapt(pol: int, kind: str, hooks: int) -> None:
 @CoverPoint("tp.lane.num", xf=lambda n, kind, hooks: n, bins=[1, 2, 4, 8])
 @CoverPoint("tp.lane.kind", xf=lambda n, kind, hooks: kind,
             bins=["first_wire", "window", "zero", "one", "walk", "rand",
-                  "loopback", "valid_rst", "lat0"])
+                  "loopback", "valid_rst", "lat0", "inc", "onehot"])
 @CoverPoint("tp.lane.hooks", xf=lambda n, kind, hooks: hooks, bins=[0, 1])
 @CoverCross("tp.lane.num_x_kind", items=["tp.lane.num", "tp.lane.kind"])
 def sample_lane(n: int, kind: str, hooks: int) -> None:

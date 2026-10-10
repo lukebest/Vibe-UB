@@ -5,8 +5,9 @@
 #   make leaf LEAF=ub_rst_sync TEST_HOOKS=0 SIM=icarus
 #   make leaf-batch1 SIM=icarus
 # DUT filelist:
-#   TEST_HOOKS=0 -> rtl/<block>/<module>.v  (PRODUCT)
-#   TEST_HOOKS=1 -> rtl/<block>/hooks/<module>.v if present, else PRODUCT
+#   TEST_HOOKS=0 -> rtl/<block>/<variant>.v if present, else <module>.v
+#   TEST_HOOKS=1 -> rtl/<block>/hooks/<variant>.v, else hooks/<module>.v, else PRODUCT
+#   Lane variants: ub_pcs_lane_dist_x4.v / _x8.v (SPEC §2.2); parameterized fallback.
 #   ub_rst_sync is whitelist SV: always rtl/common/ub_rst_sync.sv (no hooks copy)
 # Leaves listed in SPEC §10 as having no hooks: HOOKS ports == PRODUCT.
 # Leaf wrappers do not add tb_* and do not bind the hook agent.
@@ -35,12 +36,23 @@ export COCOTB_HDL_TIMEPRECISION ?= 1ps
 
 TOPLEVEL_LANG := verilog
 
-# Prefer hooks/ netlist when TEST_HOOKS=1 and the file exists; else PRODUCT.
+# SPEC §2.2 (PR #22): prefer fixed variant <leaf>_<tag>.v, else parameterized <leaf>.v.
+# TEST_HOOKS=1: hooks/<variant>, hooks/<param>, PRODUCT/<variant>, PRODUCT/<param>.
+# Single-parameter leaves have no tag. _placeholder is lint/TB only.
 ifeq ($(TEST_HOOKS),1)
-rtl_dut = $(if $(wildcard $(RTL)/$(1)/hooks/$(2)),$(RTL)/$(1)/hooks/$(2),$(RTL)/$(1)/$(2))
+pick_rtl = $(firstword $(wildcard \
+  $(RTL)/$(1)/hooks/$(3) $(RTL)/$(1)/hooks/$(2) \
+  $(RTL)/$(1)/$(3) $(RTL)/$(1)/$(2)))
 else
-rtl_dut = $(RTL)/$(1)/$(2)
+pick_rtl = $(firstword $(wildcard $(RTL)/$(1)/$(3) $(RTL)/$(1)/$(2)))
 endif
+rtl_dut = $(call pick_rtl,$(1),$(2),$(2))
+
+LANE_TAG := x$(NUM_LANES)
+DIST_VAR := ub_pcs_lane_dist_$(LANE_TAG).v
+DEDIST_VAR := ub_pcs_lane_dedist_$(LANE_TAG).v
+DIST_PARAM := ub_pcs_lane_dist.v
+DEDIST_PARAM := ub_pcs_lane_dedist.v
 
 ifeq ($(LEAF),ub_rst_sync)
 TOPLEVEL := tb_ub_rst_sync
@@ -55,17 +67,17 @@ VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_rst_adapt.sv $(DUT_RTL)
 else ifeq ($(LEAF),ub_pcs_lane_dist)
 TOPLEVEL := tb_ub_lane_dist
 MODULE   := tb.tests.tb_lane_dist
-DUT_RTL  := $(call rtl_dut,pcs,ub_pcs_lane_dist.v)
+DUT_RTL  := $(call pick_rtl,pcs,$(DIST_PARAM),$(DIST_VAR))
 VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_lane_dist.sv $(DUT_RTL)
 else ifeq ($(LEAF),ub_pcs_lane_dedist)
 TOPLEVEL := tb_ub_lane_dedist
 MODULE   := tb.tests.tb_lane_dedist
-DUT_RTL  := $(call rtl_dut,pcs,ub_pcs_lane_dedist.v)
+DUT_RTL  := $(call pick_rtl,pcs,$(DEDIST_PARAM),$(DEDIST_VAR))
 VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_lane_dedist.sv $(DUT_RTL)
 else ifeq ($(LEAF),ub_pcs_lane_collect)
 TOPLEVEL := tb_ub_lane_collect
 MODULE   := tb.tests.tb_lane_collect
-DUT_RTL  := $(call rtl_dut,pcs,ub_pcs_lane_dist.v) $(call rtl_dut,pcs,ub_pcs_lane_dedist.v)
+DUT_RTL  := $(call pick_rtl,pcs,$(DIST_PARAM),$(DIST_VAR)) $(call pick_rtl,pcs,$(DEDIST_PARAM),$(DEDIST_VAR))
 VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_lane_collect.sv $(DUT_RTL)
 else ifeq ($(LEAF),ub_dll_bcrc)
 TOPLEVEL := tb_ub_bcrc
@@ -109,10 +121,21 @@ endif
 endif
 
 ifneq ($(filter $(LEAF),ub_pcs_lane_dist ub_pcs_lane_dedist ub_pcs_lane_collect),)
+LANE_FIXED := $(if $(filter %_$(LANE_TAG).v,$(DUT_RTL)),1,0)
+ifeq ($(LANE_FIXED),1)
+ifeq ($(SIM),verilator)
+EXTRA_ARGS += -DUB_LANE_FIXED -DUB_DIST_MODULE=ub_pcs_lane_dist_$(LANE_TAG) \
+	-DUB_DEDIST_MODULE=ub_pcs_lane_dedist_$(LANE_TAG)
+else
+COMPILE_ARGS += -DUB_LANE_FIXED -DUB_DIST_MODULE=ub_pcs_lane_dist_$(LANE_TAG) \
+	-DUB_DEDIST_MODULE=ub_pcs_lane_dedist_$(LANE_TAG)
+endif
+else
 ifeq ($(SIM),verilator)
 EXTRA_ARGS += -GNUM_LANES=$(NUM_LANES)
 else
 COMPILE_ARGS += -P$(TOPLEVEL).NUM_LANES=$(NUM_LANES)
+endif
 endif
 endif
 

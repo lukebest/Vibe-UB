@@ -11,9 +11,12 @@ from tb.vibe_uvm.leaf_base import LeafUvmTest, as_int, env_int, leaf_entry, wait
 from tb.vibe_uvm.leaf_cov import sample_lane
 from tb.vibe_uvm.lane_util import (
     PMA_W,
+    compare_word,
     expected_dedist,
     expected_window,
+    incrementing_symbols,
     nsym,
+    onehot_symbols,
     pack_symbols,
     walking_ones,
 )
@@ -45,6 +48,8 @@ class LaneDedistLeafTest(LeafUvmTest):
         self.dut.rst_n.value = 1
         await wait_ps(20)
         await self.case_inverse()
+        await self.case_inc_symbols()
+        await self.case_onehot_symbols()
         await self.case_corners()
         await self.case_walking_one()
         await self.case_random()
@@ -70,8 +75,9 @@ class LaneDedistLeafTest(LeafUvmTest):
             striped = expected_window(symbols, self.num_lanes)
             got, vout = await self._drive(striped, 1)
             exp = pack_symbols(symbols)
-            if vout != 1 or got != exp:
-                raise AssertionError(f"valid={vout} got=0x{got:x} exp=0x{exp:x}")
+            if vout != 1:
+                raise AssertionError(f"valid={vout}")
+            compare_word(got, exp, self.num_lanes, "inverse")
             sample_lane(self.num_lanes, "window", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -84,8 +90,7 @@ class LaneDedistLeafTest(LeafUvmTest):
             for label, vec in (("zero", 0), ("one", (1 << self.width) - 1)):
                 exp = expected_dedist(vec, self.num_lanes)
                 got, _ = await self._drive(vec, 1)
-                if got != exp:
-                    raise AssertionError(f"{label} got=0x{got:x} exp=0x{exp:x}")
+                compare_word(got, exp, self.num_lanes, label)
                 sample_lane(self.num_lanes, label, self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -98,8 +103,7 @@ class LaneDedistLeafTest(LeafUvmTest):
             for vec in walking_ones(self.width):
                 exp = expected_dedist(vec, self.num_lanes)
                 got, _ = await self._drive(vec, 1)
-                if got != exp:
-                    raise AssertionError(f"walk 0x{vec:x}")
+                compare_word(got, exp, self.num_lanes, f"walk 0x{vec:x}")
             sample_lane(self.num_lanes, "walk", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -114,8 +118,7 @@ class LaneDedistLeafTest(LeafUvmTest):
                 vec = rng.randrange(1 << self.width)
                 exp = expected_dedist(vec, self.num_lanes)
                 got, _ = await self._drive(vec, 1)
-                if got != exp:
-                    raise AssertionError(f"rand got=0x{got:x} exp=0x{exp:x}")
+                compare_word(got, exp, self.num_lanes, "rand")
             sample_lane(self.num_lanes, "rand", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
@@ -129,9 +132,37 @@ class LaneDedistLeafTest(LeafUvmTest):
             b = expected_dedist(2, self.num_lanes)
             got_a, _ = await self._drive(1, 1)
             got_b, _ = await self._drive(2, 1)
-            if got_a != a or got_b != b:
-                raise AssertionError("extra cycle of latency")
+            compare_word(got_a, a, self.num_lanes, "lat0 a")
+            compare_word(got_b, b, self.num_lanes, "lat0 b")
             sample_lane(self.num_lanes, "lat0", self.hooks)
+            self.rec.pass_(name, TP)
+        except Exception as exc:
+            self.rec.fail(name, TP, str(exc))
+            raise
+
+    async def case_inc_symbols(self) -> None:
+        name = "inc_symbols_mapping"
+        try:
+            symbols = incrementing_symbols(self.num_lanes)
+            striped = expected_window(symbols, self.num_lanes)
+            got, vout = await self._drive(striped, 1)
+            if vout != 1:
+                raise AssertionError(f"valid_out={vout}")
+            compare_word(got, pack_symbols(symbols), self.num_lanes, "inc_symbols")
+            sample_lane(self.num_lanes, "inc", self.hooks)
+            self.rec.pass_(name, TP)
+        except Exception as exc:
+            self.rec.fail(name, TP, str(exc))
+            raise
+
+    async def case_onehot_symbols(self) -> None:
+        name = "onehot_symbol_scan"
+        try:
+            for idx, symbols in onehot_symbols(self.num_lanes):
+                striped = expected_window(symbols, self.num_lanes)
+                got, _ = await self._drive(striped, 1)
+                compare_word(got, pack_symbols(symbols), self.num_lanes, f"onehot ca[{idx}]")
+            sample_lane(self.num_lanes, "onehot", self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
             self.rec.fail(name, TP, str(exc))

@@ -1,5 +1,10 @@
 // TB-only wrapper. Combo DUT + valid-only (SPEC §3.1). No tb_* (SPEC §10 / Xia).
+// SPEC §2.2: instantiate ub_pcs_lane_dist_xN when that netlist exists; else parameterized.
 `timescale 1ns / 1ps
+
+`ifndef UB_DIST_MODULE
+`define UB_DIST_MODULE ub_pcs_lane_dist
+`endif
 
 module tb_ub_lane_dist #(
   parameter integer NUM_LANES = 4,
@@ -14,7 +19,13 @@ module tb_ub_lane_dist #(
   output wire                         valid_out
 );
 
-  ub_pcs_lane_dist #(
+`ifdef UB_LANE_FIXED
+  `UB_DIST_MODULE dut (
+    .data_in(data_in),
+    .data_out(data_out)
+  );
+`else
+  `UB_DIST_MODULE #(
     .NUM_LANES(NUM_LANES),
     .PMA_W(PMA_W),
     .SYM_W(SYM_W)
@@ -22,6 +33,7 @@ module tb_ub_lane_dist #(
     .data_in(data_in),
     .data_out(data_out)
   );
+`endif
 
   assign valid_out = rst_n & valid_in;
 

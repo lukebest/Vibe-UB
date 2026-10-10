@@ -24,6 +24,7 @@
 
 ### Changed
 
+- SPEC §2.2：pyCircuit 源码目录与导入（已定）——叶子 `pycircuit/<层>/<leaf>.py`，门禁只扫该层 `*.py`（跳过 `lib/` 与 `__init__.py`）；同层 helper 在 `pycircuit/<层>/lib/` 不出网表；导入根 `pycircuit/`（`from <层>.lib import ...`），门禁 / `emit_rtl.py` / tb 把 `pycircuit/` 置于 `PYTHONPATH` 最前；仓库根目录不进 `sys.path`；工具按脚本路径调用。门禁细则见 `docs/rules/verif_gate.md`（PR #33）。架构 Xia 与守门人验证 2026-10-10 共同定。
 - SPEC §2.6：BCRC 流式接口拍位（已定）：`start`/`valid_in` 同拍计入首 flit；`start`/`valid_in`/`last` 同拍只算末 4 字节 BCRC 之前的 16 字节并 1 拍给出 `crc_word`；`start==1 && valid_in==0` 只复位全 1；未见 `last` 再 `start` 以新块初值重算。与 `tb/models/ub_dll_bcrc.py` 的 `start()`/`eat()` 一致。架构 Xia 2026-10-10 裁定。
 - `scripts/impl/quick_synth.*` + `docs/rules/impl_quick_synth.md` v0.5：每叶子拆两列深度——`logic depth` 不计 `buf_*`/`clkbuf_*`/`qs_fbuf_*`（与 `--no-buffer`、COMBO_DEPTH、日后 pycc `--logic-depth` 同口径）；`depth incl. buf` 为含缓冲级数。slack/area 仍来自缓冲后网表。
 - `scripts/impl/quick_synth.*` + `docs/rules/impl_quick_synth.md` v0.4：abc 映射后默认插确定性 Sky130 `buf_4`/`buf_8` 扇出树（max fanout 16；`--no-buffer` / `--max-fanout`；每叶子报 max fanout）。OpenROAD `repair_design` 未作为本 proxy 路径（VM 无 OpenROAD、且无 floorplan）。`sta -version` 探测版本，避免 `sta -no_init -exit` 无脚本挂起。

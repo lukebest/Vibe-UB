@@ -130,11 +130,13 @@ def _build_and_test(
         "--assert",
     ]
     includes = [str(p) for p in sim_include_dirs()]
-    build_args.extend(["-I", str(pyc_lib_dir().resolve())])
+    # Single-token -I/-v: a spaced ``-I dir`` is parsed as a module name.
+    pyc_lib = pyc_lib_dir().resolve()
+    build_args.append(f"-I{pyc_lib}")
     # ``-v`` so an `include of the same pyc_*.v does not compile the module twice.
     for path in sources:
         if path.name.startswith("pyc_") and path.suffix.lower() in {".v", ".sv"}:
-            build_args.extend(["-v", str(path)])
+            build_args.append(f"-v{path}")
 
     runner = get_runner("verilator")
     # Do not pass `parameters=` — that becomes Verilator -G (forbidden).

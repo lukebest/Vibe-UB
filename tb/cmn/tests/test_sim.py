@@ -1,14 +1,14 @@
 """cocotb + Verilator against discovered fixed netlists (SPEC §2.2).
 
-Skipped with an explicit reason when ``rtl/cmn/`` (PRODUCT) or
-``rtl/cmn/hooks/`` (TEST_HOOKS) has no parseable variants, or when
-Verilator / cocotb is missing. Equivalence of the two netlists is a
-gate Yosys-equiv job — this file does not run eqy.
+The matrix is whatever ``discover_variants()`` finds under ``rtl/cmn/``
+(PRODUCT) and ``rtl/cmn/hooks/`` (TEST_HOOKS). There is no hardcoded
+variant list. Arrays with ``DEPTH*WIDTH > 4096`` bits use a short smoke
+plan; smaller ones run the full directed + random suite. A leaf that is
+absent is simply not discovered — that is not a skip or a failure.
 
-``d64w64m16`` runs the full suite (word + segmented). ``d512w512m64``
-is smoke only (short random + a few directed cases). Both PRODUCT and
-HOOKS are attempted; a missing hooks tree or segmented leaf is skip
-with the gap named.
+Skipped only when a whole netlist tree has no parseable variants, or
+when Verilator / cocotb is missing. Equivalence of the two netlists is
+a gate Yosys-equiv job — this file does not run eqy.
 """
 
 from __future__ import annotations
@@ -17,14 +17,13 @@ import pytest
 
 from tb.cmn.discover import discover_by_netlist, rtl_sim_skip_reason
 from tb.cmn.sequences import (
-    FULL_WMASK_TAGS,
     NEGATIVE_CASES,
     POSITIVE_CASES,
     SMOKE_CASES,
     SMOKE_RANDOM_N,
-    SMOKE_WMASK_TAGS,
     WMASK_CASES,
     WMASK_NEG_CASES,
+    is_smoke_variant,
 )
 
 SEED = 1
@@ -48,9 +47,7 @@ def _is_pow2(n: int) -> bool:
 
 
 def _is_smoke(variant) -> bool:
-    return variant.tag in SMOKE_WMASK_TAGS or (
-        variant.depth >= 512 and variant.width >= 512 and variant.nseg > 1
-    )
+    return is_smoke_variant(variant.depth, variant.width)
 
 
 def _positive_plan(variant) -> tuple[list[str], tuple[bool, ...], int]:
@@ -71,32 +68,20 @@ def _negative_cases_for(variant) -> list[str]:
     if variant.nseg > 1:
         cases.extend(WMASK_NEG_CASES)
     if _is_pow2(variant.depth):
-        skipped = [c for c in cases if c.startswith("oor_")]
         cases = [c for c in cases if not c.startswith("oor_")]
-        for case in skipped:
-            print(
-                f"SKIP {variant.module} {case}: DEPTH={variant.depth} is 2^AW; "
-                "no out-of-range encoding fits on waddr/raddr",
-                flush=True,
-            )
     return cases
 
 
-def _note_wmask_coverage(variants) -> None:
-    tags = {v.tag for v in variants}
-    if "d64w64m16" not in tags and not any(v.nseg > 1 and not _is_smoke(v) for v in variants):
+def _log_discovered(variants) -> None:
+    for var in variants:
+        bits = var.depth * var.width
         print(
-            "NOTE: no full-suite segmented leaf (expected d64w64m16) in this netlist",
+            f"DISCOVER {var.netlist}:{var.module} "
+            f"DEPTH={var.depth} WIDTH={var.width} WMASK_W={var.wmask_w} "
+            f"NSEG={var.nseg} bits={bits} "
+            f"suite={'smoke' if _is_smoke(var) else 'full'}",
             flush=True,
         )
-    if "d512w512m64" not in tags and not any(_is_smoke(v) for v in variants):
-        print(
-            "NOTE: no smoke segmented leaf (expected d512w512m64) in this netlist",
-            flush=True,
-        )
-    for name in sorted(FULL_WMASK_TAGS | SMOKE_WMASK_TAGS):
-        if name not in tags:
-            print(f"NOTE: variant {name} not discovered", flush=True)
 
 
 @pytest.mark.sim
@@ -106,7 +91,7 @@ def test_rtl_positive_all_variants(netlist):
     from tb.cmn.sim_runner import run_sim_variant
 
     print(f"SEED {SEED}", flush=True)
-    _note_wmask_coverage(variants)
+    _log_discovered(variants)
     for variant in variants:
         cases, anurs, random_n = _positive_plan(variant)
         print(
@@ -136,8 +121,8 @@ def test_rtl_negative_all_variants(netlist):
     for variant in variants:
         if _is_smoke(variant):
             print(
-                f"SKIP {variant.module} negatives: smoke suite only "
-                "(d512w512m64 / large segmented leaf)",
+                f"PLAN {variant.module} negatives omitted (smoke: "
+                f"DEPTH*WIDTH={variant.depth * variant.width} > 4096)",
                 flush=True,
             )
             continue

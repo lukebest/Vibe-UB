@@ -17,11 +17,13 @@ from typing import Any, Iterable
 
 GATE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = GATE_DIR.parent.parent
-LISTS_DIR = REPO_ROOT / "gate"
+# All machine-readable lists live next to the scripts (scripts/gate/).
+LISTS_DIR = GATE_DIR
 LEGACY_LIST = LISTS_DIR / "legacy.txt"
 HANDWRITTEN_LIST = LISTS_DIR / "handwritten.yml"
-STUBS_LIST = LISTS_DIR / "stubs.yml"
+BLACKBOX_LIST = LISTS_DIR / "blackbox.yml"
 HOOKS_PORTS_LIST = LISTS_DIR / "hooks_ports.yml"
+MIGRATE_LIST = LISTS_DIR / "pycircuit_migrate.txt"
 INVENTORY_CANDIDATES = (
     REPO_ROOT / "docs" / "arch" / "MODULE_INVENTORY.yml",
     REPO_ROOT / "docs" / "arch" / "MODULE_INVENTORY.yaml",
@@ -40,6 +42,7 @@ RTL_INCLUDE_SUFFIXES = {".vh", ".svh"}
 FILELIST_SUFFIXES = {".f", ".vf"}
 
 # Layer names are discovered from the tree. Do not hard-code pcs/dll/lmsm/csr.
+# Xia: cmn is a real layer (ub_cmn_mem_1r1w) and must always be enumerated.
 LAYER_SKIP = {
     "hooks",
     "gen",
@@ -50,14 +53,11 @@ LAYER_SKIP = {
     "out",
     "filelists",
 }
+ALWAYS_LAYERS = ("cmn",)
 
-FILELIST_GLOBS = (
-    "rtl/**/*.f",
-    "rtl/**/*.vf",
-    "scripts/gate/filelists/*.f",
-)
+# Layer discovery only. Do not scan rtl/gen (that tree is not used).
 
-# Fallback only if gate/handwritten.yml is absent. Prefer the YAML list.
+# Fallback only if scripts/gate/handwritten.yml is absent. Prefer the YAML list.
 WHITELIST_CELLS = {"ub_rst_sync"}
 
 GENERATED_BANNER = re.compile(
@@ -93,7 +93,7 @@ class Finding:
     rule: str
     message: str
     severity: str = "error"
-    bucket: str = "new"  # new | legacy | report
+    bucket: str = "new"  # new | legacy | migrate | report
     waived_by: str = ""
 
     def key(self) -> tuple[str, str, str, str]:
@@ -179,6 +179,7 @@ def print_tool_versions(needed: Iterable[str]) -> None:
         "yosys": ("yosys_lock", ["yosys", "-V"]),
         "eqy": ("eqy_lock", ["eqy", "--version"]),
         "sby": ("sby_lock", ["sby", "--version"]),
+        "pycc": ("pycc_lock", ["pycc", "--version"]),
         "python": ("", [sys.executable, "--version"]),
     }
     print("=== tool versions (TOOLCHAIN.lock vs actual) ===")
@@ -199,7 +200,7 @@ def print_tool_versions(needed: Iterable[str]) -> None:
     print("=== end tool versions ===")
 
 
-def read_legacy_patterns(path: Path = LEGACY_LIST) -> list[str]:
+def read_list_patterns(path: Path) -> list[str]:
     pats: list[str] = []
     if not path.is_file():
         return pats
@@ -208,6 +209,32 @@ def read_legacy_patterns(path: Path = LEGACY_LIST) -> list[str]:
         if line:
             pats.append(line.replace("\\", "/"))
     return pats
+
+
+def read_legacy_patterns(path: Path = LEGACY_LIST) -> list[str]:
+    return read_list_patterns(path)
+
+
+def read_migrate_patterns(path: Path = MIGRATE_LIST) -> list[str]:
+    return read_list_patterns(path)
+
+
+def is_migrate_path(path: Path, patterns: list[str] | None = None) -> bool:
+    """Existing pyCircuit leaves from main / PR #5 / #7 / #11 / #12 (迁移待办)."""
+    rel_path = rel(path)
+    pats = patterns if patterns is not None else read_migrate_patterns()
+    for pat in pats:
+        if rel_path == pat or fnmatch.fnmatch(rel_path, pat):
+            return True
+        p = Path(pat)
+        if len(p.parts) >= 3 and p.parts[0] == "pycircuit":
+            layer, stem = p.parts[1], p.stem
+            if rel_path in {
+                f"rtl/{layer}/{stem}.v",
+                f"rtl/{layer}/hooks/{stem}.v",
+            }:
+                return True
+    return False
 
 
 def looks_generated(path: Path) -> bool:
@@ -241,7 +268,17 @@ def _file_for_class(path_text: str) -> str:
 
 
 def classify_finding(finding: Finding) -> Finding:
-    finding.bucket = "legacy" if is_legacy_path(Path(REPO_ROOT / _file_for_class(finding.file))) else "new"
+    if finding.bucket == "report":
+        return finding
+    path = Path(REPO_ROOT / _file_for_class(finding.file))
+    if is_handwritten_path(path):
+        finding.bucket = "new"
+    elif is_migrate_path(path):
+        finding.bucket = "migrate"
+    elif is_legacy_path(path):
+        finding.bucket = "legacy"
+    else:
+        finding.bucket = "new"
     return finding
 
 
@@ -299,7 +336,7 @@ def _load_approved_list(path: Path, key: str, kind: str) -> list[dict[str, Any]]
 
 
 def load_handwritten() -> list[dict[str, Any]]:
-    """Approved handwritten SV entries from gate/handwritten.yml."""
+    """Approved handwritten SV entries from scripts/gate/handwritten.yml."""
     return _load_approved_list(HANDWRITTEN_LIST, "entries", "HANDWRITTEN")
 
 
@@ -327,14 +364,50 @@ def handwritten_modules() -> set[str]:
     return names or set(WHITELIST_CELLS)
 
 
+BLACKBOX_KINDS = {"stub", "macro"}
+BLACKBOX_PORTS = {"1RW", "1R1W"}
+BLACKBOX_CONFLICT = {"old", "new"}
+BLACKBOX_REQUIRED = (
+    "module",
+    "file",
+    "kind",
+    "replaces",
+    "depth",
+    "width",
+    "ports",
+    "read_latency",
+    "rw_conflict",
+    "reset",
+    "macro",
+    "reason",
+    "registrant",
+    "approver",
+)
+
+
+def load_blackbox_raw() -> list[dict[str, Any]]:
+    if not BLACKBOX_LIST.is_file():
+        return []
+    data = load_yaml(BLACKBOX_LIST)
+    rows = data.get("entries") if isinstance(data, dict) else None
+    return [dict(e) for e in (rows or []) if isinstance(e, dict)]
+
+
+def load_blackboxes() -> list[dict[str, Any]]:
+    """Approved stub/macro entries from scripts/gate/blackbox.yml."""
+    return _load_approved_list(BLACKBOX_LIST, "entries", "BLACKBOX")
+
+
 def load_stubs() -> list[dict[str, Any]]:
-    """Approved behavioral stubs / blackboxes from gate/stubs.yml."""
-    return _load_approved_list(STUBS_LIST, "entries", "STUB")
+    """Alias: approved blackbox.yml entries (kind stub|macro)."""
+    return load_blackboxes()
 
 
 def is_stub_listed(path: Path) -> bool:
     rel_path = rel(path)
-    for entry in load_stubs():
+    if path.stem in stub_modules():
+        return True
+    for entry in load_blackboxes():
         pat = str(entry.get("file") or "").replace("\\", "/")
         if not pat:
             continue
@@ -345,14 +418,118 @@ def is_stub_listed(path: Path) -> bool:
 
 def stub_modules() -> set[str]:
     names: set[str] = set()
-    for entry in load_stubs():
+    for entry in load_blackboxes():
         pat = str(entry.get("file") or "")
         if pat:
             names.add(Path(pat).stem)
-        mod = str(entry.get("module") or "")
-        if mod:
-            names.add(mod)
+        for key in ("module", "name"):
+            mod = str(entry.get(key) or "")
+            if mod:
+                names.add(mod)
     return names
+
+
+def blackbox_lib_files() -> list[Path]:
+    """Files synth-check must read with `read_verilog -lib`."""
+    files: list[Path] = []
+    for entry in load_blackboxes():
+        pat = str(entry.get("file") or "")
+        if not pat:
+            continue
+        path = REPO_ROOT / pat
+        if path.is_file():
+            files.append(path)
+    return files
+
+
+def blackbox_by_module() -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for entry in load_blackboxes():
+        name = str(entry.get("module") or Path(str(entry.get("file") or "")).stem)
+        if name:
+            out[name] = entry
+    return out
+
+
+def validate_blackbox_schema() -> list[Finding]:
+    """Fail the job if blackbox.yml is missing fields or uses kind=primitive."""
+    findings: list[Finding] = []
+    if not BLACKBOX_LIST.is_file():
+        return [
+            Finding(
+                check="lint",
+                module="*",
+                file=rel(BLACKBOX_LIST),
+                rule="BLACKBOX_LIST_MISSING",
+                message="scripts/gate/blackbox.yml is required",
+            )
+        ]
+    for idx, entry in enumerate(load_blackbox_raw()):
+        ident = str(entry.get("id") or entry.get("module") or f"entry[{idx}]")
+        missing = [k for k in BLACKBOX_REQUIRED if str(entry.get(k) or "").strip() == ""]
+        if missing:
+            findings.append(
+                Finding(
+                    check="lint",
+                    module=str(entry.get("module") or "*"),
+                    file=rel(BLACKBOX_LIST),
+                    rule="BLACKBOX_SCHEMA",
+                    message=f"{ident}: missing/empty fields {missing}",
+                )
+            )
+        kind = str(entry.get("kind") or "").strip().lower()
+        if kind and kind not in BLACKBOX_KINDS:
+            findings.append(
+                Finding(
+                    check="lint",
+                    module=str(entry.get("module") or "*"),
+                    file=rel(BLACKBOX_LIST),
+                    rule="BLACKBOX_KIND",
+                    message=(
+                        f"{ident}: kind={kind!r} is not allowed; "
+                        f"use stub|macro (Xia: ub_cmn_mem_1r1w is a normal "
+                        f"pycircuit/cmn leaf, not kind=primitive)"
+                    ),
+                )
+            )
+        ports = str(entry.get("ports") or "").strip()
+        if ports and ports not in BLACKBOX_PORTS:
+            findings.append(
+                Finding(
+                    check="lint",
+                    module=str(entry.get("module") or "*"),
+                    file=rel(BLACKBOX_LIST),
+                    rule="BLACKBOX_SCHEMA",
+                    message=f"{ident}: ports={ports!r} must be 1RW or 1R1W",
+                )
+            )
+        conflict = str(entry.get("rw_conflict") or "").strip().lower()
+        if conflict and conflict not in BLACKBOX_CONFLICT:
+            findings.append(
+                Finding(
+                    check="lint",
+                    module=str(entry.get("module") or "*"),
+                    file=rel(BLACKBOX_LIST),
+                    rule="BLACKBOX_SCHEMA",
+                    message=f"{ident}: rw_conflict={conflict!r} must be old or new",
+                )
+            )
+        reset = str(entry.get("reset") or "")
+        valid_outside = entry.get("valid_outside")
+        if re.search(r"不复位|unreset|no.?reset", reset, re.I) and valid_outside is not True:
+            findings.append(
+                Finding(
+                    check="lint",
+                    module=str(entry.get("module") or "*"),
+                    file=rel(BLACKBOX_LIST),
+                    rule="BLACKBOX_VALID_OUTSIDE",
+                    message=(
+                        f"{ident}: reset says the array is not reset; "
+                        f"set valid_outside: true or RDC will fail"
+                    ),
+                )
+            )
+    return findings
 
 
 STUB_ATTR_RE = re.compile(r"\(\*\s*(?:blackbox|stub)\s*\*\)", re.I)
@@ -484,9 +661,10 @@ def apply_waivers(findings: list[Finding], check: str) -> list[Finding]:
 
 def split_findings(
     findings: list[Finding],
-) -> tuple[list[Finding], list[Finding], list[Finding], list[Finding]]:
+) -> tuple[list[Finding], list[Finding], list[Finding], list[Finding], list[Finding]]:
     blocking: list[Finding] = []
     legacy: list[Finding] = []
+    migrate: list[Finding] = []
     report: list[Finding] = []
     waived: list[Finding] = []
     for f in findings:
@@ -494,23 +672,25 @@ def split_findings(
             waived.append(f)
         elif f.bucket == "legacy":
             legacy.append(f)
+        elif f.bucket == "migrate":
+            migrate.append(f)
         elif f.bucket == "report":
             report.append(f)
         else:
             blocking.append(f)
-    return blocking, legacy, report, waived
+    return blocking, legacy, migrate, report, waived
 
 
 def emit_report(check: str, findings: list[Finding]) -> int:
-    """Print the two-column report. Return process exit code."""
+    """Print the multi-column report. Return process exit code."""
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     apply_waivers(findings, check)
-    blocking, legacy, report, waived = split_findings(findings)
+    blocking, legacy, migrate, report, waived = split_findings(findings)
     print(f"=== {check} findings ===")
     print(
         f"total={len(findings)} blocking={len(blocking)} "
-        f"legacy_report_only={len(legacy)} report_only={len(report)} "
-        f"waived={len(waived)}"
+        f"legacy_report_only={len(legacy)} migrate_backlog={len(migrate)} "
+        f"report_only={len(report)} waived={len(waived)}"
     )
     print()
     print("## New leaves (blocking)")
@@ -524,18 +704,42 @@ def emit_report(check: str, findings: list[Finding]) -> int:
         print("(none)")
     else:
         _print_table(legacy)
+    print()
+    print("## pyCircuit migrate (main / PR #5 / #7 / #11 / #12; 迁移待办)")
+    roster = read_migrate_roster()
+    if roster:
+        print("| path | group | status |")
+        print("| --- | --- | --- |")
+        for row in roster:
+            print(f"| {row['path']} | {row['group']} | {row['status'] or ''} |")
+    if migrate:
+        _print_table(migrate)
+    elif not roster:
+        print("(none)")
+    pending = list_pending_waivers()
     if report:
         print()
-        print("## Report-only (non-blocking; inventory / timing)")
+        print("## Report-only (non-blocking; inventory / timing / pycc emit / combo depth)")
         _print_table(report)
     if waived:
         print()
         print("## Waived (approved gatekeeper entries only)")
         _print_table(waived)
+    if pending:
+        print()
+        print("## Pending waiver drafts (waivers/pending/; inactive until approved)")
+        print("| id | check | file | status |")
+        print("| --- | --- | --- | --- |")
+        for row in pending:
+            print(
+                f"| {row.get('id') or ''} | {row.get('check') or ''} | "
+                f"{row.get('file') or ''} | {row.get('status') or 'pending'} |"
+            )
     payload = {
         "check": check,
         "blocking": [asdict(f) for f in blocking],
         "legacy": [asdict(f) for f in legacy],
+        "migrate": [asdict(f) for f in migrate],
         "report": [asdict(f) for f in report],
         "waived": [asdict(f) for f in waived],
     }
@@ -548,6 +752,67 @@ def emit_report(check: str, findings: list[Finding]) -> int:
         return 1
     print(f"\n{check}: PASS (no blocking findings on new leaves)")
     return 0
+
+
+def read_migrate_roster() -> list[dict[str, str]]:
+    """Parse scripts/gate/pycircuit_migrate.txt including group comments."""
+    rows: list[dict[str, str]] = []
+    if not MIGRATE_LIST.is_file():
+        return rows
+    group = "main"
+    status = ""
+    seen: set[tuple[str, str]] = set()
+    for raw in MIGRATE_LIST.read_text(encoding="utf-8").splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("#"):
+            body = stripped[1:].strip()
+            low = body.lower()
+            if low.startswith("main"):
+                group, status = "main", ""
+            elif "pr #11" in low:
+                group, status = "PR #11", "待 Xia 核实"
+            elif body.upper().startswith("PR #"):
+                group = body.split("—")[0].split("-")[0].strip()
+                status = ""
+            continue
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        key = (line, group)
+        if key in seen:
+            continue
+        seen.add(key)
+        rows.append({"path": line, "group": group, "status": status})
+    return rows
+
+
+def list_pending_waivers() -> list[dict[str, str]]:
+    pending_dir = WAIVERS_DIR / "pending"
+    out: list[dict[str, str]] = []
+    if not pending_dir.is_dir():
+        return out
+    for path in sorted(pending_dir.glob("*.yml")):
+        if path.name.lower() == "readme.yml":
+            continue
+        try:
+            data = load_yaml(path)
+        except SystemExit:
+            continue
+        entries = data.get("waivers") if isinstance(data, dict) else None
+        if not entries:
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            out.append(
+                {
+                    "id": str(entry.get("id") or ""),
+                    "check": str(entry.get("check") or ""),
+                    "file": rel(path),
+                    "status": str(entry.get("status") or "pending"),
+                }
+            )
+    return out
 
 
 def _print_table(rows: list[Finding]) -> None:
@@ -594,17 +859,22 @@ def parse_filelist(path: Path) -> tuple[list[Path], list[Path]]:
 
 
 def discover_layers(root: Path) -> list[str]:
-    """Directory names under root that count as hierarchy layers / ifaces."""
-    if not root.is_dir():
-        return []
-    names: list[str] = []
-    for path in sorted(root.iterdir()):
-        if not path.is_dir():
-            continue
-        if path.name in LAYER_SKIP or path.name.startswith("."):
-            continue
-        names.append(path.name)
-    return names
+    """Directory names under root that count as hierarchy layers / ifaces.
+
+    Always includes `cmn` (Xia: ub_cmn_mem_1r1w lives in pycircuit/cmn,
+    rtl/cmn, formal/cmn) even if the directory is still empty.
+    """
+    names: set[str] = set()
+    if root.is_dir():
+        for path in sorted(root.iterdir()):
+            if not path.is_dir():
+                continue
+            if path.name in LAYER_SKIP or path.name.startswith("."):
+                continue
+            names.add(path.name)
+    if root.name in {"pycircuit", "rtl", "formal", "tb"}:
+        names.update(ALWAYS_LAYERS)
+    return sorted(names)
 
 
 def is_hooks_path(path: Path) -> bool:
@@ -612,49 +882,68 @@ def is_hooks_path(path: Path) -> bool:
 
 
 def discover_rtl() -> dict[str, Any]:
-    """Auto-discover RTL from filelists (preferred) or rtl/<layer>/ (+ hooks/)."""
-    filelists: list[Path] = []
-    for glob in FILELIST_GLOBS:
-        filelists.extend(sorted(REPO_ROOT.glob(glob)))
+    """Layer-based discovery. Never scans rtl/gen.
+
+    PRODUCT = rtl/<layer>/*.{v,sv}
+    HOOKS   = rtl/<layer>/hooks/*.{v,sv}
+    <layer> is auto-enumerated (pcs, dll, common, cmn, tp, ta, mem, ...).
+    Layers correspond 1:1 with pycircuit/<layer>/.
+    Files sitting directly under rtl/ are D10 leftovers only.
+    """
     sources: list[Path] = []
     incdirs: list[Path] = []
     used_filelists = False
+    filelists: list[Path] = []
     rtl_root = REPO_ROOT / "rtl"
+    pyc_root = REPO_ROOT / "pycircuit"
     layers = discover_layers(rtl_root)
-    if filelists:
-        used_filelists = True
-        for fl in filelists:
-            files, incs = parse_filelist(fl)
-            sources.extend(files)
-            incdirs.extend(incs)
-    else:
-        seen: set[Path] = set()
+    pyc_layers = discover_layers(pyc_root)
+    seen: set[Path] = set()
 
-        def _add(path: Path) -> None:
-            if not path.is_file() or not _is_rtl_file(path) or _excluded(path):
-                return
-            rp = path.resolve()
-            if rp in seen:
-                return
-            seen.add(rp)
-            sources.append(rp)
+    def _add(path: Path) -> None:
+        if not path.is_file() or not _is_rtl_file(path) or _excluded(path):
+            return
+        if "gen" in {p.lower() for p in path.parts}:
+            return
+        rp = path.resolve()
+        if rp in seen:
+            return
+        seen.add(rp)
+        sources.append(rp)
 
-        if rtl_root.is_dir():
-            for path in sorted(rtl_root.iterdir()):
+    if rtl_root.is_dir():
+        for path in sorted(rtl_root.iterdir()):
+            if path.is_file():
+                _add(path)  # D10 leftovers at rtl/*.v
+        for layer in layers:
+            if layer == "gen":
+                continue
+            layer_dir = rtl_root / layer
+            if not layer_dir.is_dir():
+                continue
+            for path in sorted(layer_dir.iterdir()):
                 if path.is_file():
-                    _add(path)  # D10 leftovers at rtl/*.v
-            for layer in layers:
-                layer_dir = rtl_root / layer
-                for path in sorted(layer_dir.iterdir()):
+                    _add(path)
+            hooks = layer_dir / "hooks"
+            if hooks.is_dir():
+                for path in sorted(hooks.iterdir()):
                     if path.is_file():
                         _add(path)
-                hooks = layer_dir / "hooks"
-                if hooks.is_dir():
-                    for path in sorted(hooks.iterdir()):
-                        if path.is_file():
-                            _add(path)
-                incdirs.append(layer_dir.resolve())
-            incdirs.append(rtl_root.resolve())
+            incdirs.append(layer_dir.resolve())
+        incdirs.append(rtl_root.resolve())
+
+    print(
+        "RTL discovery: PRODUCT=rtl/<layer>/*.{v,sv} "
+        "HOOKS=rtl/<layer>/hooks/*.{v,sv} "
+        f"(no rtl/gen). rtl_layers={layers or []} "
+        f"pycircuit_layers={pyc_layers or []}"
+    )
+    missing_rtl = [ly for ly in pyc_layers if ly not in layers]
+    extra_rtl = [ly for ly in layers if ly not in pyc_layers and ly != "common"]
+    if missing_rtl:
+        print(f"NOTE: pycircuit layers with no rtl/<layer>/: {missing_rtl}")
+    if extra_rtl:
+        print(f"NOTE: rtl layers with no pycircuit/<layer>/: {extra_rtl}")
 
     sources = [p for p in sources if p.is_file()]
     modules: list[RtlUnit] = []
@@ -717,6 +1006,7 @@ def discover_rtl() -> dict[str, Any]:
         "instantiations": instantiations,
         "defined": defined,
         "layers": layers,
+        "pycircuit_layers": pyc_layers,
     }
 
 
@@ -776,9 +1066,11 @@ def parse_ports(path: Path) -> list[tuple[str, str]]:
     return ports
 
 
-def collect_stub_findings(check: str = "lint") -> list[Finding]:
-    """Unlisted stub/blackbox is blocking. Timing vs MODULE_INVENTORY is report-only."""
-    findings: list[Finding] = []
+def collect_blackbox_findings(check: str = "lint") -> list[Finding]:
+    """Unlisted stub/macro is blocking. Timing vs MODULE_INVENTORY is report-only."""
+    findings: list[Finding] = validate_blackbox_schema()
+    for f in findings:
+        f.check = check
     inventory = load_module_inventory()
     inv_path = find_module_inventory()
     storage_rows: list[dict[str, Any]] = []
@@ -789,12 +1081,18 @@ def collect_stub_findings(check: str = "lint") -> list[Finding]:
     if inv_path is None:
         print(
             "NOTE: MODULE_INVENTORY not found "
-            "(docs/arch/MODULE_INVENTORY.yml); stub timing auto-check skipped"
+            "(docs/arch/MODULE_INVENTORY.yml); blackbox timing auto-check skipped"
         )
-    listed = load_stubs()
-    listed_files = {str(e.get("file") or "").replace("\\", "/") for e in listed}
+    listed = load_blackboxes()
+    print(
+        f"blackbox registry: {len(listed)} approved stub|macro entries "
+        f"(ub_cmn_mem_1r1w is a normal cmn leaf, not listed here)"
+    )
     for path in iter_rtl_sources():
         if is_handwritten_path(path):
+            continue
+        # Generated cmn storage leaf is a normal PRODUCT, not a stub.
+        if path.stem == "ub_cmn_mem_1r1w" and "cmn" in path.parts:
             continue
         detected = looks_like_stub_or_blackbox(path)
         listed_here = is_stub_listed(path)
@@ -806,7 +1104,8 @@ def collect_stub_findings(check: str = "lint") -> list[Finding]:
                     file=rel(path),
                     rule="STUB_UNLISTED",
                     message=(
-                        "stub/blackbox under rtl/ is not on gate/stubs.yml "
+                        "stub/blackbox under rtl/ is not on "
+                        "scripts/gate/blackbox.yml "
                         "(or the entry has no gatekeeper approver)"
                     ),
                 )
@@ -815,18 +1114,22 @@ def collect_stub_findings(check: str = "lint") -> list[Finding]:
         if not listed_here:
             continue
         entry = next(
-            (e for e in listed if str(e.get("file") or "").replace("\\", "/")
-             == rel(path) or fnmatch.fnmatch(rel(path), str(e.get("file") or ""))),
+            (
+                e
+                for e in listed
+                if str(e.get("file") or "").replace("\\", "/") == rel(path)
+                or fnmatch.fnmatch(rel(path), str(e.get("file") or ""))
+                or str(e.get("module") or "") == path.stem
+            ),
             {},
         )
-        timing = entry.get("timing") or {}
         if not storage_rows:
             continue
         match = None
         for row in storage_rows:
             rid = str(row.get("id") or row.get("replaces") or row.get("macro") or "")
             rmod = str(row.get("module") or "")
-            if rid and rid == str(entry.get("replaces") or entry.get("id") or ""):
+            if rid and rid == str(entry.get("replaces") or entry.get("macro") or entry.get("id") or ""):
                 match = row
                 break
             if rmod and rmod in {path.stem, entry.get("module")}:
@@ -840,7 +1143,7 @@ def collect_stub_findings(check: str = "lint") -> list[Finding]:
                     file=rel(path),
                     rule="STUB_TIMING_NO_INVENTORY_ROW",
                     message=(
-                        "registered stub has no MODULE_INVENTORY storage row "
+                        "registered stub/macro has no MODULE_INVENTORY storage row "
                         "to check read latency / 1RW/1R1W / conflict"
                     ),
                     bucket="report",
@@ -850,15 +1153,17 @@ def collect_stub_findings(check: str = "lint") -> list[Finding]:
         want = {
             "read_latency": match.get("read_latency", match.get("read_lat")),
             "ports": match.get("ports") or match.get("port_kind"),
-            "conflict": match.get("conflict") or match.get("same_addr"),
+            "conflict": match.get("conflict")
+            or match.get("rw_conflict")
+            or match.get("same_addr"),
         }
         got = {
-            "read_latency": timing.get("read_latency", timing.get("read_lat")),
-            "ports": timing.get("ports") or timing.get("port_kind"),
-            "conflict": timing.get("conflict") or timing.get("same_addr"),
+            "read_latency": entry.get("read_latency", entry.get("read_lat")),
+            "ports": entry.get("ports") or entry.get("port_kind"),
+            "conflict": entry.get("rw_conflict") or entry.get("conflict"),
         }
         mismatches = [
-            f"{k}: inventory={want[k]!r} stub={got[k]!r}"
+            f"{k}: inventory={want[k]!r} list={got[k]!r}"
             for k in want
             if want[k] is not None and got[k] is not None and str(want[k]) != str(got[k])
         ]
@@ -871,14 +1176,17 @@ def collect_stub_findings(check: str = "lint") -> list[Finding]:
                     file=rel(path),
                     rule="STUB_TIMING",
                     message=(
-                        "stub timing vs MODULE_INVENTORY (report-only): "
-                        + "; ".join(mismatches + [f"{k} missing on stub" for k in missing])
+                        "blackbox timing vs MODULE_INVENTORY (report-only): "
+                        + "; ".join(mismatches + [f"{k} missing on list" for k in missing])
                     ),
                     bucket="report",
                 )
             )
-    _ = listed_files
     return findings
+
+
+def collect_stub_findings(check: str = "lint") -> list[Finding]:
+    return collect_blackbox_findings(check)
 
 
 def discover_product_leaves() -> list[dict[str, str]]:

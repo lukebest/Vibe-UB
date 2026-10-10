@@ -5,8 +5,10 @@
 # Module not listed: HOOKS ports must equal PRODUCT (no tb_test_mode).
 # Module listed: HOOKS ports = PRODUCT ports + extra_ports (must include
 # tb_test_mode and the SPEC §10 tb_* for that module).
+# Xia exception: §10-named large storage arrays may have tb_* backdoor
+# ports; they still go on this table.
 #
-# CODEOWNERS: /gate/ is gatekeeper-owned. Do not self-approve drafts.
+# CODEOWNERS: /scripts/gate/ is gatekeeper-owned. Do not self-approve drafts.
 
 entries:
   - id: HOOKS-UB-LMSM

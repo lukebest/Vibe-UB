@@ -35,6 +35,34 @@ jobs:
       - name: rtl-emit-consistency
         run: scripts/gate/rtl_emit_consistency.sh
 
+  equiv:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Yosys / eqy (best effort) + gate Python
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y eqy || true
+          pip install -r scripts/gate/requirements.txt
+      - name: equiv (eqy / Yosys equiv_* fallback)
+        run: scripts/gate/equiv.sh
+
+  pycircuit-provenance:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install gate Python
+        run: pip install -r scripts/gate/requirements.txt
+      - name: pycircuit-provenance
+        run: scripts/gate/pycircuit_provenance.sh
+
   hooks-port-consistency:
     runs-on: ubuntu-24.04
     steps:

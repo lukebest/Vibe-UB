@@ -9,7 +9,7 @@
 #   - CDC treats the module as a legal reset-sync cell
 #
 # Any other handwritten .v/.sv under rtl/ is a finding (new leaves fail;
-# D10 leftover is report-only via gate/legacy.txt).
+# D10 leftover is report-only via scripts/gate/legacy.txt).
 #
 # CODEOWNERS: this file is gatekeeper-owned. Do not self-approve drafts.
 

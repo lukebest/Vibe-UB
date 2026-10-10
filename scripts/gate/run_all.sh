@@ -7,6 +7,8 @@ source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
 jobs=(
   rtl-emit-consistency
+  equiv
+  pycircuit-provenance
   hooks-port-consistency
   lint
   synth-check

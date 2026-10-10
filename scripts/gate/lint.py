@@ -126,8 +126,8 @@ def main() -> int:
         print("lint: no RTL modules discovered")
         return emit_report("lint", findings)
     # Tops and leaves both — CODING_STYLE §7 covers PRODUCT and HOOKS trees
-    # when they appear under rtl/. Handwritten whitelist and registered stubs
-    # still lint.
+    # when they appear under rtl/. Handwritten whitelist and registered
+    # blackbox.yml stubs still lint. ub_cmn_mem_1r1w is a normal cmn leaf.
     for unit in modules:
         needed = module_closure(unit.module, disc) or [unit.file]
         findings.extend(lint_module(unit.module, unit.file, needed, incdirs))

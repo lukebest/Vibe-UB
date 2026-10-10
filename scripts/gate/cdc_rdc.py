@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gatelib import (
     CDC_RULES,
     Finding,
+    blackbox_by_module,
     discover_rtl,
     emit_report,
     handwritten_modules,
@@ -42,6 +43,10 @@ PORT_RE = re.compile(
 IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 INST_RE = re.compile(
     r"\b([A-Za-z_][A-Za-z0-9_]*)\s+(?:#\s*\([^;]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+)
+ARRAY_DECL_RE = re.compile(
+    r"\b(?:reg|logic)\b(?:\s+\[[^\]]+\])?\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[",
+    re.I,
 )
 
 
@@ -207,6 +212,47 @@ def analyze_module(name: str, path: Path, text: str, rules: dict) -> list[Findin
     return findings
 
 
+def rdc_unreset_arrays(name: str, file: str, text: str) -> list[Finding]:
+    """Array writes without reset require blackbox.yml valid_outside: true."""
+    arrays = ARRAY_DECL_RE.findall(text)
+    if not arrays:
+        return []
+    written = set()
+    reset_assigned = set()
+    for m in ALWAYS_ASYNC_RE.finditer(text):
+        # body is approximate: from this always to the next always/endmodule
+        start = m.end()
+        nxt = re.search(r"\balways\b|\bendmodule\b", text[start:], re.I)
+        body = text[start : start + (nxt.start() if nxt else len(text))]
+        async_rsts = async_reset_edges(m.group(1))
+        for arr in arrays:
+            if re.search(rf"\b{re.escape(arr)}\s*\[", body):
+                written.add(arr)
+                if async_rsts and re.search(
+                    rf"\b{re.escape(arr)}\b.?(?:<=|=)", body.split("else")[0]
+                ):
+                    reset_assigned.add(arr)
+    unreset = [a for a in arrays if a in written and a not in reset_assigned]
+    if not unreset:
+        return []
+    entry = blackbox_by_module().get(name) or {}
+    if entry.get("valid_outside") is True:
+        return []
+    return [
+        Finding(
+            check="cdc",
+            module=name,
+            file=file,
+            rule="RDC_UNRESET_ARRAY",
+            message=(
+                f"array(s) {unreset} are written without reset; "
+                f"register the module in scripts/gate/blackbox.yml with "
+                f"valid_outside: true (C-line RDC)"
+            ),
+        )
+    ]
+
+
 def main() -> int:
     print_tool_versions(["python", "yosys"])
     rules = load_rules()
@@ -223,11 +269,13 @@ def main() -> int:
         bodies = MODULE_RE.findall(text)
         if not bodies:
             findings.extend(analyze_module(unit.module, unit.file, text, rules))
+            findings.extend(rdc_unreset_arrays(unit.module, rel(unit.file), text))
             continue
         for mname, body in bodies:
             if mname != unit.module:
                 continue
             findings.extend(analyze_module(mname, unit.file, body, rules))
+            findings.extend(rdc_unreset_arrays(mname, rel(unit.file), body))
     return emit_report("cdc", findings)
 
 

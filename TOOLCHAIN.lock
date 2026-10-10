@@ -31,6 +31,18 @@ yosys_lock = "0.33"
 # ubuntu-24.04 may not package it; CI installs `eqy` best-effort.
 eqy_lock = "0.36"
 
+[pycircuit]
+# Single source of truth for pyc4.0 / pycc / LLVM. setup_pycircuit.sh
+# reads these keys; do not duplicate version numbers in the setup script.
+# Install recipe is a replaceable entry until design posts it.
+pycircuit_repo = "https://github.com/lukebest/pyCircuit"
+pycircuit_commit = "43cc5918e3d09ecc0c814cabef6c1384cb9980ae"
+pycircuit_release = "pyc4.0"
+pycircuit_package = "pycircuit-hisi"
+pycircuit_package_version = ""
+llvm_lock = "19"
+pycc_lock = ""
+
 [simulators-actual]
 # Recorded when this lock was first exercised in the Cloud Agent VM.
 # If a locked simulator cannot be installed, say so here (do not pretend).

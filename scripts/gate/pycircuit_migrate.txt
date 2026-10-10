@@ -1,0 +1,36 @@
+# Existing pyCircuit leaves on main / PR #5 / #7 / #12, plus PR #11.
+# Provenance findings on these paths are the "migrate" column (迁移待办),
+# not blocking. New leaves not listed here fail the static check.
+# Handwritten whitelist (scripts/gate/handwritten.yml) is not subject
+# to provenance.
+#
+# Group comments feed the report roster. Do not delete the headers.
+
+# main (already landed; still 迁移待办 until provenance is clean)
+pycircuit/common/ub_pyc_rst_adapt.py
+pycircuit/dll/ub_dll_bcrc.py
+pycircuit/dll/ub_dll_bcrc_check.py
+pycircuit/pcs/ub_pcs_descrambler.py
+pycircuit/pcs/ub_pcs_lane_dedist.py
+pycircuit/pcs/ub_pcs_lane_dist.py
+pycircuit/pcs/ub_pcs_scrambler.py
+pycircuit/lmsm/ub_lmsm.py
+
+# PR #5
+pycircuit/common/ub_pyc_rst_adapt.py
+pycircuit/dll/ub_dll_bcrc.py
+pycircuit/dll/ub_dll_bcrc_check.py
+pycircuit/pcs/ub_pcs_descrambler.py
+pycircuit/pcs/ub_pcs_lane_dedist.py
+pycircuit/pcs/ub_pcs_lane_dist.py
+pycircuit/pcs/ub_pcs_scrambler.py
+
+# PR #7
+pycircuit/lmsm/ub_lmsm.py
+
+# PR #11 — 待 Xia 核实
+pycircuit/csr/ub_csr_regs.py
+
+# PR #12
+pycircuit/dll/ub_dll_retry_ack_sm.py
+pycircuit/dll/ub_dll_retry_req_sm.py

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Run every formal/<iface>/*.sby. Each interface ships its own stub so the
-# job does not need product RTL. Empty tree → success + "no assertions yet".
+# Run every formal/<iface>/*.sby (cmn included). Each interface ships its
+# own stub so the job does not need product RTL. Empty tree → success +
+# "no assertions yet".
 set -euo pipefail
 # shellcheck disable=SC1091
 source "$(cd "$(dirname "$0")" && pwd)/lib.sh"

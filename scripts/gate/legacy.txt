@@ -8,7 +8,7 @@
 #   - Globs are allowed; prefer exact paths so a rewritten file can leave
 #     this list without a directory-wide hole.
 #
-# Do not list pyCircuit PRODUCT/HOOKS or gate/handwritten.yml cells.
+# Do not list pyCircuit PRODUCT/HOOKS or scripts/gate/handwritten.yml cells.
 # CODEOWNERS: this file is gatekeeper-owned.
 
 rtl/ub_controller_tx.v

@@ -13,6 +13,7 @@ Skip the whole job when emit_rtl.py is missing.
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -210,21 +211,32 @@ def run_equiv(
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--equiv-only",
+        action="store_true",
+        help="skip emit+diff; run PRODUCT≡HOOKS only (visible equiv job)",
+    )
+    args = parser.parse_args()
     print_tool_versions(["python", "yosys", "eqy"])
     print(
-        f"emit knobs: EMIT_SCRIPT={EMIT_SCRIPT} EMIT_CMD={' '.join(EMIT_CMD)}"
+        f"emit knobs: EMIT_SCRIPT={EMIT_SCRIPT} EMIT_CMD={' '.join(EMIT_CMD)} "
+        f"equiv_only={args.equiv_only}"
     )
     pyc_layers = discover_layers(REPO_ROOT / "pycircuit")
     rtl_layers = discover_layers(REPO_ROOT / "rtl")
     formal_layers = discover_layers(REPO_ROOT / "formal")
     print(
         f"discovered layers: pycircuit={pyc_layers or '[]'} "
-        f"rtl={rtl_layers or '[]'} formal={formal_layers or '[]'}"
+        f"rtl={rtl_layers or '[]'} formal={formal_layers or '[]'} "
+        f"(cmn always enumerated)"
     )
 
     findings: list[Finding] = []
     emit_path = REPO_ROOT / EMIT_SCRIPT
-    if not emit_path.is_file():
+    if args.equiv_only:
+        print("equiv-only: skip emit+diff")
+    elif not emit_path.is_file():
         print(f"skip emit+diff: {EMIT_SCRIPT} does not exist (pyCircuit emit not on this branch)")
     else:
         print(f"=== {' '.join(EMIT_CMD)} ===")
@@ -261,24 +273,26 @@ def main() -> int:
                 )
             )
 
-    for path in iter_rtl_sources():
-        if is_handwritten_path(path):
-            print(f"handwritten OK {rel(path)} (skip emit/hooks/eqy)")
-            continue
-        if looks_generated(path):
-            continue
-        findings.append(
-            Finding(
-                check="emit",
-                module=path.stem,
-                file=rel(path),
-                rule="HANDWRITTEN_UNLISTED",
-                message=(
-                    "handwritten .v/.sv under rtl/ is not on "
-                    "gate/handwritten.yml (or the entry has no gatekeeper approver)"
-                ),
+    if not args.equiv_only:
+        for path in iter_rtl_sources():
+            if is_handwritten_path(path):
+                print(f"handwritten OK {rel(path)} (skip emit/hooks/eqy)")
+                continue
+            if looks_generated(path):
+                continue
+            findings.append(
+                Finding(
+                    check="emit",
+                    module=path.stem,
+                    file=rel(path),
+                    rule="HANDWRITTEN_UNLISTED",
+                    message=(
+                        "handwritten .v/.sv under rtl/ is not on "
+                        "scripts/gate/handwritten.yml "
+                        "(or the entry has no gatekeeper approver)"
+                    ),
+                )
             )
-        )
 
     table = load_hooks_ports()
     for leaf in discover_leaf_pairs():
@@ -320,7 +334,7 @@ def main() -> int:
         if hit:
             findings.append(hit)
 
-    return emit_report("emit", findings)
+    return emit_report("equiv" if args.equiv_only else "emit", findings)
 
 
 if __name__ == "__main__":

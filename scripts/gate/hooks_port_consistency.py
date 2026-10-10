@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Independent HOOKS vs PRODUCT port check (Xia ruling, SPEC §11 (f)).
 
-Leaves not in gate/hooks_ports.yml: HOOKS ports == PRODUCT ports
+Leaves not in scripts/gate/hooks_ports.yml: HOOKS ports == PRODUCT ports
 (no tb_test_mode). Listed modules: HOOKS = PRODUCT + extra_ports.
 Failure is blocking.
 """
@@ -52,7 +52,7 @@ def compare_ports(
                     file=rel(hooks),
                     rule="HOOKS_PORT_MISMATCH",
                     message=(
-                        "leaf is not on gate/hooks_ports.yml; HOOKS ports "
+                        "leaf is not on scripts/gate/hooks_ports.yml; HOOKS ports "
                         f"must match PRODUCT exactly (product={prod_names} "
                         f"hooks={hook_names})"
                     ),
@@ -101,7 +101,7 @@ def compare_ports(
                 file=rel(hooks),
                 rule="HOOKS_PORT_MISMATCH",
                 message=(
-                    "HOOKS must be PRODUCT + gate/hooks_ports.yml extras; "
+                    "HOOKS must be PRODUCT + scripts/gate/hooks_ports.yml extras; "
                     f"missing_product={missing_prod} missing_extra={missing_extra} "
                     f"unexpected={unexpected}"
                 ),

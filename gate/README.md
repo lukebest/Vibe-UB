@@ -1,16 +1,14 @@
-# Gate lists (tool gatekeeper)
+# Gate lists moved
 
-Machine-readable lists the CI scripts honor. Rules:
-[docs/rules/verif_gate.md](../docs/rules/verif_gate.md).
+Machine-readable lists now live next to the scripts:
 
-| File | Purpose |
-| --- | --- |
-| `legacy.txt` | D10 leftover RTL — report-only until a migration PR |
-| `handwritten.yml` | Approved handwritten SV (today: `ub_rst_sync.sv` only) |
-| `stubs.yml` | Approved behavioral stubs / blackboxes (C-line SRAM) |
-| `hooks_ports.yml` | Per-module extra HOOKS ports (SPEC §10 / §11 (f)) |
+- [`scripts/gate/legacy.txt`](../scripts/gate/legacy.txt)
+- [`scripts/gate/handwritten.yml`](../scripts/gate/handwritten.yml)
+- [`scripts/gate/blackbox.yml`](../scripts/gate/blackbox.yml) (`kind`: `stub` | `macro`)
+- [`scripts/gate/hooks_ports.yml`](../scripts/gate/hooks_ports.yml)
+- [`scripts/gate/pycircuit_migrate.txt`](../scripts/gate/pycircuit_migrate.txt)
 
-Approval: same as `waivers/`. YAML entries need a verification gatekeeper
-in `approver`. CODEOWNERS routes `/gate/` to `lukebest`.
+Rules: [docs/rules/verif_gate.md](../docs/rules/verif_gate.md).
+Approval: same as `waivers/`. CODEOWNERS covers `/scripts/gate/*.yml` and `*.txt`.
 
-Runnable jobs live in `scripts/gate/` (`make gate`).
+Xia: `ub_cmn_mem_1r1w` is a normal pycc leaf (`pycircuit/cmn/` → `rtl/cmn/`), not a blackbox.

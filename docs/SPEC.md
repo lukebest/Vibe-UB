@@ -939,22 +939,24 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 
 **下列「两套网表 / eqy」规则只适用于 pyCircuit 生成叶子。**
 
-每个 **生成叶子** 都出两套网表：`TEST_HOOKS=0` → PRODUCT（`rtl/<layer>/`）；`TEST_HOOKS=1` → HOOKS（`rtl/<layer>/hooks/`）。§10 **没有**列出钩子的生成叶子仍须发出 HOOKS 网表，功能与 PRODUCT **相同**（无 `tb_*` mux，或 mux 被生成期消掉）。eqy **对每个生成叶子**跑：HOOKS 侧 `tb_test_mode=0`，全部钩子输入（若该叶有）接低 / 复位不介入值。无钩子生成叶子的两套网表应对等价。
+每个 **生成叶子** 都出两套网表：`TEST_HOOKS=0` → PRODUCT（`rtl/<layer>/`）；`TEST_HOOKS=1` → HOOKS（`rtl/<layer>/hooks/`）。
+
+§10 **没有**列出钩子的生成叶子仍须发出 HOOKS 网表，且 **端口表与 PRODUCT 完全相同**（**没有** `tb_test_mode`，也没有任何 `tb_*`）。`tb_test_mode` 与钩子端口 **只**出现在 §10 指派了钩子的模块上。eqy **对每个生成叶子**跑。有钩子的叶子：HOOKS 侧 `tb_test_mode=0`，全部钩子输入接低 / 复位不介入值。无钩子叶子：两套网表端口一致，直接比功能等价。
 
 | 网表 | 生成参数 | 用途 |
 | --- | --- | --- |
 | **PRODUCT** | `TEST_HOOKS=0` | **没有** `tb_*` 端口。用于 lint、CDC、综合、实现、FPGA。这是交付网表 |
-| **HOOKS** | `TEST_HOOKS=1` | 含钩子端口与 mux（无钩子叶子则与 PRODUCT 功能相同）。必须过 lint 与 CDC，**不得**进入实现/FPGA |
+| **HOOKS** | `TEST_HOOKS=1` | §10 有钩子的模块：含 `tb_test_mode` 与 `tb_*` 及 mux。§10 无钩子的叶子：**端口表 = PRODUCT**，无 `tb_test_mode`。必须过 lint 与 CDC，**不得**进入实现/FPGA |
 
 规则：
 
 **(a) 实现只用 PRODUCT。** lint / CDC / 综合 / P&R / FPGA 的签字网表是 `TEST_HOOKS=0`。`TEST_HOOKS=1` 也必须过 lint 与 CDC，但永不进入实现。
 
-**(b) 回归与覆盖率跑 HOOKS。** 在 `TEST_HOOKS=1` 网上跑，且 **两种** `tb_test_mode` 都要覆盖：`tb_test_mode=0` 与 `tb_test_mode=1`。行覆盖率分母是 `TEST_HOOKS=1` 网表（含钩子 mux 代码）；钩子代码 **不另开 waiver**。无钩子 **生成叶子** 的 HOOKS 网表仍参加门禁。
+**(b) 回归与覆盖率跑 HOOKS。** 在 `TEST_HOOKS=1` 网上跑。§10 指派了钩子的模块须覆盖 **两种** `tb_test_mode`（0 与 1）。行覆盖率分母是 `TEST_HOOKS=1` 网表（含钩子 mux 代码）；钩子代码 **不另开 waiver**。无钩子生成叶子的 HOOKS 网表仍参加门禁（无 `tb_test_mode` 可扫）。
 
 **(c) PRODUCT 烟测。** `TEST_HOOKS=0` 网表跑一套与钩子无关的 smoke 子集（证明无钩子端口时功能闭环）。
 
-**(d) 形式等价门禁。** 用 Yosys eqy 或同等开源工具，**每个 pyCircuit 生成叶子**各比一次：`TEST_HOOKS=0` 对比 `TEST_HOOKS=1`，且后者 `tb_test_mode=0`、全部钩子输入接低（不介入）。两者必须等价；不等价则 **阻断交付**。TEST 窗在这两种条件下都是「已映射、读 0、写忽略、`csr_err=0`」，因此不破坏等价。白名单手写文件 **不**参加 eqy（见 (f)）。
+**(d) 形式等价门禁。** 用 Yosys eqy 或同等开源工具，**每个 pyCircuit 生成叶子**各比一次：`TEST_HOOKS=0` 对比 `TEST_HOOKS=1`。有钩子的叶子：HOOKS 侧 `tb_test_mode=0`、钩子输入接低。无钩子叶子：两侧端口表相同，无额外绑脚。两者必须等价；不等价则 **阻断交付**。TEST 窗在 `tb_test_mode=0` / `TEST_HOOKS=0` 下都是「已映射、读 0、写忽略、`csr_err=0`」，因此不破坏等价。白名单手写文件 **不**参加 eqy（见 (f)）。
 
 **(e) 覆盖率 waiver。** 钩子 mux 不另开 waiver（见 (b)）。信用下溢（`CRD_UF` 计数与 irq 分支）在正确设计中不可达，须 **具名覆盖率 waiver**（§13.1）。
 

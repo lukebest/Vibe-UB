@@ -35,4 +35,4 @@
 - 并入 `origin/main` `d8ef97e4`（D18）。§1.2 / §1.3 按 D18 写：全控制器，M1 仍是第一批 PHY+DLL。
 - §6.3 / §6.4：`ub_dll_retry` 叶子事件口（`ub_<层>_<功能>`）、脉冲/电平、同拍优先级。事件集合来自 UB-DL §4.7.3.3 / §4.7.3.4；针脚名、脉冲（重训标志位除外）、同拍仲裁为架构提案，列入 §13。`RETRY_WAIT_CYC` / `NUM_RETRY_THRESHOLD` / `NUM_PHY_REINIT_THRESHOLD` 仍在 §13，§6.3 只引参数名。
 - §3.3.4 / §6.1 / §13：`pcs2lmsm_null_blk` / `pcs2lmsm_tx_null_blk` 具体提案（宽 1、1 拍脉冲、LMSM 计数 8/16）待 Luke 批。未改 `docs/REGMAP.md` / yaml。
-- §11：每个 **pyCircuit 生成叶子** 经 `scripts/emit_rtl.py` 出 PRODUCT 与 HOOKS；§10 无钩子的生成叶子 HOOKS 与 PRODUCT 功能相同；eqy 对每个生成叶子、`tb_test_mode=0`、钩子输入接低。手写 SV 仅允许门禁白名单（验证维护，与 `waivers/` 并列；首条 `ub_rst_sync.sv`，§4.2）；白名单文件不做 emit 一致性 / HOOKS / eqy，仍过 lint、综合、CDC/RDC。`rtl/` 下未列名手写一律拒绝。§2.2：源在 `pycircuit/<layer>/`。
+- §11：每个 **pyCircuit 生成叶子** 经 `scripts/emit_rtl.py` 出 PRODUCT 与 HOOKS。§10 无钩子的叶子：HOOKS **端口表与 PRODUCT 相同**，无 `tb_test_mode`；`tb_test_mode` / `tb_*` 只出现在 §10 指派了钩子的模块。eqy 对每个生成叶子（有钩子则 `tb_test_mode=0`、钩子接低）。手写 SV 仅允许门禁白名单（验证维护，与 `waivers/` 并列；首条 `ub_rst_sync.sv`，§4.2）；白名单文件不做 emit / HOOKS / eqy，仍过 lint、综合、CDC/RDC。`rtl/` 下未列名手写一律拒绝。§2.2：源在 `pycircuit/<layer>/`。

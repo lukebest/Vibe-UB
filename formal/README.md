@@ -26,20 +26,18 @@ the script falls back to `-I rtl/common` and prints
 The banner line includes `pyc_inc=rtl/pyc_lib` or `pyc_inc=rtl/common`.
 The TB filelist (`tb/Makefile` `VERILOG_INCLUDE_DIRS`) uses the same pair.
 
-Methods, in order. Exit 0 only if a method **proves** the compare (no
-BMC-only pass):
+Methods, in order. Exit 0 only if a method **proves** the compare.
+Timeout of a method is unproven; try the next. BMC-only is not a pass.
+Affine next-state basis is not a recognized pass.
 
 1. `equiv_make` + `equiv_simple` + `equiv_induct` + `equiv_status -assert`
-2. `equiv_simple -seq 8 -undef` + `equiv_struct` + induct
-3. `miter -equiv -flatten -make_assert` + `sat -verify -tempinduct -prove-asserts -set-init-zero`
-4. `equiv_add` of the hidden CRC remainder, then the same tempinduct
-5. BCRC only: next-state affine basis (`scripts/gate/equiv_seq_basis.py`) —
-   CRC30 absorb is an affine map over GF(2). Matching the zero vector and
-   every `(crc, data)` unit vector in each `{rst,start,valid,last}` cube
-   proves the next-state functions; that plus matching reset is sequential
-   equivalence of `crc` / `crc_word` / `done`.
+2. `miter -equiv -flatten -make_assert` + `sat -verify -tempinduct -prove-asserts -set-init-zero`
+3. `write_aiger` of gold and gate, then Yosys `yosys-abc` `dsec`
+   (combinational nets fall through to `cec`). If that cannot run:
+   `miter -equiv -flatten -make_outputs` + `&r; &cec -m`.
 
-The script prints `equiv_ref METHOD=...` and `gate_chparam=none|...`.
+The script prints `equiv_ref METHOD=...`, `equiv_ref TIME method=... sec=... result=...`,
+`equiv_ref abc=... yosys=... yosys_pkg=...`, and `gate_chparam=none|...`.
 
 Xia §2.6 BCRC `start`/`valid_in` (do not edit `tb/models`):
 

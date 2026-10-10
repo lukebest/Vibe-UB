@@ -3,15 +3,20 @@
 # Usage: equiv_ref.sh <leaf> <netlist.v>
 # Does not read rtl/ and does not require a design PR.
 # Gold = formal/<layer>/ref/<leaf>.sv
-# Exit 0 only if every output is proven (equiv_* or miter tempinduct)
-# or, for BCRC, the affine next-state basis matches in every control cube.
+# Exit 0 only if a recognized method proves the compare (timeout = unproven):
+#   (1) equiv_make / equiv_simple / equiv_induct
+#   (2) miter + sat -tempinduct
+#   (3) miter + ABC dsec (or &cec after FFs are ports)
+# Affine next-state basis is not a recognized pass (premise unproven).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LEAF="${1:-}"
 NET="${2:-}"
-# Per-method SAT / yosys wall time. Tempinduct on a 160-bit CRC XOR is heavy.
+# Per-method wall time. Timeout of a method is unproven; try the next.
 EQUIV_TMO="${EQUIV_TMO:-90}"
+# Comma list: equiv,sat,abc  (default all, in that order)
+EQUIV_METHODS="${EQUIV_METHODS:-equiv,sat,abc}"
 
 usage() {
   echo "usage: $0 <leaf> <netlist.v>" >&2
@@ -23,6 +28,8 @@ usage() {
   echo "  Always -I rtl/pyc_lib for pycc \`include \"pyc_reg.v\". If that dir is" >&2
   echo "  missing (main before #5/#21), fall back to -I rtl/common and WARN." >&2
   echo "  EQUIV_INC=dir[:dir] extra include dirs (after the repo primitive dir)." >&2
+  echo "  EQUIV_METHODS=equiv,sat,abc  which families to try (default all)." >&2
+  echo "  EQUIV_TMO=seconds per method (default 90). Timeout = unproven." >&2
   exit 2
 }
 
@@ -162,6 +169,11 @@ for d in "${INC_FLAGS[@]+"${INC_FLAGS[@]}"}"; do
   gate_read+=" -I${d}"
 done
 gate_read+=" ${NET_ABS}; "
+# Check gold instantiates ub_dll_bcrc. A standalone pycc check net does not.
+if [[ "$LEAF" == ub_dll_bcrc_check ]] \
+   && ! grep -qE '^[[:space:]]*module[[:space:]]+ub_dll_bcrc[[:space:]]*[(#]' "$NET_ABS"; then
+  gate_read="read_verilog -sv ${ROOT}/formal/dll/ref/ub_dll_bcrc.sv; ${gate_read}"
+fi
 
 prep_gold="
 ${gold_read}
@@ -184,6 +196,19 @@ design -copy-from gold -as gold gold
 design -copy-from gate -as gate gate
 "
 
+has_method() {
+  [[ ",${EQUIV_METHODS}," == *",$1,"* ]]
+}
+
+sec_now() { date +%s; }
+
+log_time() {
+  local name="$1" t0="$2" result="$3"
+  local t1
+  t1="$(sec_now)"
+  echo "equiv_ref TIME method=${name} sec=$((t1 - t0)) result=${result}"
+}
+
 run_yosys() {
   local script="$1"
   local tmo="${2:-0}"
@@ -202,6 +227,141 @@ run_yosys() {
   return "$RC"
 }
 
+abc_parse() {
+  local log="$1"
+  if grep -qE 'Networks are equivalent' "$log"; then
+    echo equivalent
+  elif grep -qiE 'NOT EQUIVALENT|Verification failed' "$log"; then
+    echo not_equivalent
+  else
+    echo unproven
+  fi
+}
+
+# (3) write_aiger gold/gate then yosys-abc dsec; combo nets fall through to cec.
+# If dsec cannot run, miter -make_outputs + &r; &cec -m (FFs already in the AIG).
+try_abc() {
+  local t0 tmp abc_bin tmo log rc kind
+  t0="$(sec_now)"
+  abc_bin="$(command -v yosys-abc || true)"
+  if [[ -z "$abc_bin" ]]; then
+    echo "equiv_ref note: yosys-abc not on PATH; ABC method unproven"
+    log_time "abc-dsec" "$t0" "unproven"
+    return 1
+  fi
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/equiv_ref_abc.XXXXXX")"
+  tmo="$EQUIV_TMO"
+  echo "equiv_ref note: trying miter/write_aiger + ABC dsec|&cec (yosys-abc)"
+
+  local script_aig="${prep_gold}${prep_gate}
+design -load gold
+hierarchy -top gold
+techmap; opt; dffunmap; aigmap; opt
+write_aiger -symbols ${tmp}/gold.aig
+design -load gate
+hierarchy -top gate
+techmap; opt; dffunmap; aigmap; opt
+write_aiger -symbols ${tmp}/gate.aig
+"
+  set +e
+  if ! run_yosys "$script_aig" "$tmo"; then
+    set -e
+    echo "equiv_ref note: AIGER write failed or timed out"
+    log_time "abc-dsec" "$t0" "timeout"
+    rm -rf "$tmp"
+    return 1
+  fi
+  set -e
+  if [[ ! -s "${tmp}/gold.aig" || ! -s "${tmp}/gate.aig" ]]; then
+    echo "equiv_ref note: empty AIGER"
+    log_time "abc-dsec" "$t0" "unproven"
+    rm -rf "$tmp"
+    return 1
+  fi
+
+  log="${tmp}/dsec.log"
+  set +e
+  timeout "$tmo" "$abc_bin" -c "dsec -T ${tmo} -v ${tmp}/gold.aig ${tmp}/gate.aig" \
+    >"$log" 2>&1
+  rc=$?
+  set -e
+  cat "$log"
+  if grep -q 'has no latches' "$log"; then
+    echo "equiv_ref note: no latches; running combinational cec"
+    log="${tmp}/cec_combo.log"
+    set +e
+    timeout "$tmo" "$abc_bin" -c "cec -T ${tmo} -v ${tmp}/gold.aig ${tmp}/gate.aig" \
+      >"$log" 2>&1
+    rc=$?
+    set -e
+    cat "$log"
+  fi
+  kind="$(abc_parse "$log")"
+  if [[ "$kind" == equivalent ]]; then
+    log_time "abc-dsec" "$t0" "equivalent"
+    rm -rf "$tmp"
+    pass_method "miter + write_aiger + ABC dsec (yosys-abc)"
+  fi
+  if [[ "$kind" == not_equivalent ]]; then
+    log_time "abc-dsec" "$t0" "not_equivalent"
+    rm -rf "$tmp"
+    echo "equiv_ref METHOD=abc-dsec" >&2
+    echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (ABC dsec: not equivalent)" >&2
+    exit 1
+  fi
+  if [[ "$rc" -eq 124 ]]; then
+    echo "equiv_ref note: ABC dsec timed out"
+    log_time "abc-dsec" "$t0" "timeout"
+  else
+    log_time "abc-dsec" "$t0" "unproven"
+  fi
+
+  # Fallback: single-output miter AIGER + &cec -m (combo, or FFs already ports).
+  echo "equiv_ref note: dsec unproven; trying miter -make_outputs + &cec -m"
+  local script_m="${prep_gold}${prep_gate}${restore}
+miter -equiv -flatten -make_outputs gold gate miter
+hierarchy -top miter
+techmap; opt; dffunmap; aigmap; opt
+write_aiger -symbols -miter ${tmp}/miter.aig
+"
+  t0="$(sec_now)"
+  set +e
+  if ! run_yosys "$script_m" "$tmo"; then
+    set -e
+    log_time "abc-cec" "$t0" "timeout"
+    rm -rf "$tmp"
+    return 1
+  fi
+  set -e
+  log="${tmp}/cec.log"
+  set +e
+  timeout "$tmo" "$abc_bin" -c "&r ${tmp}/miter.aig; &cec -m -v -T ${tmo}" \
+    >"$log" 2>&1
+  rc=$?
+  set -e
+  cat "$log"
+  kind="$(abc_parse "$log")"
+  if [[ "$kind" == equivalent ]]; then
+    log_time "abc-cec" "$t0" "equivalent"
+    rm -rf "$tmp"
+    pass_method "miter -equiv -flatten -make_outputs + ABC &cec (yosys-abc)"
+  fi
+  if [[ "$kind" == not_equivalent ]]; then
+    log_time "abc-cec" "$t0" "not_equivalent"
+    rm -rf "$tmp"
+    echo "equiv_ref METHOD=abc-cec" >&2
+    echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (ABC &cec: not equivalent)" >&2
+    exit 1
+  fi
+  if [[ "$rc" -eq 124 ]]; then
+    log_time "abc-cec" "$t0" "timeout"
+  else
+    log_time "abc-cec" "$t0" "unproven"
+  fi
+  rm -rf "$tmp"
+  return 1
+}
+
 pass_method() {
   METHOD="$1"
   echo "equiv_ref METHOD=${METHOD}"
@@ -210,22 +370,34 @@ pass_method() {
 }
 
 METHOD=""
-echo "equiv_ref leaf=${LEAF} gold=${GOLD} gate=${NET_ABS} top=${GATE_TOP} NUM_LANES=${NUM_LANES:-n/a} PYC=${PYC_RST_ACTIVE_HIGH} gate_chparam=${gate_ch:-none} pyc_inc=${PYC_INC}"
+ABC_BIN="$(command -v yosys-abc || echo MISSING)"
+YOSYS_VER="$(yosys -V 2>/dev/null | head -n 1)"
+YOSYS_PKG="$(dpkg-query -W -f='${Version}' yosys 2>/dev/null || echo unknown)"
+echo "equiv_ref abc=${ABC_BIN} yosys=${YOSYS_VER} yosys_pkg=${YOSYS_PKG}"
+echo "equiv_ref leaf=${LEAF} gold=${GOLD} gate=${NET_ABS} top=${GATE_TOP} NUM_LANES=${NUM_LANES:-n/a} PYC=${PYC_RST_ACTIVE_HIGH} gate_chparam=${gate_ch:-none} pyc_inc=${PYC_INC} methods=${EQUIV_METHODS}"
 
-# 1) default equiv_make / simple / induct
-SCRIPT1="${prep_gold}${prep_gate}${restore}
+# 1) equiv_*
+if has_method equiv; then
+  t0="$(sec_now)"
+  SCRIPT1="${prep_gold}${prep_gate}${restore}
 equiv_make gold gate equiv
 equiv_simple equiv
 equiv_induct equiv
 equiv_status -assert equiv
 "
-if run_yosys "$SCRIPT1"; then
-  pass_method "equiv_make+simple+induct"
-fi
-echo "equiv_ref note: default equiv_* left unproven cells; trying -seq/-undef/equiv_struct"
+  if run_yosys "$SCRIPT1" "$EQUIV_TMO"; then
+    log_time "equiv_make+simple+induct" "$t0" "equivalent"
+    pass_method "equiv_make+simple+induct"
+  fi
+  if [[ "${RC:-1}" -eq 124 ]]; then
+    log_time "equiv_make+simple+induct" "$t0" "timeout"
+  else
+    log_time "equiv_make+simple+induct" "$t0" "unproven"
+  fi
+  echo "equiv_ref note: default equiv_* left unproven cells; trying -seq/-undef/equiv_struct"
 
-# 2) deeper equiv_simple + struct (combo-depth / window)
-SCRIPT2="${prep_gold}${prep_gate}${restore}
+  t0="$(sec_now)"
+  SCRIPT2="${prep_gold}${prep_gate}${restore}
 equiv_make gold gate equiv
 equiv_simple -seq 8 -undef equiv
 equiv_struct equiv
@@ -233,24 +405,39 @@ equiv_simple -seq 8 equiv
 equiv_induct equiv
 equiv_status -assert equiv
 "
-if run_yosys "$SCRIPT2" "$EQUIV_TMO"; then
-  pass_method "equiv_simple -seq 8 -undef + equiv_struct + induct"
+  if run_yosys "$SCRIPT2" "$EQUIV_TMO"; then
+    log_time "equiv_simple -seq 8" "$t0" "equivalent"
+    pass_method "equiv_simple -seq 8 -undef + equiv_struct + induct"
+  fi
+  if [[ "${RC:-1}" -eq 124 ]]; then
+    log_time "equiv_simple -seq 8" "$t0" "timeout"
+  else
+    log_time "equiv_simple -seq 8" "$t0" "unproven"
+  fi
+  echo "equiv_ref note: still unproven; trying miter -equiv + sat -tempinduct"
 fi
-echo "equiv_ref note: still unproven; trying miter -equiv + sat -tempinduct"
 
-# 3) miter + temporal induction (unbounded). Must prove all asserts.
-SCRIPT3="${prep_gold}${prep_gate}${restore}
+# 2) miter + sat -tempinduct
+if has_method sat; then
+  t0="$(sec_now)"
+  SCRIPT3="${prep_gold}${prep_gate}${restore}
 miter -equiv -flatten -make_assert gold gate miter
 hierarchy -top miter
 sat -verify -tempinduct -prove-asserts -set-init-zero -timeout $EQUIV_TMO
 "
-if run_yosys "$SCRIPT3" "$((EQUIV_TMO + 15))"; then
-  pass_method "miter -equiv -flatten -make_assert + sat -tempinduct -prove-asserts -set-init-zero"
-fi
-echo "equiv_ref note: output-only tempinduct did not finish; pairing hidden CRC and retrying"
+  if run_yosys "$SCRIPT3" "$((EQUIV_TMO + 15))"; then
+    log_time "miter+sat-tempinduct" "$t0" "equivalent"
+    pass_method "miter -equiv -flatten -make_assert + sat -tempinduct -prove-asserts -set-init-zero"
+  fi
+  if [[ "${RC:-1}" -eq 124 ]]; then
+    log_time "miter+sat-tempinduct" "$t0" "timeout"
+  else
+    log_time "miter+sat-tempinduct" "$t0" "unproven"
+  fi
+  echo "equiv_ref note: output-only tempinduct did not finish; pairing hidden CRC and retrying"
 
-# 4) pair remainder (crc_gold / crc_q_gate) then tempinduct. BMC-only is not a PASS.
-SCRIPT4="${prep_gold}${prep_gate}${restore}
+  t0="$(sec_now)"
+  SCRIPT4="${prep_gold}${prep_gate}${restore}
 equiv_make gold gate equiv
 cd equiv
 equiv_add -try crc_gold crc_q_gate
@@ -260,27 +447,21 @@ equiv_miter -assert miter
 cd miter
 sat -verify -tempinduct -prove-asserts -set-init-zero -timeout $EQUIV_TMO
 "
-if run_yosys "$SCRIPT4" "$((EQUIV_TMO + 15))"; then
-  pass_method "equiv_add crc + miter -assert + sat -tempinduct -prove-asserts -set-init-zero"
+  if run_yosys "$SCRIPT4" "$((EQUIV_TMO + 15))"; then
+    log_time "sat-tempinduct-paired-crc" "$t0" "equivalent"
+    pass_method "equiv_add crc + miter -assert + sat -tempinduct -prove-asserts -set-init-zero"
+  fi
+  if [[ "${RC:-1}" -eq 124 ]]; then
+    log_time "sat-tempinduct-paired-crc" "$t0" "timeout"
+  else
+    log_time "sat-tempinduct-paired-crc" "$t0" "unproven"
+  fi
+  echo "equiv_ref note: sat -tempinduct unproven; trying ABC dsec|&cec"
 fi
 
-# 5) BCRC: affine next-state basis (complete for the remainder map).
-# Handwritten fakes have no pyc_reg / crc_q; they already failed tempinduct.
-if [[ "$LEAF" == ub_dll_bcrc || "$LEAF" == ub_dll_bcrc_check ]] \
-   && grep -qE 'pyc_reg|crc_q__next' "$NET_ABS"; then
-  echo "equiv_ref note: SAT timed out on the 190-input XOR; running next-state basis"
-  INC_ARGS=()
-  for d in "${INC_FLAGS[@]+"${INC_FLAGS[@]}"}"; do
-    INC_ARGS+=(--inc "$d")
-  done
-  set +e
-  python3 "$ROOT/scripts/gate/equiv_seq_basis.py" "$LEAF" "$GOLD" "$NET_ABS" "$GATE_TOP" \
-    "${INC_ARGS[@]+"${INC_ARGS[@]}"}"
-  RC=$?
-  set -e
-  if [[ "$RC" -eq 0 ]]; then
-    pass_method "next-state affine basis (crc/data unit vectors × control cubes)"
-  fi
+# 3) ABC dsec / &cec. Affine basis is not a recognized pass.
+if has_method abc; then
+  try_abc || true
 fi
 
 echo "equiv_ref METHOD=unproven" >&2

@@ -1,0 +1,61 @@
+# ub_mem_tlb HOOKS formal (验证-C).
+# Reads the PR #27 hooks netlist plus the lint placeholder for
+# ub_cmn_mem_1r1w_d64w109.
+#
+# pyc_reg.v: same resolution as scripts/check_mem.sh — `inc/pyc_reg.v`
+# is filled by get_pyc_inc.sh (rtl/pyc_lib if present, else PR #21
+# origin/cursor/cmn-mem-1r1w-5d26). After #21 merges, drop inc/ and
+# read `-I rtl/pyc_lib`.
+#
+# Default tasks (scripts/gate/formal.sh: `sby -f`):
+#   cover — depth 20. Deepest cover is step 17 (c_way3_hit /
+#           c_all_vld_lkup). 20 = 17 + small search margin.
+#   bmc   — depth 17 (exactly the deepest cover). yices at depth 18
+#           already sits on one step for minutes; z3 at 16 took ~50 min.
+# prove is not a default task (see README): k-induction basecase
+# passes, induction fails on an unreachable a_tag_unique_* CEX
+# (arrays start arbitrary). abc pdr / abc bmc3 crash this sby.
+#
+# [files] paths are repo-root relative: gate and README invoke
+#   sby -f formal/mem/ub_mem_tlb.sby
+# from the repo root.
+
+[tasks]
+cover
+bmc
+
+[options]
+cover:
+mode cover
+depth 20
+--
+bmc:
+mode bmc
+depth 17
+--
+
+[engines]
+# Timed on this VM (cover+bmc sequential ≈ 70 s). See README.
+# apt boolector 1.5: BrokenPipe on this SMT2. abc bmc3/pdr: sby
+# KeyError. z3: too slow for the gate budget.
+smtbmc yices
+
+[script]
+# Keep $mem (no FF explosion). prep/aiger would map the 4×64×109 arrays.
+read -formal ub_cmn_mem_1r1w_d64w109.v
+read -formal ub_mem_tlb.v
+read -formal ub_mem_tlb_if_props.sv
+read -formal ub_mem_tlb_harness.sv
+hierarchy -check -top ub_mem_tlb_harness
+proc
+flatten
+opt
+memory -nomap
+opt -purge
+
+[files]
+formal/mem/ub_mem_tlb_if_props.sv
+formal/mem/ub_mem_tlb_harness.sv
+formal/mem/inc/pyc_reg.v
+rtl/mem/hooks/ub_mem_tlb.v
+tb/mem/lint_placeholder/ub_cmn_mem_1r1w_d64w109.v

@@ -1078,7 +1078,7 @@ Xia 标准：每条 SPEC **功能需求**至少一条 TP。下表按 SPEC 章节
 | §10.3 | `tb_obs_lmsm_st` 仅顶层 0–9 | HOOK-001 |
 | §10.4 | `LMSM_TMR_SCALE` / `CRD_TO_DIS` / `AM_IVL_SCALE` | CSR-005–007 |
 | §10.5 | 非法态 waiver；unpack drain 待定 | PCS-026/027、DLL-022 |
-| §11 (a)–(e) | 两套网表、双 mode、PRODUCT 冒烟（含 TEST 窗）、eqy、CRD_UF waiver | TOP-015–018/021、CSR-019、DLL-024 |
+| §11 (a)–(e) | 两套网表、双 mode、PRODUCT 冒烟（含 TEST 窗）、Yosys `equiv`、CRD_UF waiver | TOP-015–018/021、CSR-019、DLL-024 |
 | §12 | 与现网冲突（重写对齐） | 非功能需求；PCS-006、PMA-002、RST-001、CDC-004 覆盖偏差 |
 | §13 | 开放问题 | 见 §14.1，0 条无映射 |
 | UB 第 9 章 | UMMU + 译码器（Home / User 内存管理） | 见 §8.8.6；MEM-*、DEC-*、SUB-MEM-* |

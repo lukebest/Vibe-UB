@@ -25,6 +25,8 @@ scripts/gate/out/
 .pycircuit_out/
 .pycircuit-venv/
 formal/**/*.sby_*
+formal/**/*_bmc/
+formal/**/*_cover/
 *.sbydir/
 
 # Impl quick-synth: never commit PDK / liberty / local work dirs

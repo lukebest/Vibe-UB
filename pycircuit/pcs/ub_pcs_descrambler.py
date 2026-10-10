@@ -13,6 +13,7 @@ MODULE = "ub_pcs_descrambler"
 
 
 def emit_verilog(
+    test_hooks: bool = False,
     *,
     data_w: int = P.DATA_W_SCR,
     scr_w: int = P.SCR_W,
@@ -21,6 +22,7 @@ def emit_verilog(
 ) -> str:
     return _emit_scramble_module(
         MODULE,
+        test_hooks=test_hooks,
         data_w=data_w,
         scr_w=scr_w,
         amctl_lid_w=amctl_lid_w,

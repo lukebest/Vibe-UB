@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
-"""Emit PRODUCT Verilog (TEST_HOOKS=0) from pycircuit sources.
+"""Emit PRODUCT + HOOKS Verilog from registered pycircuit leaves.
 
-CODING_STYLE §1: submitted .v must be reproducible from current Python.
-`pycc` (MLIR → Verilog) is used when present; the committed netlist is
-always written by this emitter so LLVM 19 is not required.
+CODING_STYLE §1 / SPEC §11: TEST_HOOKS expands at Python generation time.
+  PRODUCT  TEST_HOOKS=0  → rtl/<block>/<module>.v
+  HOOKS    TEST_HOOKS=1  → rtl/<block>/hooks/<module>.v
 
-Layout (SPEC §2.2 / CODING_STYLE §5; same as PR #7 ub_lmsm):
-  PRODUCT  rtl/<block>/<module>.v
-  HOOKS    rtl/<block>/hooks/<module>.v   (not emitted here — SPEC §10
-           lists no hooks on these leaves, so PRODUCT is the only netlist)
-Whitelist SV is handwritten: rtl/common/ub_rst_sync.sv
+SPEC §10 lists no hook ports on this batch, so HOOKS is port-identical
+to PRODUCT (header ``TEST_HOOKS=1`` only). Xia: do not add unused
+``tb_test_mode`` (that is only for modules §10 lists hooks for).
+
+Layers register via ``lib.registry.register``. Batch-1 registers here;
+later ``pycircuit/lmsm``, extra ``pycircuit/dll``, ``pycircuit/csr``
+call ``register()`` from ``scripts/emit_rtl.py``.
+
+Whitelist SV is handwritten: rtl/common/ub_rst_sync.sv — no HOOKS copy
+(CODING_STYLE §3 does not require one).
+
+Do not put the repo root on PYTHONPATH (toolchain package is also
+named pycircuit).
 """
 
 from __future__ import annotations
@@ -24,37 +32,45 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 RTL = REPO / "rtl"
 
-# pycircuit/ on sys.path — do NOT put REPO root on PYTHONPATH (shadows
-# the toolchain package also named pycircuit).
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 from common.ub_pyc_rst_adapt import emit_verilog as emit_rst_adapt
 from dll.ub_dll_bcrc import emit_verilog as emit_bcrc
 from dll.ub_dll_bcrc_check import emit_verilog as emit_bcrc_check
+from lib.registry import Leaf, register, registered
 from pcs.ub_pcs_descrambler import emit_verilog as emit_descrambler
 from pcs.ub_pcs_lane_dedist import emit_verilog as emit_dedist
 from pcs.ub_pcs_lane_dist import emit_verilog as emit_dist
 from pcs.ub_pcs_scrambler import emit_verilog as emit_scrambler
 
-LEAVES = (
-    ("common", "ub_pyc_rst_adapt", emit_rst_adapt),
-    ("pcs", "ub_pcs_scrambler", emit_scrambler),
-    ("pcs", "ub_pcs_descrambler", emit_descrambler),
-    ("pcs", "ub_pcs_lane_dist", emit_dist),
-    ("pcs", "ub_pcs_lane_dedist", emit_dedist),
-    ("dll", "ub_dll_bcrc", emit_bcrc),
-    ("dll", "ub_dll_bcrc_check", emit_bcrc_check),
-)
+
+def register_batch1() -> None:
+    """M1 leaf batch 1. Idempotent."""
+    register("common", "ub_pyc_rst_adapt", emit_rst_adapt)
+    register("pcs", "ub_pcs_scrambler", emit_scrambler)
+    register("pcs", "ub_pcs_descrambler", emit_descrambler)
+    register("pcs", "ub_pcs_lane_dist", emit_dist)
+    register("pcs", "ub_pcs_lane_dedist", emit_dedist)
+    register("dll", "ub_dll_bcrc", emit_bcrc)
+    register("dll", "ub_dll_bcrc_check", emit_bcrc_check)
+
+
+def write_leaf(leaf: Leaf, out_root: Path = RTL) -> list[Path]:
+    product = out_root / leaf.layer / f"{leaf.name}.v"
+    hooks = out_root / leaf.layer / "hooks" / f"{leaf.name}.v"
+    product.parent.mkdir(parents=True, exist_ok=True)
+    hooks.parent.mkdir(parents=True, exist_ok=True)
+    product.write_text(leaf.emit(test_hooks=False), encoding="utf-8")
+    hooks.write_text(leaf.emit(test_hooks=True), encoding="utf-8")
+    return [product, hooks]
 
 
 def emit_all(out_root: Path = RTL) -> list[Path]:
+    register_batch1()
     written: list[Path] = []
-    for layer, name, fn in LEAVES:
-        dest = out_root / layer / f"{name}.v"
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(fn(), encoding="utf-8")
-        written.append(dest)
+    for leaf in registered():
+        written.extend(write_leaf(leaf, out_root))
     return written
 
 

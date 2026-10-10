@@ -8,7 +8,7 @@ Closed by SPEC:
   - pack ``{1'b0, ERROR_FLAG, crc[29:0]}``; bit31 reserved 0
   - TX ERROR_FLAG is **always 0** (SPEC §7: no ECC, no nw_tx_err)
   - FLIT_W=160 streaming; 1-cycle to crc_word / done (SPEC §5)
-  - sync rst_pyc; no TEST_HOOKS (§10)
+  - sync rst_pyc; SPEC §10 lists no hook ports (HOOKS netlist identical)
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ MODULE = "ub_dll_bcrc"
 
 
 def emit_verilog(
+    test_hooks: bool = False,
     *,
     flit_w: int = P.FLIT_W,
     crc_w: int = P.BCRC_W,
@@ -28,6 +29,7 @@ def emit_verilog(
     return _emit_bcrc(
         MODULE,
         check=False,
+        test_hooks=test_hooks,
         flit_w=flit_w,
         crc_w=crc_w,
         poly=poly,
@@ -39,6 +41,7 @@ def _emit_bcrc(
     name: str,
     *,
     check: bool,
+    test_hooks: bool = False,
     flit_w: int,
     crc_w: int,
     poly: int,
@@ -82,9 +85,11 @@ def _emit_bcrc(
         if check
         else "TX ERROR_FLAG hardwired 0 (SPEC §7)."
     )
+    th = 1 if test_hooks else 0
     return f"""// GENERATED from pycircuit/dll/{name}.py — do not edit.
 // Reproduce: make emit
-// SPEC §2.6 / UB-DL §4.3.2.2.4 / §4.7.2 / §7. TEST_HOOKS=0.
+// SPEC §2.6 / UB-DL §4.3.2.2.4 / §4.7.2 / §7. TEST_HOOKS={th}
+// (SPEC §10 lists no hook ports on this leaf).
 // BCRC {role}. Registers: posedge core_clk, sync active-high rst_pyc.
 // Poly/init/no-invert/MSB-first-per-byte/packing from SPEC (not Switch).
 // {check_note}

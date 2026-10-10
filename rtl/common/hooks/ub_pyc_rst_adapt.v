@@ -1,6 +1,6 @@
 // GENERATED from pycircuit/common/ub_pyc_rst_adapt.py — do not edit.
 // Reproduce: make emit
-// SPEC §4.2 / CODING_STYLE §2. TEST_HOOKS=0 (SPEC §10 lists no hook ports).
+// SPEC §4.2 / CODING_STYLE §2. TEST_HOOKS=1 (SPEC §10 lists no hook ports).
 // pyc_reg native polarity is active-high; invert rst_n_sync → rst_pyc.
 
 module ub_pyc_rst_adapt #(

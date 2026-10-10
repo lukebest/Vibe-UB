@@ -1,6 +1,6 @@
 // GENERATED from pycircuit/pcs/ub_pcs_lane_dist.py — do not edit.
 // Reproduce: make emit
-// SPEC §2.4 / §3.3 / UB-PHY §3.2.2.3 / §3.2.5. TEST_HOOKS=0
+// SPEC §2.4 / §3.3 / UB-PHY §3.2.2.3 / §3.2.5. TEST_HOOKS=1
 // (SPEC §10 lists no hook ports on this leaf).
 // 8-bit FEC symbols. UB-PHY §3.2.2.3: Lane<j,i>=CA<(NSYM-1)-i*NUM_LANES-j>; symbol0 / lane0 at LSB (SPEC §3.3). Combo, 0-cycle.
 

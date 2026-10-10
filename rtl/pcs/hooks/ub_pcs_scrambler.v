@@ -1,7 +1,7 @@
-// GENERATED from pycircuit/pcs/ub_pcs_descrambler.py — do not edit.
+// GENERATED from pycircuit/pcs/ub_pcs_scrambler.py — do not edit.
 // Reproduce: make emit
 // SPEC §2.4 / UB-PHY §3.2.2.4 / §3.2.6 / §3.3 / §3.4.3.6 / §3.4.3.7.
-// TEST_HOOKS=0 (SPEC §10 lists no hook ports on this leaf).
+// TEST_HOOKS=1 (SPEC §10 lists no hook ports on this leaf).
 // pyc_reg: posedge core_clk, sync active-high rst_pyc.
 // PRECODE_EN=0 (PMA; SPEC §9) — this leaf does not precode.
 //
@@ -16,7 +16,7 @@
 //   SCR_TAPS, SEED_MAP, LFSR_INIT
 // No product default (no Switch g(x), no invented LID map).
 
-module ub_pcs_descrambler #(
+module ub_pcs_scrambler #(
   parameter integer DATA_W        = 32,
   parameter integer SCR_W         = 23,
   parameter integer AMCTL_LID_W   = 4,

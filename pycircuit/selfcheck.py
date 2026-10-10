@@ -150,6 +150,10 @@ def _ports_block(text: str) -> str:
 def main() -> int:
     paths = emit_all()
     assert paths, "emit wrote nothing"
+    products = [p for p in paths if "/hooks/" not in p.as_posix()]
+    hooks = [p for p in paths if "/hooks/" in p.as_posix()]
+    assert len(products) == 7, products
+    assert len(hooks) == 7, hooks
     for p in paths:
         assert "gen/" not in p.as_posix()
         text = p.read_text(encoding="utf-8")
@@ -162,6 +166,23 @@ def main() -> int:
         # DECLFILENAME: file stem == module name
         mod = text.split("module ", 1)[1].split("(", 1)[0].split("#", 1)[0].strip()
         assert p.stem == mod, f"DECLFILENAME {p.name} vs {mod}"
+        ports = _ports_block(text)
+        assert "tb_test_mode" not in ports
+        assert "tb_inj_" not in ports
+        assert "tb_obs_" not in ports
+        if "/hooks/" in p.as_posix():
+            assert "TEST_HOOKS=1" in text
+        else:
+            assert "TEST_HOOKS=0" in text
+    # Xia: no §10 hooks → HOOKS ports identical to PRODUCT (no tb_test_mode).
+    for prod in products:
+        hook = prod.parent / "hooks" / prod.name
+        assert hook in hooks, hook
+        assert _ports_block(prod.read_text(encoding="utf-8")) == _ports_block(
+            hook.read_text(encoding="utf-8")
+        )
+    rst_hooks = HERE.parent / "rtl/common/hooks/ub_rst_sync.sv"
+    assert not rst_hooks.exists(), "whitelist ub_rst_sync must not get a hooks copy"
 
     rtl = HERE.parent / "rtl"
     scr = (rtl / "pcs/ub_pcs_scrambler.v").read_text(encoding="utf-8")

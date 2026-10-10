@@ -113,3 +113,24 @@
 ## 9. 与现有树的关系
 
 `rtl/`、`tb/` 下现存手写 Verilog 不是本约定的范本（异步复位、2-bit 分 lane、PCS 内 Gray）。重写以 SPEC §12 为准。
+
+---
+
+## 10. 统一存储原语（`ub_cmn_mem_1r1w`）— 实现路径
+
+端口、参数与时序（`DEPTH`/`WIDTH`，`AW=$clog2(DEPTH)`；`clk`；`we/waddr/wdata` + `re/raddr/rdata`；读 1 拍寄存；同址同拍 **read-old**；阵列无复位）见 **PR #20** 对 §10 的提案（Xia；规范未裁定）。PR #20 未合入前以该草案为准；合入后把本段接到其 §10 正文之后，不改写端口表。
+
+**实现路径：**
+
+| 路径 | 谁 | 做什么 |
+| --- | --- | --- |
+| `pycircuit/cmn/` → `rtl/cmn/`（+HOOKS 时的 `tb_<inst>_bd_*`） | 设计-B | pycc 生成的**普通叶子**。走 emit-consistency + eqy。 |
+| 门禁 stub / black box 名单 | 验证维护 | **没有**单独的 primitive 种类。本原语就是普通 pycc 叶子；**仅当**换成 SRAM 宏时才登记为 stub。换宏不改端口、不改测试。`valid_outside: true` 表示 valid 位在阵列外的复位 flop（如线 C UMMU/TLB）。 |
+| `formal/cmn/` | 架构 | formal-only 可综合行为模型 + `ub_cmn_mem_1r1w_if_props`。**不是**产品 RTL。用 `$anyconst` 盯一个地址（1 bit `written` + 该地址数据），大 `DEPTH` 也能收敛。written 跟踪只在 property/bind 模块，**不进产品 RTL**。 |
+| `model/ub_cmn_mem_1r1w.py` | 架构 | scoreboard 参考。 |
+| `tb/cmn/` | 验证-B | 本分支不建；由验证-B 后补。 |
+| `pycircuit/cmn/` | 设计-B | 本分支不建；由设计-B 后补。 |
+
+**`ASSERT_NO_UNINIT_READ`（默认 1）：** 读「自复位以来从未写入」的项算违规。Python 构造参数 `assert_no_uninit_read=True`；形式化模块参数 `ASSERT_NO_UNINIT_READ=1`。门禁名单 `valid_outside: true` 的实例（valid 在阵列外）设 **0**；其未初始化读由验证的 valid-bit 断言负责。
+
+**越界：** RTL **不截断**地址。`we`/`re` 时 `waddr`/`raddr >= DEPTH` 由断言标出（非 2 幂 `DEPTH` 时 `AW` 多出的编码会走到这里）。

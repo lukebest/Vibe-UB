@@ -1,0 +1,26 @@
+[tasks]
+bmc
+cover
+
+[options]
+depth 16
+bmc:
+mode bmc
+--
+cover:
+mode cover
+--
+
+[engines]
+smtbmc z3
+
+[script]
+read -formal ub_cmn_mem_1r1w_if_props.sv
+read -formal ub_cmn_mem_1r1w_formal_ref.sv
+read -formal ub_cmn_mem_1r1w_harness.sv
+prep -top ub_cmn_mem_1r1w_harness
+
+[files]
+ub_cmn_mem_1r1w_if_props.sv
+ub_cmn_mem_1r1w_formal_ref.sv
+ub_cmn_mem_1r1w_harness.sv

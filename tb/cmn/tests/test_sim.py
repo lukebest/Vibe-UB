@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from tb.cmn.discover import discover_by_netlist, rtl_sim_skip_reason
+from tb.cmn.discover import discover_by_netlist, require_pyc_runtime, rtl_sim_skip_reason
 from tb.cmn.sequences import (
     NEGATIVE_CASES,
     POSITIVE_CASES,
@@ -30,6 +30,8 @@ SEED = 1
 
 
 def _require_sim(netlist: str):
+    # Missing rtl/pyc_lib/ or leftover layer pyc_* is a failure, not a skip.
+    require_pyc_runtime()
     reason = rtl_sim_skip_reason(netlist=netlist)
     if reason:
         pytest.skip(reason)

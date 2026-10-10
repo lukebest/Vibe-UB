@@ -32,9 +32,21 @@ from tb.cmn.ports import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RTL_CMN = REPO_ROOT / "rtl" / "cmn"
 RTL_CMN_HOOKS = RTL_CMN / "hooks"
+RTL_PYC_LIB = REPO_ROOT / "rtl" / "pyc_lib"
 LEAF = "ub_cmn_mem_1r1w"
 LEAF_SUFFIXES = {".v", ".sv"}
 META_SUFFIXES = {".json", ".yml", ".yaml"}
+_INCLUDE_RE = re.compile(r"""`include\s+["<]([^">]+)[">]""")
+
+PYC_LIB_MISSING_ZH = (
+    "rtl/pyc_lib/ 不存在。pycc 运行库（pyc_reg.v 等 pyc_*）全仓只放这一份；"
+    "拒绝回退 rtl/cmn/ 或 rtl/cmn/hooks/。"
+)
+LAYER_PYC_ZH = "层目录不应有 pyc_* 运行库，应放在 rtl/pyc_lib/"
+
+
+class PycLibError(RuntimeError):
+    """SPEC §2.2: pyc_* runtime lives only in ``rtl/pyc_lib/``."""
 
 _MODULE_RE = re.compile(r"^\s*module\s+(\w+)", re.MULTILINE)
 _TAG_DEPTH_WIDTH = (
@@ -321,13 +333,91 @@ def parse_variant_file(
     )
 
 
+def is_pyc_runtime_name(name: str) -> bool:
+    stem = Path(name).name
+    return stem.startswith("pyc_") and Path(stem).suffix.lower() in LEAF_SUFFIXES | {".vh"}
+
+
 def _iter_netlist_files(root: Path) -> list[Path]:
+    """Leaf netlists only. ``pyc_*`` runtime files are not variants."""
     if not root.is_dir():
         return []
     out: list[Path] = []
     for path in sorted(root.iterdir()):
-        if path.is_file() and path.suffix.lower() in LEAF_SUFFIXES:
-            out.append(path)
+        if not path.is_file() or path.suffix.lower() not in LEAF_SUFFIXES:
+            continue
+        if is_pyc_runtime_name(path.name):
+            continue
+        out.append(path)
+    return out
+
+
+def layer_pyc_runtime_files(repo: Path | None = None) -> list[Path]:
+    """``pyc_*.v`` left under ``rtl/cmn/`` or ``rtl/cmn/hooks/`` (forbidden)."""
+    root = Path(repo) if repo is not None else REPO_ROOT
+    found: list[Path] = []
+    for directory in (root / "rtl" / "cmn", root / "rtl" / "cmn" / "hooks"):
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.iterdir()):
+            if path.is_file() and is_pyc_runtime_name(path.name):
+                found.append(path.resolve())
+    return found
+
+
+def pyc_lib_dir(repo: Path | None = None) -> Path:
+    root = Path(repo) if repo is not None else REPO_ROOT
+    return root / "rtl" / "pyc_lib"
+
+
+def require_pyc_runtime(repo: Path | None = None) -> Path:
+    """``rtl/pyc_lib/`` must exist; layer dirs must not still hold ``pyc_*``.
+
+    Missing lib is a hard error (RTL sim fails). Do not fall back to
+    ``rtl/cmn/pyc_reg.v`` or ``rtl/cmn/hooks/pyc_reg.v``.
+    """
+    leftover = layer_pyc_runtime_files(repo)
+    lib = pyc_lib_dir(repo)
+    parts: list[str] = []
+    if leftover:
+        rels = ", ".join(str(p) for p in leftover)
+        parts.append(f"{LAYER_PYC_ZH}: {rels}")
+    if not lib.is_dir():
+        parts.append(PYC_LIB_MISSING_ZH)
+    if parts:
+        raise PycLibError(" ".join(parts))
+    return lib.resolve()
+
+
+def leaf_pyc_include_names(text: str) -> list[str]:
+    """``pyc_*.v`` names pulled in by `` `include `` (SPEC §2.2)."""
+    names: list[str] = []
+    seen: set[str] = set()
+    for match in _INCLUDE_RE.finditer(text):
+        name = Path(match.group(1)).name
+        if is_pyc_runtime_name(name) and name not in seen:
+            seen.add(name)
+            names.append(name)
+    return names
+
+
+def used_pyc_lib_files(leaf: Path, repo: Path | None = None) -> list[Path]:
+    """``rtl/pyc_lib/pyc_*.v`` actually referenced by the leaf. One path per name."""
+    lib = require_pyc_runtime(repo)
+    text = leaf.read_text(encoding="utf-8", errors="replace")
+    out: list[Path] = []
+    seen: set[str] = set()
+    for name in leaf_pyc_include_names(text):
+        if name in seen:
+            continue
+        seen.add(name)
+        path = lib / name
+        if not path.is_file():
+            raise PycLibError(
+                f"{leaf.name} `include \"{name}\" 但 {path} 不存在。"
+                "运行库只从 rtl/pyc_lib/ 取，不回退层目录。"
+            )
+        out.append(path.resolve())
     return out
 
 

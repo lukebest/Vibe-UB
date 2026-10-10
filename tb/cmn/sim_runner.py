@@ -14,8 +14,12 @@ from pathlib import Path
 from tb.cmn.discover import (
     REPO_ROOT,
     MemVariant,
+    PycLibError,
+    pyc_lib_dir,
+    require_pyc_runtime,
     require_variant_ports,
     rtl_sim_skip_reason,
+    used_pyc_lib_files,
 )
 from tb.cmn.harness.emit_wrapper import TOPLEVEL, emit_wrapper
 from tb.cmn.ports import LeafPortError, check_leaf_ports, parse_module_ports_file
@@ -24,6 +28,43 @@ from tb.cmn.sequences import expected_violation
 TB_CMN = Path(__file__).resolve().parent
 FORMAL_PROPS = REPO_ROOT / "formal" / "cmn" / "ub_cmn_mem_1r1w_if_props.sv"
 SIM_MODULE = "tb.cmn.sim_cocotb"
+_LAYER_PYC_MARKERS = ("/rtl/cmn/pyc_", "/rtl/cmn/hooks/pyc_")
+
+
+def sim_verilog_sources(
+    variant: MemVariant,
+    *,
+    wrapper: Path,
+    tb_check: bool,
+    repo: Path | None = None,
+) -> list[Path]:
+    """Wrapper + leaf + used ``rtl/pyc_lib/pyc_*.v`` (+ formal). One path per stem.
+
+    Never lists ``rtl/cmn/pyc_*.v`` or ``rtl/cmn/hooks/pyc_*.v``.
+    """
+    require_pyc_runtime(repo)
+    used = used_pyc_lib_files(variant.path, repo)
+    by_stem: dict[str, Path] = {}
+    for path in used:
+        resolved = path.resolve()
+        text = str(resolved)
+        if any(mark in text for mark in _LAYER_PYC_MARKERS):
+            raise PycLibError(
+                f"仿真文件列表拒绝层目录运行库 {resolved}；应使用 rtl/pyc_lib/"
+            )
+        by_stem[resolved.stem] = resolved
+    out = [wrapper.resolve(), variant.path.resolve()]
+    out.extend(by_stem[name] for name in sorted(by_stem))
+    if tb_check and FORMAL_PROPS.is_file():
+        out.append(FORMAL_PROPS.resolve())
+    return out
+
+
+def sim_include_dirs(repo: Path | None = None) -> list[Path]:
+    """``-I rtl/pyc_lib`` plus formal. Layer dirs are not on the include path."""
+    require_pyc_runtime(repo)
+    root = Path(repo) if repo is not None else REPO_ROOT
+    return [pyc_lib_dir(repo).resolve(), (root / "formal" / "cmn").resolve()]
 
 
 def _build_and_test(
@@ -38,6 +79,7 @@ def _build_and_test(
     from cocotb.runner import get_runner
 
     require_variant_ports(variant)
+    require_pyc_runtime()
     if tb_check:
         _require_formal_bind_ports()
 
@@ -58,9 +100,9 @@ def _build_and_test(
         tb_check=tb_check,
     )
 
-    sources = [wrapper, variant.path]
-    if tb_check and FORMAL_PROPS.is_file():
-        sources.append(FORMAL_PROPS)
+    sources = sim_verilog_sources(
+        variant, wrapper=wrapper, tb_check=tb_check
+    )
 
     extra_env = {
         "CMN_CASE": case,
@@ -87,7 +129,12 @@ def _build_and_test(
         "-Wno-UNOPTFLAT",
         "--assert",
     ]
-    includes = [str(variant.path.parent), str(REPO_ROOT / "formal" / "cmn")]
+    includes = [str(p) for p in sim_include_dirs()]
+    build_args.extend(["-I", str(pyc_lib_dir().resolve())])
+    # ``-v`` so an `include of the same pyc_*.v does not compile the module twice.
+    for path in sources:
+        if path.name.startswith("pyc_") and path.suffix.lower() in {".v", ".sv"}:
+            build_args.extend(["-v", str(path)])
 
     runner = get_runner("verilator")
     # Do not pass `parameters=` — that becomes Verilator -G (forbidden).
@@ -98,7 +145,12 @@ def _build_and_test(
         includes=includes,
         build_args=build_args,
     )
-    srcs = [str(p) for p in sources]
+    # Primary sources: wrapper + leaf + formal. pyc_* go through -I / -v only.
+    srcs = [
+        str(p)
+        for p in sources
+        if not (p.name.startswith("pyc_") and p.suffix.lower() in {".v", ".sv"})
+    ]
     try:
         runner.build(verilog_sources=srcs, **build_kw)
     except TypeError:
@@ -182,6 +234,7 @@ def run_sim_variant(
     seed: int = 1,
     random_n: int = 80,
 ) -> None:
+    require_pyc_runtime()
     reason = rtl_sim_skip_reason(netlist=variant.netlist)
     if reason:
         raise RuntimeError(reason)

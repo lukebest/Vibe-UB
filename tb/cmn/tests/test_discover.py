@@ -5,12 +5,18 @@ from __future__ import annotations
 from pathlib import Path
 
 from tb.cmn.discover import (
+    LAYER_PYC_ZH,
     LEAF,
+    PYC_LIB_MISSING_ZH,
+    PycLibError,
     discover_by_netlist,
     discover_variants,
+    leaf_pyc_include_names,
     parse_variant_file,
+    require_pyc_runtime,
     require_variant_ports,
     rtl_sim_skip_reason,
+    used_pyc_lib_files,
 )
 from tb.cmn.harness.emit_wrapper import TOPLEVEL, emit_wrapper
 from tb.cmn.ports import (
@@ -406,3 +412,91 @@ def test_smoke_threshold_is_array_bits_not_a_name_list():
     assert is_smoke_variant(65, 64) is True
     assert is_smoke_variant(128, 64) is True
     assert is_smoke_variant(5, 8) is False
+
+
+def test_discover_ignores_pyc_runtime_in_layer_dir(tmp_path: Path):
+    cmn = tmp_path / "rtl" / "cmn"
+    cmn.mkdir(parents=True)
+    _write_leaf(cmn / f"{LEAF}_d5w8.v", f"{LEAF}_d5w8", 3, 8)
+    (cmn / "pyc_reg.v").write_text("module pyc_reg; endmodule\n", encoding="utf-8")
+    found = discover_variants(tmp_path)
+    assert all(not v.module.startswith("pyc_") for v in found)
+    assert {v.module for v in found} == {f"{LEAF}_d5w8"}
+
+
+def test_require_pyc_runtime_errors_if_lib_missing(tmp_path: Path):
+    (tmp_path / "rtl" / "cmn").mkdir(parents=True)
+    try:
+        require_pyc_runtime(tmp_path)
+    except PycLibError as exc:
+        assert PYC_LIB_MISSING_ZH in str(exc)
+        assert "拒绝回退" in str(exc)
+    else:
+        raise AssertionError("expected PycLibError when rtl/pyc_lib/ is absent")
+
+
+def test_require_pyc_runtime_errors_on_layer_pyc(tmp_path: Path):
+    lib = tmp_path / "rtl" / "pyc_lib"
+    cmn = tmp_path / "rtl" / "cmn"
+    hooks = cmn / "hooks"
+    lib.mkdir(parents=True)
+    hooks.mkdir(parents=True)
+    (lib / "pyc_reg.v").write_text("module pyc_reg; endmodule\n", encoding="utf-8")
+    leftover = cmn / "pyc_reg.v"
+    leftover.write_text("module pyc_reg; endmodule\n", encoding="utf-8")
+    try:
+        require_pyc_runtime(tmp_path)
+    except PycLibError as exc:
+        assert LAYER_PYC_ZH in str(exc)
+        assert "pyc_reg.v" in str(exc)
+    else:
+        raise AssertionError("expected PycLibError for leftover layer pyc_*")
+
+
+def test_used_pyc_lib_files_from_include_not_layer(tmp_path: Path):
+    lib = tmp_path / "rtl" / "pyc_lib"
+    cmn = tmp_path / "rtl" / "cmn"
+    lib.mkdir(parents=True)
+    cmn.mkdir(parents=True)
+    (lib / "pyc_reg.v").write_text("module pyc_reg; endmodule\n", encoding="utf-8")
+    leaf = _write_xia_leaf(cmn / f"{LEAF}_d5w8.v", f"{LEAF}_d5w8", 3, 8)
+    # _write_xia_leaf has no include; add one.
+    text = leaf.read_text(encoding="utf-8")
+    leaf.write_text('`include "pyc_reg.v"\n' + text, encoding="utf-8")
+    assert leaf_pyc_include_names(leaf.read_text(encoding="utf-8")) == ["pyc_reg.v"]
+    used = used_pyc_lib_files(leaf, tmp_path)
+    assert used == [lib.resolve() / "pyc_reg.v"]
+    assert all("rtl/cmn/pyc_" not in str(p) for p in used)
+
+
+def test_sim_file_list_uses_pyc_lib_only(tmp_path: Path):
+    from tb.cmn.sim_runner import sim_include_dirs, sim_verilog_sources
+
+    lib = tmp_path / "rtl" / "pyc_lib"
+    cmn = tmp_path / "rtl" / "cmn"
+    lib.mkdir(parents=True)
+    cmn.mkdir(parents=True)
+    (tmp_path / "formal" / "cmn").mkdir(parents=True)
+    (lib / "pyc_reg.v").write_text("module pyc_reg; endmodule\n", encoding="utf-8")
+    leaf = _write_xia_leaf(cmn / f"{LEAF}_d5w8.v", f"{LEAF}_d5w8", 3, 8)
+    leaf.write_text(
+        '`include "pyc_reg.v"\n' + leaf.read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    var = parse_variant_file(leaf, netlist="product")
+    assert var is not None
+    wrapper = tmp_path / "wrap.sv"
+    wrapper.write_text("// wrap\n", encoding="utf-8")
+    files = sim_verilog_sources(
+        var, wrapper=wrapper, tb_check=False, repo=tmp_path
+    )
+    names = [p.name for p in files]
+    assert "pyc_reg.v" in names
+    assert names.count("pyc_reg.v") == 1
+    assert all("/rtl/cmn/pyc_" not in str(p) and "/rtl/cmn/hooks/pyc_" not in str(p) for p in files)
+    assert all(
+        p.name != "pyc_reg.v" or p.parent.name == "pyc_lib" for p in files
+    )
+    includes = sim_include_dirs(tmp_path)
+    assert any(p.name == "pyc_lib" for p in includes)
+    assert not any(p.name == "cmn" and p.parent.name == "rtl" for p in includes)
+    assert not any(p.name == "hooks" for p in includes)

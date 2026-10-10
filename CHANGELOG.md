@@ -4,6 +4,7 @@
 
 ### Added
 
+- `scripts/impl/quick_synth.sh`：合入前叶子快速综合（Yosys flatten + Sky130 hd tt proxy + OpenSTA 最差建立路径）。Informational；不进验证门禁。规则见 `docs/rules/impl_quick_synth.md`。
 - `TOOLCHAIN.lock` + `tb/` uvm-python 骨架、golden-model 接口、双网表自检入口（叠在 M1 SPEC 上；不改 `rtl/` / SPEC 类文档）。
 - TB 模型按 CODING_STYLE §5 命名：`ub_dll_bcrc` 已按 SPEC §2.6 写全；`ub_pcs_scrambler` 已按已定项实现，抽头与 `AMCTL.LID`→种子为必填参数（SPEC §13，无默认）；`ub_pcs_lane_dist` 已实现。无 LMB/LTB golden。
 - `tb/vibe_uvm/ub_csr_map.py` + harness：`CNT_CLR` `0x0224` bit0–8（含 `CNT_CRD_UF`）；`APPD_LMSM_ST` `0x1E00`；`APPD_PORT_ERR` `0x1F00`；TEST 窗按 SPEC §3.2.3 / §10 / §11、REGMAP §2.4。`CTRL.LMSM_START`、`RETRY_*_ST` 与 `NUM_LANES_*` 合法编码及保留值 TB assert。

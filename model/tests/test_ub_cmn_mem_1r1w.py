@@ -221,7 +221,7 @@ def test_single_segment_write():
     assert not m.segment_defined(0)
     assert m.segment_bits(m.rdata, 1) == 0xC
     assert m.compare_valid_segments(0x00C0)
-    assert m.compare_valid_segments(0xFFCF) is False
+    assert m.compare_valid_segments(0x00D0) is False
 
 
 def test_adjacent_segment_write():

@@ -175,6 +175,7 @@ def _yosys_load_both(
         "opt -full",
         "design -save gold",
         "design -reset",
+        *extras,
         *gate_reads,
         *libs,
         f"hierarchy -check -top {gate_top}",
@@ -579,9 +580,8 @@ def run_equiv(
         hooks, module, wrap, product_path=product, incdirs=incs
     )
     gate_top = f"{module}_eqy_hooks"
-    extra_reads = [_sv_read(p, incs) for p in (extra_rtl or [])]
-    gold_reads = [*extra_reads, _sv_read(product, incs), _sv_read(gold_wrap, incs)]
-    gate_reads = [*extra_reads, _sv_read(hooks, incs), _sv_read(wrap, incs)]
+    gold_reads = [_sv_read(product, incs), _sv_read(gold_wrap, incs)]
+    gate_reads = [_sv_read(hooks, incs), _sv_read(wrap, incs)]
     extra_note = (
         "listed extras" if extra_ports is not None else "no hooks_ports row"
     )

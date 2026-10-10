@@ -7,7 +7,7 @@
 | 规范基线 | UB Base Specification Rev 2.0（2025-12-31），见 [DECISIONS.md](DECISIONS.md) D1 |
 | 阶段范围 | [SPEC_INDEX.md](SPEC_INDEX.md) phase 1：第 3 章 PHY/PCS/PMA/LMSM，第 4 章 DLL，附录 D 寄存器子集 |
 | 实现语言 | 产品 RTL 一律由 pyCircuit（pyc4.0）生成，见 [CODING_STYLE.md](CODING_STYLE.md)、D5/D6 |
-| 配套寄存器 | [REGMAP.md](REGMAP.md) |
+| 配套寄存器 | [REGMAP.md](REGMAP.md)。机器可读源将是 `docs/regmap/regmap.yaml`（PR #11）；`docs/REGMAP.md` 由该源生成 |
 
 职责与流程见 [TEAM.md](TEAM.md)、[PROCESS.md](PROCESS.md)。
 
@@ -332,7 +332,7 @@ PMA 字内位序见 §3.3。AMCTL **插入同一套** `pma_tx_data` / `pma_rx_da
 | --- | --- | --- | --- | --- |
 | `link_up` | out | 1 | `core_clk` | 对应规范 `LinkUp`（赋值见 §6.1）。DLL 用来离开 Disabled（UB-PHY §3.4.3、UB-DL §4.2） |
 | `link_ready` | out | 1 | `core_clk` | 对应规范 `LinkReady`（赋值见 §6.1、UB-PHY §3.4.3.7） |
-| `irq` | out | 1 | `core_clk` | 高有效电平。任一未屏蔽源为 1。复位后 **全部源屏蔽**（见 REGMAP `IRQ_MASK`） |
+| `irq` | out | 1 | `core_clk` | 高有效。`irq = IRQ_EN & OR(IRQ_STATUS & ~IRQ_MASK)`。`IRQ_MASK` 位 1=屏蔽。复位后全部屏蔽（`IRQ_EN=0`、`IRQ_MASK` 全 1） |
 
 测试钩子：顶层另有 `tb_test_mode` 与 `tb_inj_*` / `tb_obs_*`，见 §10。`TEST_HOOKS=0` 时这些端口不存在。
 
@@ -736,7 +736,7 @@ M1 列中 Xia 提出的默认值已由船长确认。仍标「草案」的是规
 | 重传缓冲 | `RETRY_BUF_DEPTH` | 256 flit | 8192 flit | §4.7.3.2；已确认。M1 RTT 假设 2 µs |
 | cell 大小 | `FLOW_CTRL_SIZE` | 1 flit/cell | 同左或按协商 | §4.6、Init Block；已确认 |
 | credit/ACK 粒度 | `*_GRAIN_SIZE` | 32 | 按公式/协商 | §4.6.1–4.6.3；已确认 |
-| 信用模式 | `CREDIT_MODE` | 独占 | 独占或共享 | §4.6.1.2 / §4.6.1.3；共享为非默认；已确认独占 |
+| 信用模式 | `CREDIT_EXCL` | 1（独占） | 1=独占；0=共享 | §4.6.1.2 / §4.6.1.3；共享为非默认；已确认独占。对齐 REGMAP `PARAM_DLL.CREDIT_EXCL` |
 | 每 VL 初始信用 | `INIT_CRD` | 640 cell | 按公式 | §4.6.1；已确认 |
 | flit 宽度 | `FLIT_W` | 160 | 160 | 项目接口 |
 | 每 DLLDB 最大 flit | `MAX_DB_FLITS` | 32 | 32 | §4.3 |

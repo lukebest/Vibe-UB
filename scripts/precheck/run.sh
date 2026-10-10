@@ -68,13 +68,13 @@ equiv scripts/precheck/ub_pcs_lane_dedist_spec.v ub_pcs_lane_dedist_spec \
 "${UB_PYC_VENV}/bin/python" scripts/precheck/emit_bcrc_next.py "${EV}/ub_dll_bcrc_next.v"
 equiv scripts/precheck/ub_dll_bcrc_next_spec.v ub_dll_bcrc_next_spec \
       "${EV}/ub_dll_bcrc_next.v" ub_dll_bcrc_next \
-      "-Irtl/common" "" bcrc_next_vs_spec 120
+      "-Irtl/pyc_lib" "" bcrc_next_vs_spec 120
 
 equiv scripts/precheck/ub_dll_bcrc_spec.v ub_dll_bcrc_spec \
       rtl/dll/ub_dll_bcrc.v ub_dll_bcrc \
-      "-Irtl/common" "" bcrc_prod_vs_spec 90
+      "-Irtl/pyc_lib" "" bcrc_prod_vs_spec 90
 equiv scripts/precheck/ub_dll_bcrc_check_spec.v ub_dll_bcrc_check_spec \
       rtl/dll/ub_dll_bcrc_check.v ub_dll_bcrc_check \
-      "-Irtl/common" "" bcrc_check_prod_vs_spec 90
+      "-Irtl/pyc_lib" "" bcrc_check_prod_vs_spec 90
 
 echo "precheck done (non-gating). logs in ${EV}/"

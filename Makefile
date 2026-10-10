@@ -9,7 +9,7 @@
 PY ?= python3
 RTL := rtl
 WHITELIST := $(RTL)/common/ub_rst_sync.sv
-PYC_REG := $(RTL)/common/pyc_reg.v
+PYC_REG := $(RTL)/pyc_lib/pyc_reg.v
 VERILATOR ?= verilator
 YOSYS ?= yosys
 
@@ -55,7 +55,7 @@ lint: emit
 	  gflags=""; extra=""; \
 	  case $$f in \
 	    *ub_pcs_scrambler.v|*ub_pcs_descrambler.v) gflags="$(SCR_OPEN_G)" ;; \
-	    *ub_dll_bcrc*.v) extra="-I$(RTL)/common" ;; \
+	    *ub_dll_bcrc*.v) extra="-I$(RTL)/pyc_lib" ;; \
 	  esac; \
 	  echo "==== verilator --lint-only -Wall $$gflags $$f $$extra ===="; \
 	  if $(VERILATOR) --lint-only -Wall $$gflags $$f $$extra; then \
@@ -73,7 +73,7 @@ synth: emit
 	  ch=""; extra=""; \
 	  case $$f in \
 	    *ub_pcs_scrambler.v|*ub_pcs_descrambler.v) ch="$(SCR_OPEN_CH); " ;; \
-	    *ub_dll_bcrc*.v) extra="-I$(RTL)/common" ;; \
+	    *ub_dll_bcrc*.v) extra="-I$(RTL)/pyc_lib" ;; \
 	  esac; \
 	  echo "==== yosys read/synth $$f (top $$top) ===="; \
 	  if $(YOSYS) -q -p "read_verilog $$extra -sv $$f; $${ch}hierarchy -check -top $$top; proc; opt; stat"; then \

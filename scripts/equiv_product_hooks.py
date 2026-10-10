@@ -114,7 +114,7 @@ def _write_tied_wrapper(
 
 
 def _incdir() -> str:
-    return f"-I{REPO / 'rtl' / 'common'} "
+    return f"-I{REPO / 'rtl' / 'pyc_lib'} "
 
 
 def _extra_v(name: str) -> str:

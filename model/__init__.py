@@ -12,6 +12,7 @@ from model.ub_cmn_mem_1r1w import (
     UbCmnMemAddrError,
     UbCmnMemUnwrittenError,
     clog2,
+    variant_name,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "UbCmnMemAddrError",
     "UbCmnMemUnwrittenError",
     "clog2",
+    "variant_name",
 ]

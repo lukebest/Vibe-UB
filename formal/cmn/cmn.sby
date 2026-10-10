@@ -1,9 +1,15 @@
 # Clock port is core_clk (CODING_STYLE §5). No reset port; business
 # reset name is rst_pyc — this primitive does not bring it out.
+#
+# Tasks:
+#   bmc / cover     — existing whole-word small config (d5w8, NSEG=1)
+#   bmc_m16 / cover_m16 — d64w64m16 (NSEG=4) per-segment props
 
 [tasks]
 bmc
 cover
+bmc_m16
+cover_m16
 
 [options]
 depth 16
@@ -13,6 +19,14 @@ mode bmc
 cover:
 mode cover
 --
+bmc_m16:
+mode bmc
+depth 12
+--
+cover_m16:
+mode cover
+depth 12
+--
 
 [engines]
 smtbmc z3
@@ -21,7 +35,18 @@ smtbmc z3
 read -formal ub_cmn_mem_1r1w_if_props.sv
 read -formal ub_cmn_mem_1r1w_formal_ref.sv
 read -formal ub_cmn_mem_1r1w_harness.sv
+bmc:
 prep -top ub_cmn_mem_1r1w_harness
+--
+cover:
+prep -top ub_cmn_mem_1r1w_harness
+--
+bmc_m16:
+prep -top ub_cmn_mem_1r1w_harness_m16
+--
+cover_m16:
+prep -top ub_cmn_mem_1r1w_harness_m16
+--
 
 [files]
 ub_cmn_mem_1r1w_if_props.sv

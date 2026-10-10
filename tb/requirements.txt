@@ -1,0 +1,10 @@
+# Exact pins for the uvm-python TB (D7 / D16). See ../TOOLCHAIN.lock.
+# cocotb 2.x cannot import uvm-python — keep <2.
+cocotb==1.9.2
+cocotb-coverage==1.2.0
+cocotb-bus==0.2.1
+regex==2024.11.6
+uvm-python @ git+https://github.com/lukebest/uvm-python.git@96a06eee7dda1edae2013154b3d3756b040c71ad
+
+# Model / report self-tests (not a simulator stack).
+pytest==8.3.5

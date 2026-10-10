@@ -16,3 +16,5 @@ Reads the PR #27 hooks netlist and `tb/mem/lint_placeholder/ub_cmn_mem_1r1w_d64w
 bash formal/mem/get_pyc_inc.sh
 sby -f formal/mem/ub_mem_tlb.sby
 ```
+
+Engine: `smtbmc z3` (same as `formal/cmn`).

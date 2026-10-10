@@ -2,10 +2,10 @@
 // Regenerate: python3 scripts/emit_rtl.py
 // PRODUCT (TEST_HOOKS=0). SPEC §10 lists no tb_* hooks — no HOOKS netlist.
 // Variant d8w16: DEPTH=8 WIDTH=16 AW=3
-// Ports: core_clk, rst_pyc, we, waddr[3-1:0], wdata[16-1:0], re, raddr[3-1:0], rdata[16-1:0]
+// Ports: core_clk, we, waddr[3-1:0], wdata[16-1:0], re, raddr[3-1:0], rdata[16-1:0]
 // 1R1W, registered rdata (1-cycle), same-address same-cycle read-old.
-// rst_pyc is the leaf-standard sync reset; array and rdata are not
-// cleared. OOR addresses are not truncated.
+// No rst_pyc port; array and rdata are not reset.
+// OOR addresses are not truncated.
 
 `include "pyc_reg.v"
 
@@ -14,7 +14,6 @@
 
 module ub_cmn_mem_1r1w_d8w16 (
   input core_clk,
-  input rst_pyc,
   input we,
   input [2:0] waddr,
   input [15:0] wdata,
@@ -22,27 +21,27 @@ module ub_cmn_mem_1r1w_d8w16 (
   input [2:0] raddr,
   output [15:0] rdata
 );
-  // Leaf-standard sync reset (CODING_STYLE §2). Array and rdata
-  // are not reset (undefined until a defined read).
-  wire rst = rst_pyc & 1'b0;
+  // pyc_reg requires !pyc.reset; PRODUCT ties it off.
+  // Array and rdata are not reset (undefined until a defined read).
+  wire rst = 1'b0;
 
 
-wire [15:0] acc__ub_cmn_mem_1r1w__L107; // pyc.name="acc__ub_cmn_mem_1r1w__L107"
-wire [15:0] acc__ub_cmn_mem_1r1w__L107_2; // pyc.name="acc__ub_cmn_mem_1r1w__L107"
-wire [15:0] acc__ub_cmn_mem_1r1w__L107_3; // pyc.name="acc__ub_cmn_mem_1r1w__L107"
-wire [15:0] acc__ub_cmn_mem_1r1w__L107_4; // pyc.name="acc__ub_cmn_mem_1r1w__L107"
-wire [15:0] acc__ub_cmn_mem_1r1w__L107_5; // pyc.name="acc__ub_cmn_mem_1r1w__L107"
-wire [15:0] acc__ub_cmn_mem_1r1w__L107_6; // pyc.name="acc__ub_cmn_mem_1r1w__L107"
-wire [15:0] acc__ub_cmn_mem_1r1w__L107_7; // pyc.name="acc__ub_cmn_mem_1r1w__L107"
-wire [15:0] acc__ub_cmn_mem_1r1w__L107_8; // pyc.name="acc__ub_cmn_mem_1r1w__L107"
-wire [15:0] cell__ub_cmn_mem_1r1w__L93; // pyc.name="cell__ub_cmn_mem_1r1w__L93"
-wire [15:0] cell__ub_cmn_mem_1r1w__L93_2; // pyc.name="cell__ub_cmn_mem_1r1w__L93"
-wire [15:0] cell__ub_cmn_mem_1r1w__L93_3; // pyc.name="cell__ub_cmn_mem_1r1w__L93"
-wire [15:0] cell__ub_cmn_mem_1r1w__L93_4; // pyc.name="cell__ub_cmn_mem_1r1w__L93"
-wire [15:0] cell__ub_cmn_mem_1r1w__L93_5; // pyc.name="cell__ub_cmn_mem_1r1w__L93"
-wire [15:0] cell__ub_cmn_mem_1r1w__L93_6; // pyc.name="cell__ub_cmn_mem_1r1w__L93"
-wire [15:0] cell__ub_cmn_mem_1r1w__L93_7; // pyc.name="cell__ub_cmn_mem_1r1w__L93"
-wire [15:0] cell__ub_cmn_mem_1r1w__L93_8; // pyc.name="cell__ub_cmn_mem_1r1w__L93"
+wire [15:0] acc__ub_cmn_mem_1r1w__L105; // pyc.name="acc__ub_cmn_mem_1r1w__L105"
+wire [15:0] acc__ub_cmn_mem_1r1w__L105_2; // pyc.name="acc__ub_cmn_mem_1r1w__L105"
+wire [15:0] acc__ub_cmn_mem_1r1w__L105_3; // pyc.name="acc__ub_cmn_mem_1r1w__L105"
+wire [15:0] acc__ub_cmn_mem_1r1w__L105_4; // pyc.name="acc__ub_cmn_mem_1r1w__L105"
+wire [15:0] acc__ub_cmn_mem_1r1w__L105_5; // pyc.name="acc__ub_cmn_mem_1r1w__L105"
+wire [15:0] acc__ub_cmn_mem_1r1w__L105_6; // pyc.name="acc__ub_cmn_mem_1r1w__L105"
+wire [15:0] acc__ub_cmn_mem_1r1w__L105_7; // pyc.name="acc__ub_cmn_mem_1r1w__L105"
+wire [15:0] acc__ub_cmn_mem_1r1w__L105_8; // pyc.name="acc__ub_cmn_mem_1r1w__L105"
+wire [15:0] cell__ub_cmn_mem_1r1w__L91; // pyc.name="cell__ub_cmn_mem_1r1w__L91"
+wire [15:0] cell__ub_cmn_mem_1r1w__L91_2; // pyc.name="cell__ub_cmn_mem_1r1w__L91"
+wire [15:0] cell__ub_cmn_mem_1r1w__L91_3; // pyc.name="cell__ub_cmn_mem_1r1w__L91"
+wire [15:0] cell__ub_cmn_mem_1r1w__L91_4; // pyc.name="cell__ub_cmn_mem_1r1w__L91"
+wire [15:0] cell__ub_cmn_mem_1r1w__L91_5; // pyc.name="cell__ub_cmn_mem_1r1w__L91"
+wire [15:0] cell__ub_cmn_mem_1r1w__L91_6; // pyc.name="cell__ub_cmn_mem_1r1w__L91"
+wire [15:0] cell__ub_cmn_mem_1r1w__L91_7; // pyc.name="cell__ub_cmn_mem_1r1w__L91"
+wire [15:0] cell__ub_cmn_mem_1r1w__L91_8; // pyc.name="cell__ub_cmn_mem_1r1w__L91"
 wire [15:0] mem_0; // pyc.name="mem_0"
 wire [15:0] mem_0__next; // pyc.name="mem_0__next"
 wire [15:0] mem_1; // pyc.name="mem_1"
@@ -147,30 +146,30 @@ wire [15:0] pyc_reg_59; // op=pyc.reg
 wire [15:0] pyc_reg_64; // op=pyc.reg
 wire [15:0] pyc_reg_69; // op=pyc.reg
 wire [15:0] pyc_reg_87; // op=pyc.reg
-wire [2:0] raddr__ub_cmn_mem_1r1w__L86; // pyc.name="raddr__ub_cmn_mem_1r1w__L86"
-wire rd_hit__ub_cmn_mem_1r1w__L106; // pyc.name="rd_hit__ub_cmn_mem_1r1w__L106"
-wire rd_hit__ub_cmn_mem_1r1w__L106_2; // pyc.name="rd_hit__ub_cmn_mem_1r1w__L106"
-wire rd_hit__ub_cmn_mem_1r1w__L106_3; // pyc.name="rd_hit__ub_cmn_mem_1r1w__L106"
-wire rd_hit__ub_cmn_mem_1r1w__L106_4; // pyc.name="rd_hit__ub_cmn_mem_1r1w__L106"
-wire rd_hit__ub_cmn_mem_1r1w__L106_5; // pyc.name="rd_hit__ub_cmn_mem_1r1w__L106"
-wire rd_hit__ub_cmn_mem_1r1w__L106_6; // pyc.name="rd_hit__ub_cmn_mem_1r1w__L106"
-wire rd_hit__ub_cmn_mem_1r1w__L106_7; // pyc.name="rd_hit__ub_cmn_mem_1r1w__L106"
-wire rd_hit__ub_cmn_mem_1r1w__L106_8; // pyc.name="rd_hit__ub_cmn_mem_1r1w__L106"
+wire [2:0] raddr__ub_cmn_mem_1r1w__L84; // pyc.name="raddr__ub_cmn_mem_1r1w__L84"
+wire rd_hit__ub_cmn_mem_1r1w__L104; // pyc.name="rd_hit__ub_cmn_mem_1r1w__L104"
+wire rd_hit__ub_cmn_mem_1r1w__L104_2; // pyc.name="rd_hit__ub_cmn_mem_1r1w__L104"
+wire rd_hit__ub_cmn_mem_1r1w__L104_3; // pyc.name="rd_hit__ub_cmn_mem_1r1w__L104"
+wire rd_hit__ub_cmn_mem_1r1w__L104_4; // pyc.name="rd_hit__ub_cmn_mem_1r1w__L104"
+wire rd_hit__ub_cmn_mem_1r1w__L104_5; // pyc.name="rd_hit__ub_cmn_mem_1r1w__L104"
+wire rd_hit__ub_cmn_mem_1r1w__L104_6; // pyc.name="rd_hit__ub_cmn_mem_1r1w__L104"
+wire rd_hit__ub_cmn_mem_1r1w__L104_7; // pyc.name="rd_hit__ub_cmn_mem_1r1w__L104"
+wire rd_hit__ub_cmn_mem_1r1w__L104_8; // pyc.name="rd_hit__ub_cmn_mem_1r1w__L104"
 wire [15:0] rdata_q; // pyc.name="rdata_q"
 wire [15:0] rdata_q__next; // pyc.name="rdata_q__next"
-wire [15:0] rdata_q__ub_cmn_mem_1r1w__L109; // pyc.name="rdata_q__ub_cmn_mem_1r1w__L109"
-wire re__ub_cmn_mem_1r1w__L85; // pyc.name="re__ub_cmn_mem_1r1w__L85"
-wire [2:0] waddr__ub_cmn_mem_1r1w__L83; // pyc.name="waddr__ub_cmn_mem_1r1w__L83"
-wire [15:0] wdata__ub_cmn_mem_1r1w__L84; // pyc.name="wdata__ub_cmn_mem_1r1w__L84"
-wire we__ub_cmn_mem_1r1w__L82; // pyc.name="we__ub_cmn_mem_1r1w__L82"
-wire wr_hit__ub_cmn_mem_1r1w__L92; // pyc.name="wr_hit__ub_cmn_mem_1r1w__L92"
-wire wr_hit__ub_cmn_mem_1r1w__L92_2; // pyc.name="wr_hit__ub_cmn_mem_1r1w__L92"
-wire wr_hit__ub_cmn_mem_1r1w__L92_3; // pyc.name="wr_hit__ub_cmn_mem_1r1w__L92"
-wire wr_hit__ub_cmn_mem_1r1w__L92_4; // pyc.name="wr_hit__ub_cmn_mem_1r1w__L92"
-wire wr_hit__ub_cmn_mem_1r1w__L92_5; // pyc.name="wr_hit__ub_cmn_mem_1r1w__L92"
-wire wr_hit__ub_cmn_mem_1r1w__L92_6; // pyc.name="wr_hit__ub_cmn_mem_1r1w__L92"
-wire wr_hit__ub_cmn_mem_1r1w__L92_7; // pyc.name="wr_hit__ub_cmn_mem_1r1w__L92"
-wire wr_hit__ub_cmn_mem_1r1w__L92_8; // pyc.name="wr_hit__ub_cmn_mem_1r1w__L92"
+wire [15:0] rdata_q__ub_cmn_mem_1r1w__L107; // pyc.name="rdata_q__ub_cmn_mem_1r1w__L107"
+wire re__ub_cmn_mem_1r1w__L83; // pyc.name="re__ub_cmn_mem_1r1w__L83"
+wire [2:0] waddr__ub_cmn_mem_1r1w__L81; // pyc.name="waddr__ub_cmn_mem_1r1w__L81"
+wire [15:0] wdata__ub_cmn_mem_1r1w__L82; // pyc.name="wdata__ub_cmn_mem_1r1w__L82"
+wire we__ub_cmn_mem_1r1w__L80; // pyc.name="we__ub_cmn_mem_1r1w__L80"
+wire wr_hit__ub_cmn_mem_1r1w__L90; // pyc.name="wr_hit__ub_cmn_mem_1r1w__L90"
+wire wr_hit__ub_cmn_mem_1r1w__L90_2; // pyc.name="wr_hit__ub_cmn_mem_1r1w__L90"
+wire wr_hit__ub_cmn_mem_1r1w__L90_3; // pyc.name="wr_hit__ub_cmn_mem_1r1w__L90"
+wire wr_hit__ub_cmn_mem_1r1w__L90_4; // pyc.name="wr_hit__ub_cmn_mem_1r1w__L90"
+wire wr_hit__ub_cmn_mem_1r1w__L90_5; // pyc.name="wr_hit__ub_cmn_mem_1r1w__L90"
+wire wr_hit__ub_cmn_mem_1r1w__L90_6; // pyc.name="wr_hit__ub_cmn_mem_1r1w__L90"
+wire wr_hit__ub_cmn_mem_1r1w__L90_7; // pyc.name="wr_hit__ub_cmn_mem_1r1w__L90"
+wire wr_hit__ub_cmn_mem_1r1w__L90_8; // pyc.name="wr_hit__ub_cmn_mem_1r1w__L90"
 
 // --- Combinational (netlist)
 assign pyc_constant_1 = 3'd0;
@@ -182,22 +181,22 @@ assign pyc_constant_6 = 3'd4;
 assign pyc_constant_7 = 3'd5;
 assign pyc_constant_8 = 3'd6;
 assign pyc_constant_9 = 3'd7;
-assign we__ub_cmn_mem_1r1w__L82 = we;
-assign waddr__ub_cmn_mem_1r1w__L83 = waddr;
-assign wdata__ub_cmn_mem_1r1w__L84 = wdata;
-assign mem_7__next = wdata__ub_cmn_mem_1r1w__L84;
-assign mem_6__next = wdata__ub_cmn_mem_1r1w__L84;
-assign mem_5__next = wdata__ub_cmn_mem_1r1w__L84;
-assign mem_4__next = wdata__ub_cmn_mem_1r1w__L84;
-assign mem_3__next = wdata__ub_cmn_mem_1r1w__L84;
-assign mem_2__next = wdata__ub_cmn_mem_1r1w__L84;
-assign mem_1__next = wdata__ub_cmn_mem_1r1w__L84;
-assign mem_0__next = wdata__ub_cmn_mem_1r1w__L84;
-assign re__ub_cmn_mem_1r1w__L85 = re;
-assign raddr__ub_cmn_mem_1r1w__L86 = raddr;
-assign pyc_eq_10 = (waddr__ub_cmn_mem_1r1w__L83 == pyc_constant_1);
-assign pyc_and_11 = (we__ub_cmn_mem_1r1w__L82 & pyc_eq_10);
-assign wr_hit__ub_cmn_mem_1r1w__L92 = pyc_and_11;
+assign we__ub_cmn_mem_1r1w__L80 = we;
+assign waddr__ub_cmn_mem_1r1w__L81 = waddr;
+assign wdata__ub_cmn_mem_1r1w__L82 = wdata;
+assign mem_7__next = wdata__ub_cmn_mem_1r1w__L82;
+assign mem_6__next = wdata__ub_cmn_mem_1r1w__L82;
+assign mem_5__next = wdata__ub_cmn_mem_1r1w__L82;
+assign mem_4__next = wdata__ub_cmn_mem_1r1w__L82;
+assign mem_3__next = wdata__ub_cmn_mem_1r1w__L82;
+assign mem_2__next = wdata__ub_cmn_mem_1r1w__L82;
+assign mem_1__next = wdata__ub_cmn_mem_1r1w__L82;
+assign mem_0__next = wdata__ub_cmn_mem_1r1w__L82;
+assign re__ub_cmn_mem_1r1w__L83 = re;
+assign raddr__ub_cmn_mem_1r1w__L84 = raddr;
+assign pyc_eq_10 = (waddr__ub_cmn_mem_1r1w__L81 == pyc_constant_1);
+assign pyc_and_11 = (we__ub_cmn_mem_1r1w__L80 & pyc_eq_10);
+assign wr_hit__ub_cmn_mem_1r1w__L90 = pyc_and_11;
 assign pyc_comb_12 = pyc_constant_1;
 assign pyc_comb_13 = pyc_constant_2;
 assign pyc_comb_14 = pyc_constant_3;
@@ -207,8 +206,8 @@ assign pyc_comb_17 = pyc_constant_6;
 assign pyc_comb_18 = pyc_constant_7;
 assign pyc_comb_19 = pyc_constant_8;
 assign pyc_comb_20 = pyc_constant_9;
-assign pyc_comb_21 = we__ub_cmn_mem_1r1w__L82;
-assign pyc_comb_22 = waddr__ub_cmn_mem_1r1w__L83;
+assign pyc_comb_21 = we__ub_cmn_mem_1r1w__L80;
+assign pyc_comb_22 = waddr__ub_cmn_mem_1r1w__L81;
 assign pyc_comb_23 = mem_7__next;
 assign pyc_comb_24 = mem_6__next;
 assign pyc_comb_25 = mem_5__next;
@@ -217,97 +216,97 @@ assign pyc_comb_27 = mem_3__next;
 assign pyc_comb_28 = mem_2__next;
 assign pyc_comb_29 = mem_1__next;
 assign pyc_comb_30 = mem_0__next;
-assign pyc_comb_31 = re__ub_cmn_mem_1r1w__L85;
-assign pyc_comb_32 = raddr__ub_cmn_mem_1r1w__L86;
-assign pyc_comb_33 = wr_hit__ub_cmn_mem_1r1w__L92;
+assign pyc_comb_31 = re__ub_cmn_mem_1r1w__L83;
+assign pyc_comb_32 = raddr__ub_cmn_mem_1r1w__L84;
+assign pyc_comb_33 = wr_hit__ub_cmn_mem_1r1w__L90;
 assign mem_0 = pyc_reg_34;
-assign cell__ub_cmn_mem_1r1w__L93 = mem_0;
+assign cell__ub_cmn_mem_1r1w__L91 = mem_0;
 assign pyc_eq_35 = (pyc_comb_22 == pyc_comb_14);
 assign pyc_and_36 = (pyc_comb_21 & pyc_eq_35);
-assign wr_hit__ub_cmn_mem_1r1w__L92_2 = pyc_and_36;
-assign pyc_comb_37 = cell__ub_cmn_mem_1r1w__L93;
-assign pyc_comb_38 = wr_hit__ub_cmn_mem_1r1w__L92_2;
+assign wr_hit__ub_cmn_mem_1r1w__L90_2 = pyc_and_36;
+assign pyc_comb_37 = cell__ub_cmn_mem_1r1w__L91;
+assign pyc_comb_38 = wr_hit__ub_cmn_mem_1r1w__L90_2;
 assign mem_1 = pyc_reg_39;
-assign cell__ub_cmn_mem_1r1w__L93_2 = mem_1;
+assign cell__ub_cmn_mem_1r1w__L91_2 = mem_1;
 assign pyc_eq_40 = (pyc_comb_22 == pyc_comb_15);
 assign pyc_and_41 = (pyc_comb_21 & pyc_eq_40);
-assign wr_hit__ub_cmn_mem_1r1w__L92_3 = pyc_and_41;
-assign pyc_comb_42 = cell__ub_cmn_mem_1r1w__L93_2;
-assign pyc_comb_43 = wr_hit__ub_cmn_mem_1r1w__L92_3;
+assign wr_hit__ub_cmn_mem_1r1w__L90_3 = pyc_and_41;
+assign pyc_comb_42 = cell__ub_cmn_mem_1r1w__L91_2;
+assign pyc_comb_43 = wr_hit__ub_cmn_mem_1r1w__L90_3;
 assign mem_2 = pyc_reg_44;
-assign cell__ub_cmn_mem_1r1w__L93_3 = mem_2;
+assign cell__ub_cmn_mem_1r1w__L91_3 = mem_2;
 assign pyc_eq_45 = (pyc_comb_22 == pyc_comb_16);
 assign pyc_and_46 = (pyc_comb_21 & pyc_eq_45);
-assign wr_hit__ub_cmn_mem_1r1w__L92_4 = pyc_and_46;
-assign pyc_comb_47 = cell__ub_cmn_mem_1r1w__L93_3;
-assign pyc_comb_48 = wr_hit__ub_cmn_mem_1r1w__L92_4;
+assign wr_hit__ub_cmn_mem_1r1w__L90_4 = pyc_and_46;
+assign pyc_comb_47 = cell__ub_cmn_mem_1r1w__L91_3;
+assign pyc_comb_48 = wr_hit__ub_cmn_mem_1r1w__L90_4;
 assign mem_3 = pyc_reg_49;
-assign cell__ub_cmn_mem_1r1w__L93_4 = mem_3;
+assign cell__ub_cmn_mem_1r1w__L91_4 = mem_3;
 assign pyc_eq_50 = (pyc_comb_22 == pyc_comb_17);
 assign pyc_and_51 = (pyc_comb_21 & pyc_eq_50);
-assign wr_hit__ub_cmn_mem_1r1w__L92_5 = pyc_and_51;
-assign pyc_comb_52 = cell__ub_cmn_mem_1r1w__L93_4;
-assign pyc_comb_53 = wr_hit__ub_cmn_mem_1r1w__L92_5;
+assign wr_hit__ub_cmn_mem_1r1w__L90_5 = pyc_and_51;
+assign pyc_comb_52 = cell__ub_cmn_mem_1r1w__L91_4;
+assign pyc_comb_53 = wr_hit__ub_cmn_mem_1r1w__L90_5;
 assign mem_4 = pyc_reg_54;
-assign cell__ub_cmn_mem_1r1w__L93_5 = mem_4;
+assign cell__ub_cmn_mem_1r1w__L91_5 = mem_4;
 assign pyc_eq_55 = (pyc_comb_22 == pyc_comb_18);
 assign pyc_and_56 = (pyc_comb_21 & pyc_eq_55);
-assign wr_hit__ub_cmn_mem_1r1w__L92_6 = pyc_and_56;
-assign pyc_comb_57 = cell__ub_cmn_mem_1r1w__L93_5;
-assign pyc_comb_58 = wr_hit__ub_cmn_mem_1r1w__L92_6;
+assign wr_hit__ub_cmn_mem_1r1w__L90_6 = pyc_and_56;
+assign pyc_comb_57 = cell__ub_cmn_mem_1r1w__L91_5;
+assign pyc_comb_58 = wr_hit__ub_cmn_mem_1r1w__L90_6;
 assign mem_5 = pyc_reg_59;
-assign cell__ub_cmn_mem_1r1w__L93_6 = mem_5;
+assign cell__ub_cmn_mem_1r1w__L91_6 = mem_5;
 assign pyc_eq_60 = (pyc_comb_22 == pyc_comb_19);
 assign pyc_and_61 = (pyc_comb_21 & pyc_eq_60);
-assign wr_hit__ub_cmn_mem_1r1w__L92_7 = pyc_and_61;
-assign pyc_comb_62 = cell__ub_cmn_mem_1r1w__L93_6;
-assign pyc_comb_63 = wr_hit__ub_cmn_mem_1r1w__L92_7;
+assign wr_hit__ub_cmn_mem_1r1w__L90_7 = pyc_and_61;
+assign pyc_comb_62 = cell__ub_cmn_mem_1r1w__L91_6;
+assign pyc_comb_63 = wr_hit__ub_cmn_mem_1r1w__L90_7;
 assign mem_6 = pyc_reg_64;
-assign cell__ub_cmn_mem_1r1w__L93_7 = mem_6;
+assign cell__ub_cmn_mem_1r1w__L91_7 = mem_6;
 assign pyc_eq_65 = (pyc_comb_22 == pyc_comb_20);
 assign pyc_and_66 = (pyc_comb_21 & pyc_eq_65);
-assign wr_hit__ub_cmn_mem_1r1w__L92_8 = pyc_and_66;
-assign pyc_comb_67 = cell__ub_cmn_mem_1r1w__L93_7;
-assign pyc_comb_68 = wr_hit__ub_cmn_mem_1r1w__L92_8;
+assign wr_hit__ub_cmn_mem_1r1w__L90_8 = pyc_and_66;
+assign pyc_comb_67 = cell__ub_cmn_mem_1r1w__L91_7;
+assign pyc_comb_68 = wr_hit__ub_cmn_mem_1r1w__L90_8;
 assign mem_7 = pyc_reg_69;
-assign cell__ub_cmn_mem_1r1w__L93_8 = mem_7;
+assign cell__ub_cmn_mem_1r1w__L91_8 = mem_7;
 assign pyc_eq_70 = (pyc_comb_32 == pyc_comb_12);
-assign rd_hit__ub_cmn_mem_1r1w__L106 = pyc_eq_70;
-assign pyc_mux_71 = (rd_hit__ub_cmn_mem_1r1w__L106 ? pyc_comb_37 : pyc_comb_13);
-assign acc__ub_cmn_mem_1r1w__L107 = pyc_mux_71;
+assign rd_hit__ub_cmn_mem_1r1w__L104 = pyc_eq_70;
+assign pyc_mux_71 = (rd_hit__ub_cmn_mem_1r1w__L104 ? pyc_comb_37 : pyc_comb_13);
+assign acc__ub_cmn_mem_1r1w__L105 = pyc_mux_71;
 assign pyc_eq_72 = (pyc_comb_32 == pyc_comb_14);
-assign rd_hit__ub_cmn_mem_1r1w__L106_2 = pyc_eq_72;
-assign pyc_mux_73 = (rd_hit__ub_cmn_mem_1r1w__L106_2 ? pyc_comb_42 : acc__ub_cmn_mem_1r1w__L107);
-assign acc__ub_cmn_mem_1r1w__L107_2 = pyc_mux_73;
+assign rd_hit__ub_cmn_mem_1r1w__L104_2 = pyc_eq_72;
+assign pyc_mux_73 = (rd_hit__ub_cmn_mem_1r1w__L104_2 ? pyc_comb_42 : acc__ub_cmn_mem_1r1w__L105);
+assign acc__ub_cmn_mem_1r1w__L105_2 = pyc_mux_73;
 assign pyc_eq_74 = (pyc_comb_32 == pyc_comb_15);
-assign rd_hit__ub_cmn_mem_1r1w__L106_3 = pyc_eq_74;
-assign pyc_mux_75 = (rd_hit__ub_cmn_mem_1r1w__L106_3 ? pyc_comb_47 : acc__ub_cmn_mem_1r1w__L107_2);
-assign acc__ub_cmn_mem_1r1w__L107_3 = pyc_mux_75;
+assign rd_hit__ub_cmn_mem_1r1w__L104_3 = pyc_eq_74;
+assign pyc_mux_75 = (rd_hit__ub_cmn_mem_1r1w__L104_3 ? pyc_comb_47 : acc__ub_cmn_mem_1r1w__L105_2);
+assign acc__ub_cmn_mem_1r1w__L105_3 = pyc_mux_75;
 assign pyc_eq_76 = (pyc_comb_32 == pyc_comb_16);
-assign rd_hit__ub_cmn_mem_1r1w__L106_4 = pyc_eq_76;
-assign pyc_mux_77 = (rd_hit__ub_cmn_mem_1r1w__L106_4 ? pyc_comb_52 : acc__ub_cmn_mem_1r1w__L107_3);
-assign acc__ub_cmn_mem_1r1w__L107_4 = pyc_mux_77;
+assign rd_hit__ub_cmn_mem_1r1w__L104_4 = pyc_eq_76;
+assign pyc_mux_77 = (rd_hit__ub_cmn_mem_1r1w__L104_4 ? pyc_comb_52 : acc__ub_cmn_mem_1r1w__L105_3);
+assign acc__ub_cmn_mem_1r1w__L105_4 = pyc_mux_77;
 assign pyc_eq_78 = (pyc_comb_32 == pyc_comb_17);
-assign rd_hit__ub_cmn_mem_1r1w__L106_5 = pyc_eq_78;
-assign pyc_mux_79 = (rd_hit__ub_cmn_mem_1r1w__L106_5 ? pyc_comb_57 : acc__ub_cmn_mem_1r1w__L107_4);
-assign acc__ub_cmn_mem_1r1w__L107_5 = pyc_mux_79;
+assign rd_hit__ub_cmn_mem_1r1w__L104_5 = pyc_eq_78;
+assign pyc_mux_79 = (rd_hit__ub_cmn_mem_1r1w__L104_5 ? pyc_comb_57 : acc__ub_cmn_mem_1r1w__L105_4);
+assign acc__ub_cmn_mem_1r1w__L105_5 = pyc_mux_79;
 assign pyc_eq_80 = (pyc_comb_32 == pyc_comb_18);
-assign rd_hit__ub_cmn_mem_1r1w__L106_6 = pyc_eq_80;
-assign pyc_mux_81 = (rd_hit__ub_cmn_mem_1r1w__L106_6 ? pyc_comb_62 : acc__ub_cmn_mem_1r1w__L107_5);
-assign acc__ub_cmn_mem_1r1w__L107_6 = pyc_mux_81;
+assign rd_hit__ub_cmn_mem_1r1w__L104_6 = pyc_eq_80;
+assign pyc_mux_81 = (rd_hit__ub_cmn_mem_1r1w__L104_6 ? pyc_comb_62 : acc__ub_cmn_mem_1r1w__L105_5);
+assign acc__ub_cmn_mem_1r1w__L105_6 = pyc_mux_81;
 assign pyc_eq_82 = (pyc_comb_32 == pyc_comb_19);
-assign rd_hit__ub_cmn_mem_1r1w__L106_7 = pyc_eq_82;
-assign pyc_mux_83 = (rd_hit__ub_cmn_mem_1r1w__L106_7 ? pyc_comb_67 : acc__ub_cmn_mem_1r1w__L107_6);
-assign acc__ub_cmn_mem_1r1w__L107_7 = pyc_mux_83;
+assign rd_hit__ub_cmn_mem_1r1w__L104_7 = pyc_eq_82;
+assign pyc_mux_83 = (rd_hit__ub_cmn_mem_1r1w__L104_7 ? pyc_comb_67 : acc__ub_cmn_mem_1r1w__L105_6);
+assign acc__ub_cmn_mem_1r1w__L105_7 = pyc_mux_83;
 assign pyc_eq_84 = (pyc_comb_32 == pyc_comb_20);
-assign rd_hit__ub_cmn_mem_1r1w__L106_8 = pyc_eq_84;
-assign pyc_mux_85 = (rd_hit__ub_cmn_mem_1r1w__L106_8 ? cell__ub_cmn_mem_1r1w__L93_8 : acc__ub_cmn_mem_1r1w__L107_7);
-assign acc__ub_cmn_mem_1r1w__L107_8 = pyc_mux_85;
-assign rdata_q__next = acc__ub_cmn_mem_1r1w__L107_8;
+assign rd_hit__ub_cmn_mem_1r1w__L104_8 = pyc_eq_84;
+assign pyc_mux_85 = (rd_hit__ub_cmn_mem_1r1w__L104_8 ? cell__ub_cmn_mem_1r1w__L91_8 : acc__ub_cmn_mem_1r1w__L105_7);
+assign acc__ub_cmn_mem_1r1w__L105_8 = pyc_mux_85;
+assign rdata_q__next = acc__ub_cmn_mem_1r1w__L105_8;
 assign pyc_comb_86 = rdata_q__next;
 assign rdata_q = pyc_reg_87;
-assign rdata_q__ub_cmn_mem_1r1w__L109 = rdata_q;
-assign pyc_comb_88 = rdata_q__ub_cmn_mem_1r1w__L109;
+assign rdata_q__ub_cmn_mem_1r1w__L107 = rdata_q;
+assign pyc_comb_88 = rdata_q__ub_cmn_mem_1r1w__L107;
 
 // --- Sequential primitives
 pyc_reg #(.WIDTH(16)) pyc_reg_34_inst (

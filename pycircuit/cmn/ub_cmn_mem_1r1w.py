@@ -3,20 +3,18 @@
 Described with the pyCircuit ``@module`` API and emitted by pycc. One fixed
 netlist per (DEPTH, WIDTH) set; no Verilog ``parameter`` (SPEC §2.2).
 
-Contract (model / formal / Xia):
-  * Ports: core_clk, rst_pyc, we, waddr[AW-1:0], wdata[WIDTH-1:0],
-    re, raddr[AW-1:0], rdata[WIDTH-1:0]. AW = $clog2(DEPTH).
-    Clock / reset match A-line pycc leaves (CODING_STYLE §2 / §5):
-    ``core_clk`` and sync active-high ``rst_pyc``.
+Contract (model / formal / Xia / CODING_STYLE §10):
+  * Ports: core_clk, we, waddr[AW-1:0], wdata[WIDTH-1:0], re,
+    raddr[AW-1:0], rdata[WIDTH-1:0]. AW = $clog2(DEPTH).
+    Clock is ``core_clk`` (CODING_STYLE §5). No reset port — the
+    business-leaf name is ``rst_pyc``; this primitive does not bring it out.
   * Synchronous 1R1W, single clock. rdata is registered (1-cycle latency).
     Same-address same-cycle read+write returns the OLD data.
-  * Array and rdata are NOT reset and are NOT zero-initialised. ``rst_pyc``
-    is on the leaf for parent wiring; it does not clear the array or rdata.
-    rdata is undefined until a read of an address that has been written.
-    With ASSERT_NO_UNINIT_READ=0, a read of an unwritten address is
-    undefined (caller gates with an external valid bit). Written-flag
-    tracking lives only in assertions / the model, never in this PRODUCT
-    netlist.
+  * Array and rdata are NOT reset and are NOT zero-initialised. rdata is
+    undefined until a read of an address that has been written. With
+    ASSERT_NO_UNINIT_READ=0, a read of an unwritten address is undefined
+    (caller gates with an external valid bit). Written-flag tracking lives
+    only in assertions / the model, never in this PRODUCT netlist.
   * Out-of-range encodings (non-power-of-2 DEPTH) are not truncated or
     guarded. Storage is 2**AW cells so every AW-bit encoding maps to a
     cell; formal/sim assertions catch OOR.
@@ -75,10 +73,10 @@ def build(
     nloc = 1 << aw
 
     clk = m.clock("core_clk")
-    # A-line / CODING_STYLE §2 leaf reset is rst_pyc (sync, active-high).
-    # pyc_reg / m.out require !pyc.reset. Emit isolates rst_pyc from the
-    # flops so the array and rdata stay undefined until written / defined.
-    rst = m.reset("rst_pyc")
+    # pyc_reg / m.out require !pyc.reset. PRODUCT has no reset port
+    # (CODING_STYLE §10); emit ties this off so array and rdata stay
+    # undefined until written / until a defined read.
+    rst = m.reset("rst")
     we = m.input("we", width=1)
     waddr = m.input("waddr", width=aw)
     wdata = m.input("wdata", width=width)

@@ -94,30 +94,81 @@ module ub_cmn_mem_1r1w_if_props #(
     c_re_only:           cover (re && !we && (f_wr == {NSEG{1'b1}}));
   end
 
-  // Per-segment: unmasked hold, masked write, read-old, uninit.
-  genvar gi;
+  // Per-segment props. Yosys 0.33 does not uniquify assertion names
+  // inside a for-generate, so each index is its own generate-if with
+  // a unique label. Unrolled through 3 covers the d64w64m16 NSEG=4 job
+  // (plus NSEG=1 whole-word).
   generate
-    for (gi = 0; gi < NSEG; gi = gi + 1) begin : g_seg
+    if (NSEG > 0) begin : g_seg0
       always @(posedge core_clk) begin
-        if (f_past_ok && $past(hit_w && wmask_eff[gi]))
-          a_seg_masked_written: assert (f_wr[gi]);
-
-        if (f_past_ok && $past(hit_w && !wmask_eff[gi])) begin
-          a_seg_unmasked_wr_hold: assert (f_wr[gi] == $past(f_wr[gi]));
-          a_seg_unmasked_data_hold: assert (
-            f_data[gi*WMASK_W +: WMASK_W]
-              == $past(f_data[gi*WMASK_W +: WMASK_W])
+        if (f_past_ok && $past(hit_w && wmask_eff[0]))
+          a_seg_masked_written_0: assert (f_wr[0]);
+        if (f_past_ok && $past(hit_w && !wmask_eff[0])) begin
+          a_seg_unmasked_wr_hold_0: assert (f_wr[0] == $past(f_wr[0]));
+          a_seg_unmasked_data_hold_0: assert (
+            f_data[0*WMASK_W +: WMASK_W] == $past(f_data[0*WMASK_W +: WMASK_W])
           );
         end
-
-        if (f_past_ok && $past(hit_r && f_wr[gi]))
-          a_rdata_read_old_seg: assert (
-            rdata[gi*WMASK_W +: WMASK_W]
-              == $past(f_data[gi*WMASK_W +: WMASK_W])
+        if (f_past_ok && $past(hit_r && f_wr[0]))
+          a_rdata_read_old_seg_0: assert (
+            rdata[0*WMASK_W +: WMASK_W] == $past(f_data[0*WMASK_W +: WMASK_W])
           );
-
-        if (ASSERT_NO_UNINIT_READ && hit_r && !f_wr[gi])
-          a_no_uninit_seg: assert (1'b0);
+        if (ASSERT_NO_UNINIT_READ && hit_r && !f_wr[0])
+          a_no_uninit_seg_0: assert (1'b0);
+      end
+    end
+    if (NSEG > 1) begin : g_seg1
+      always @(posedge core_clk) begin
+        if (f_past_ok && $past(hit_w && wmask_eff[1]))
+          a_seg_masked_written_1: assert (f_wr[1]);
+        if (f_past_ok && $past(hit_w && !wmask_eff[1])) begin
+          a_seg_unmasked_wr_hold_1: assert (f_wr[1] == $past(f_wr[1]));
+          a_seg_unmasked_data_hold_1: assert (
+            f_data[1*WMASK_W +: WMASK_W] == $past(f_data[1*WMASK_W +: WMASK_W])
+          );
+        end
+        if (f_past_ok && $past(hit_r && f_wr[1]))
+          a_rdata_read_old_seg_1: assert (
+            rdata[1*WMASK_W +: WMASK_W] == $past(f_data[1*WMASK_W +: WMASK_W])
+          );
+        if (ASSERT_NO_UNINIT_READ && hit_r && !f_wr[1])
+          a_no_uninit_seg_1: assert (1'b0);
+      end
+    end
+    if (NSEG > 2) begin : g_seg2
+      always @(posedge core_clk) begin
+        if (f_past_ok && $past(hit_w && wmask_eff[2]))
+          a_seg_masked_written_2: assert (f_wr[2]);
+        if (f_past_ok && $past(hit_w && !wmask_eff[2])) begin
+          a_seg_unmasked_wr_hold_2: assert (f_wr[2] == $past(f_wr[2]));
+          a_seg_unmasked_data_hold_2: assert (
+            f_data[2*WMASK_W +: WMASK_W] == $past(f_data[2*WMASK_W +: WMASK_W])
+          );
+        end
+        if (f_past_ok && $past(hit_r && f_wr[2]))
+          a_rdata_read_old_seg_2: assert (
+            rdata[2*WMASK_W +: WMASK_W] == $past(f_data[2*WMASK_W +: WMASK_W])
+          );
+        if (ASSERT_NO_UNINIT_READ && hit_r && !f_wr[2])
+          a_no_uninit_seg_2: assert (1'b0);
+      end
+    end
+    if (NSEG > 3) begin : g_seg3
+      always @(posedge core_clk) begin
+        if (f_past_ok && $past(hit_w && wmask_eff[3]))
+          a_seg_masked_written_3: assert (f_wr[3]);
+        if (f_past_ok && $past(hit_w && !wmask_eff[3])) begin
+          a_seg_unmasked_wr_hold_3: assert (f_wr[3] == $past(f_wr[3]));
+          a_seg_unmasked_data_hold_3: assert (
+            f_data[3*WMASK_W +: WMASK_W] == $past(f_data[3*WMASK_W +: WMASK_W])
+          );
+        end
+        if (f_past_ok && $past(hit_r && f_wr[3]))
+          a_rdata_read_old_seg_3: assert (
+            rdata[3*WMASK_W +: WMASK_W] == $past(f_data[3*WMASK_W +: WMASK_W])
+          );
+        if (ASSERT_NO_UNINIT_READ && hit_r && !f_wr[3])
+          a_no_uninit_seg_3: assert (1'b0);
       end
     end
   endgenerate

@@ -88,8 +88,10 @@ def _ensure_pycircuit() -> None:
 def _tie_off_rst(verilog: str, module: str) -> str:
     """Drop the leaf rst port and tie the internal net to 0.
 
-    ``m.out`` / pyc_reg require ``!pyc.reset``. PRODUCT has no reset:
-    array and rdata stay undefined until a defined write/read.
+    ``m.out`` / pyc_reg require ``!pyc.reset``. PRODUCT has no reset
+    (CODING_STYLE §10): array and rdata stay undefined until a defined
+    write/read. Business-leaf name is ``rst_pyc``; this primitive does
+    not bring it out.
     """
     needle = f"module {module} ("
     start = verilog.find(needle)
@@ -120,10 +122,11 @@ def _header(leaf: str, label: str, depth: int, width: int) -> str:
         f"// Regenerate: python3 scripts/emit_rtl.py\n"
         f"// PRODUCT (TEST_HOOKS=0). SPEC §10 lists no tb_* hooks — no HOOKS netlist.\n"
         f"// Variant {label}: DEPTH={depth} WIDTH={width} AW={aw}\n"
-        f"// Ports: clk, we, waddr[{aw}-1:0], wdata[{width}-1:0], "
+        f"// Ports: core_clk, we, waddr[{aw}-1:0], wdata[{width}-1:0], "
         f"re, raddr[{aw}-1:0], rdata[{width}-1:0]\n"
         f"// 1R1W, registered rdata (1-cycle), same-address same-cycle read-old.\n"
-        f"// Array and rdata are not reset; OOR addresses are not truncated.\n"
+        f"// No rst_pyc port; array and rdata are not reset.\n"
+        f"// OOR addresses are not truncated.\n"
         f"\n"
     )
 

@@ -4,7 +4,7 @@
 
 ### Added
 
-- `pycircuit/cmn/ub_cmn_mem_1r1w.py` → `rtl/cmn/ub_cmn_mem_1r1w_{d5w8,d8w16}.v`：pycc 固定网表（SPEC §2.2）。1R1W、读 1 拍、同址 read-old；阵列与 `rdata` 无复位 / 无零初始化；越界不截断。SPEC §10 无本叶钩子，只交 PRODUCT。`scripts/emit_rtl.py` / `make emit` 再现。
+- `pycircuit/cmn/ub_cmn_mem_1r1w.py` → `rtl/cmn/ub_cmn_mem_1r1w_{d5w8,d8w16}.v`：pycc 固定网表（SPEC §2.2）。时钟 `core_clk`；无复位口（业务叶标准名 `rst_pyc`，本原语不引出）。1R1W、读 1 拍、同址 read-old；阵列与 `rdata` 无复位 / 无零初始化；越界不截断。SPEC §10 无本叶钩子，只交 PRODUCT。`scripts/emit_rtl.py` / `make emit` 再现。
 - `model/ub_cmn_mem_1r1w.py` + `formal/cmn/`：1R1W 存储原语参考模型与接口断言（CODING_STYLE §10 / PR #20 时序提案；`ASSERT_NO_UNINIT_READ` 默认 1；formal 用 anyconst 单地址抽象）。
 - `scripts/impl/quick_synth.sh`：合入前叶子快速综合（Yosys flatten + Sky130 hd tt proxy + OpenSTA 最差建立路径）。Informational；不进验证门禁。规则见 `docs/rules/impl_quick_synth.md`。
 - `TOOLCHAIN.lock` + `tb/` uvm-python 骨架、golden-model 接口、双网表自检入口（叠在 M1 SPEC 上；不改 `rtl/` / SPEC 类文档）。

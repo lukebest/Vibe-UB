@@ -3,11 +3,13 @@
 Described with the pyCircuit ``@module`` API and emitted by pycc. One fixed
 netlist per (DEPTH, WIDTH) set; no Verilog ``parameter`` (SPEC §2.2).
 
-Contract (model / formal / Xia):
-  * Ports: clk, we, waddr[AW-1:0], wdata[WIDTH-1:0], re, raddr[AW-1:0],
-    rdata[WIDTH-1:0]. AW = $clog2(DEPTH). No reset port.
+Contract (model / formal / Xia / CODING_STYLE §10):
+  * Ports: core_clk, we, waddr[AW-1:0], wdata[WIDTH-1:0], re,
+    raddr[AW-1:0], rdata[WIDTH-1:0]. AW = $clog2(DEPTH).
+    Clock is ``core_clk`` (CODING_STYLE §5). No reset port — the
+    business-leaf name is ``rst_pyc``; this primitive does not bring it out.
   * Synchronous 1R1W, single clock. rdata is registered (1-cycle latency).
-  * Same-address same-cycle read+write returns the OLD data.
+    Same-address same-cycle read+write returns the OLD data.
   * Array and rdata are NOT reset and are NOT zero-initialised. rdata is
     undefined until a read of an address that has been written. With
     ASSERT_NO_UNINIT_READ=0, a read of an unwritten address is undefined
@@ -70,10 +72,10 @@ def build(
     aw = clog2(depth)
     nloc = 1 << aw
 
-    clk = m.clock("clk")
-    # pyc_reg / m.out require !pyc.reset. Emit post-process ties this off
-    # so the PRODUCT module has no reset port; array and rdata stay undefined
-    # until written / until a defined read.
+    clk = m.clock("core_clk")
+    # pyc_reg / m.out require !pyc.reset. PRODUCT has no reset port
+    # (CODING_STYLE §10); emit ties this off so array and rdata stay
+    # undefined until written / until a defined read.
     rst = m.reset("rst")
     we = m.input("we", width=1)
     waddr = m.input("waddr", width=aw)

@@ -17,8 +17,8 @@ source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 # --- architecture-owned knobs (confirm with Xia before editing) ---
 GEN_REGMAP="scripts/gen_regmap.py"
 REGMAP_YAML="docs/regmap/regmap.yaml"
-GEN_CMD=(python3 "$GEN_REGMAP" --check)
+GEN_CMD=(python3 -P "$GEN_REGMAP" --check)
 # ------------------------------------------------------------------
 
 echo "regmap knobs: GEN_REGMAP=$GEN_REGMAP REGMAP_YAML=$REGMAP_YAML GEN_CMD=${GEN_CMD[*]}"
-exec python3 "$GATE_DIR/regmap_consistency.py"
+exec python3 -P "$GATE_DIR/regmap_consistency.py"

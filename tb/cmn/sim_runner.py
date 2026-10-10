@@ -106,9 +106,13 @@ def _build_and_test(
         plusargs=[f"+SEED={int(seed)}"],
     )
     try:
-        runner.test(**test_kw)
-    except TypeError:
-        runner.test(hdl_toplevel=TOPLEVEL, test_module=SIM_MODULE, extra_env=extra_env)
+        try:
+            runner.test(**test_kw)
+        except TypeError:
+            runner.test(hdl_toplevel=TOPLEVEL, test_module=SIM_MODULE, extra_env=extra_env)
+    except SystemExit:
+        _assert_cocotb_passed(build_dir)
+        raise
     _assert_cocotb_passed(build_dir)
 
 

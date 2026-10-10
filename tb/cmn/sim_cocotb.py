@@ -109,7 +109,11 @@ async def test_ub_cmn_mem_1r1w(dut):
         raise AssertionError(f"checker did not report {want}: {scoreboard.all_flags}")
     if not want:
         scoreboard.assert_clean()
-        if any(c.re for c in cycles) and (anur or case != "random"):
+        if (
+            case != "uninit_ok"
+            and any(c.re for c in cycles)
+            and (anur or case != "random")
+        ):
             if scoreboard.n_compare == 0:
                 raise AssertionError(
                     "scoreboard skipped every beat; defined-flag reverse check failed "

@@ -3,7 +3,7 @@
 | 项 | 值 |
 | --- | --- |
 | 文档 | `docs/TEAM.md` |
-| 决定 | [DECISIONS.md](DECISIONS.md) D17（Luke Liu via Firstmate，2026-10-10 16:48 Asia/Shanghai） |
+| 决定 | [DECISIONS.md](DECISIONS.md) D17（分工与流程，2026-10-10 16:48）；D18（全层级范围，2026-10-10 17:04） |
 | 配套流程 | [PROCESS.md](PROCESS.md) |
 | 规则库 | [rules/architect.md](rules/architect.md)、[rules/design.md](rules/design.md)、[rules/verification.md](rules/verification.md)、[rules/backend.md](rules/backend.md) |
 
@@ -97,11 +97,12 @@
 
 ---
 
-## 6. 项目约束（与 D5–D13 对齐）
+## 6. 项目约束（与 D5–D14、D18 对齐）
 
 - 产品 RTL 用 pyCircuit（pyc4.0 fork `lukebest/pyCircuit`，D5）生成可综合 Verilog；业务逻辑同步复位，手写单元走白名单（D6）。
 - 验证使用 uvm-python（tpoikela/uvm-python，经 fork `lukebest/uvm-python`）跑在 cocotb 上（D7）。
 - TB 经端口或显式 test hook 注入与观察（D13）。
 - 所有代码改动经 Cursor cloud agent 完成；PM 把关并 squash-merge PR；各团队把 main merge 进分支。
-- PHY 阶段范围见 D2 / D3 / D14：PCS + DLL + LMSM + 寄存器 / CDC；PMA 为行为模型。
+- 范围遵循 D18：实现 UB Base Specification 全部层级，作为完整 UB 控制器——Physical（ch3）、Data Link（ch4）、Network（ch5）、Transport（ch6）、Transaction（ch7）、Function（ch8）、Memory Management（ch9）、Resource Management（含虚拟化 / RAS，ch10）、Security（ch11），以及规格定义的管理功能；团队私有规格副本为权威文本。首批为 PHY（ch3）与 DLL（ch4），其余层级按 Luke 后续决定的顺序或并行推进。
+- 当前阶段参数见 D14：ASIC 范围为数字 PCS + DLL；PMA 为行为模型。
 - 一期按 D11：原型固件消费 REGMAP 生成的驱动与寄存器访问层；上板调试留到后续阶段。

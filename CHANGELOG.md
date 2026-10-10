@@ -24,6 +24,7 @@
 
 ### Changed
 
+- SPEC §2.6：BCRC 流式接口拍位（已定）：`start`/`valid_in` 同拍计入首 flit；`start`/`valid_in`/`last` 同拍只算末 4 字节 BCRC 之前的 16 字节并 1 拍给出 `crc_word`；`start==1 && valid_in==0` 只复位全 1；未见 `last` 再 `start` 以新块初值重算。与 `tb/models/ub_dll_bcrc.py` 的 `start()`/`eat()` 一致。架构 Xia 2026-10-10 裁定。
 - `scripts/impl/quick_synth.*` + `docs/rules/impl_quick_synth.md` v0.5：每叶子拆两列深度——`logic depth` 不计 `buf_*`/`clkbuf_*`/`qs_fbuf_*`（与 `--no-buffer`、COMBO_DEPTH、日后 pycc `--logic-depth` 同口径）；`depth incl. buf` 为含缓冲级数。slack/area 仍来自缓冲后网表。
 - `scripts/impl/quick_synth.*` + `docs/rules/impl_quick_synth.md` v0.4：abc 映射后默认插确定性 Sky130 `buf_4`/`buf_8` 扇出树（max fanout 16；`--no-buffer` / `--max-fanout`；每叶子报 max fanout）。OpenROAD `repair_design` 未作为本 proxy 路径（VM 无 OpenROAD、且无 floorplan）。`sta -version` 探测版本，避免 `sta -no_init -exit` 无脚本挂起。
 - `docs/rules/verif_gate.md` v0.4：后门命名 `tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`（HOOKS only，§10 登记，eqy 拉低）；`ub_cmn_mem_1r1w` 时钟口 `core_clk`；存储变体 `d<DEPTH>w<WIDTH>[m<WMASK_W>]`；regmap `variants:`（PR #11 格式）`product_` 的 `SCR_PLACEHOLDER` 必须为 0，`=1` 非 PRODUCT 只 lint/TB，`NUM_VL`/`NUM_LANES` 与变体名一致。GATE-TB-SB-001：分段比对按段计次数。

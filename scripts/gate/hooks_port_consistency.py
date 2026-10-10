@@ -26,7 +26,8 @@ from gatelib import (
     is_tb_obs_port,
     is_tb_port,
     load_hooks_ports,
-    parse_ports,
+    parse_port_decls,
+    packed_width,
     print_tool_versions,
     rel,
 )
@@ -37,14 +38,19 @@ def compare_ports(
     product: Path,
     hooks: Path,
     allowed_extra: list[str] | None,
+    incdirs: list[Path] | None = None,
 ) -> list[Finding]:
     findings: list[Finding] = []
-    prod = parse_ports(product)
-    hook = parse_ports(hooks)
+    prod_full = parse_port_decls(product, incdirs=incdirs, module=module)
+    hook_full = parse_port_decls(hooks, incdirs=incdirs, module=module)
+    prod = [(d, n) for d, n, _p in prod_full]
+    hook = [(d, n) for d, n, _p in hook_full]
     prod_names = [n for _d, n in prod]
     hook_names = [n for _d, n in hook]
     prod_dir = {n: d for d, n in prod}
     hook_dir = {n: d for d, n in hook}
+    prod_w = {n: packed_width(p) for _d, n, p in prod_full}
+    hook_w = {n: packed_width(p) for _d, n, p in hook_full}
     extra = list(allowed_extra or [])
 
     prod_tb = [n for n in prod_names if is_tb_port(n)]
@@ -89,6 +95,19 @@ def compare_ports(
                             message=(
                                 f"port {name} direction PRODUCT="
                                 f"{prod_dir.get(name)} HOOKS={hook_dir.get(name)}"
+                            ),
+                        )
+                    )
+                if prod_w.get(name) != hook_w.get(name):
+                    findings.append(
+                        Finding(
+                            check="hooks_ports",
+                            module=module,
+                            file=rel(hooks),
+                            rule="HOOKS_PORT_WIDTH",
+                            message=(
+                                f"port {name} width PRODUCT={prod_w.get(name)} "
+                                f"HOOKS={hook_w.get(name)}"
                             ),
                         )
                     )
@@ -168,6 +187,19 @@ def compare_ports(
                     ),
                 )
             )
+        if name in hook_w and prod_w.get(name) != hook_w.get(name):
+            findings.append(
+                Finding(
+                    check="hooks_ports",
+                    module=module,
+                    file=rel(hooks),
+                    rule="HOOKS_PORT_WIDTH",
+                    message=(
+                        f"port {name} width PRODUCT={prod_w.get(name)} "
+                        f"HOOKS={hook_w.get(name)}"
+                    ),
+                )
+            )
     for name in hook_names:
         if is_tb_obs_port(name) and hook_dir.get(name) != "output":
             findings.append(
@@ -186,7 +218,7 @@ def compare_ports(
 
 
 def main() -> int:
-    print_tool_versions(["python"])
+    print_tool_versions(["python", "yosys"])
     table = load_hooks_ports()
     print(
         f"hooks_ports table: {len(table)} approved module(s): "

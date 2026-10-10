@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -2004,15 +2005,6 @@ def discover_leaf_pairs() -> list[dict[str, str]]:
     return pairs
 
 
-PORT_CHUNK_RE = re.compile(
-    r"\b(input|output|inout)\b((?:\s+(?:wire|reg|logic|signed))*"
-    r"(?:\s+\[[^\]]+\])?\s*"
-    r"[A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)",
-    re.I,
-)
-PORT_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-
-
 _MODULE_DECL_RE = re.compile(r"^\s*module\s+([A-Za-z_][A-Za-z0-9_]*)\b", re.M)
 
 
@@ -2057,15 +2049,6 @@ def collect_layer_netlists(rtl_root: Path) -> dict[str, Path]:
     return out
 
 
-PORT_DECL_RE = re.compile(
-    r"\b(input|output|inout)\b"
-    r"(?:\s+(?:wire|reg|logic|signed))*"
-    r"(?:\s*(\[[^\]]+\]))?"
-    r"\s*([A-Za-z_][A-Za-z0-9_]*)",
-    re.I,
-)
-
-
 def packed_width(packed: str) -> int:
     """Bits in a packed range like ``[15:0]`` / ``[108:0]``. Scalar → 1."""
     text = (packed or "").strip()
@@ -2078,28 +2061,114 @@ def packed_width(packed: str) -> int:
     return abs(hi - lo) + 1
 
 
-def parse_port_decls(path: Path) -> list[tuple[str, str, str]]:
-    """Return (direction, name, packed_range) in declaration order.
+def packed_range_for_width(width: int) -> str:
+    if width <= 1:
+        return ""
+    return f"[{width - 1}:0]"
 
-    packed_range is '' for a 1-bit port or '[15:0]' (including brackets).
+
+def default_verilog_incdirs(extra: list[Path] | None = None) -> list[Path]:
+    """``rtl/pyc_lib`` when present, then any caller extras. No regex include hunt."""
+    out: list[Path] = []
+    pyc = REPO_ROOT / "rtl" / "pyc_lib"
+    if pyc.is_dir():
+        out.append(pyc.resolve())
+    for item in extra or []:
+        path = Path(item)
+        if path.is_dir():
+            resolved = path.resolve()
+            if resolved not in out:
+                out.append(resolved)
+    return out
+
+
+_PORT_CACHE: dict[tuple[str, int, str, str], list[tuple[str, str, str]]] = {}
+
+
+def parse_port_decls(
+    path: Path,
+    incdirs: list[Path] | None = None,
+    module: str | None = None,
+) -> list[tuple[str, str, str]]:
+    """Ports via Yosys ``read_verilog -sv`` + ``write_json``. No text regex.
+
+    Returns (direction, name, packed_range) in Yosys port order.
+    packed_range is '' for 1-bit or '[15:0]' (including brackets).
+    Include path: ``-I rtl/pyc_lib`` when that directory exists, else extras only.
     """
-    text = strip_verilog_comments(path.read_text(encoding="utf-8", errors="replace"))
-    skip = {"input", "output", "inout", "wire", "reg", "logic", "signed"}
+    yosys = shutil_which("yosys")
+    if not yosys:
+        die("yosys is required to parse Verilog ports (no regex fallback)")
+    src = path.resolve()
+    incs = default_verilog_incdirs(incdirs)
+    key = (
+        str(src),
+        src.stat().st_mtime_ns if src.is_file() else 0,
+        module or "",
+        ":".join(str(p) for p in incs),
+    )
+    cached = _PORT_CACHE.get(key)
+    if cached is not None:
+        return list(cached)
+    inc_args = " ".join(f"-I{d}" for d in incs)
+    with tempfile.TemporaryDirectory(prefix="gate-ports-") as tmp:
+        js = Path(tmp) / "ports.json"
+        script = (
+            f"read_verilog -sv {inc_args} {src}\n"
+            "proc\n"
+            f"write_json {js}\n"
+        )
+        proc = run_cmd([yosys, "-q", "-p", script], timeout=90)
+        if proc.returncode != 0 or not js.is_file() or js.stat().st_size == 0:
+            log = (proc.stdout or "").strip()[-400:]
+            die(
+                f"yosys failed to read ports from {rel(src)} "
+                f"(exit {proc.returncode}): {log}"
+            )
+        data = json.loads(js.read_text(encoding="utf-8"))
+    modules = (data or {}).get("modules") or {}
+    want = module or src.stem
+    chosen = None
+    if want in modules:
+        chosen = want
+    else:
+        for name in modules:
+            if name == "pyc_reg" or name.startswith("$paramod"):
+                continue
+            chosen = name
+            break
+    if chosen is None:
+        die(f"yosys JSON has no module for {rel(src)} (wanted {want})")
     ports: list[tuple[str, str, str]] = []
-    seen: set[str] = set()
-    for kind, packed, name in PORT_DECL_RE.findall(text):
-        if name.lower() in skip:
-            continue
-        if name in seen:
-            continue
-        seen.add(name)
-        ports.append((kind.lower(), name, packed or ""))
-    return ports
+    for name, spec in (modules[chosen].get("ports") or {}).items():
+        kind = str(spec.get("direction") or "input").lower()
+        width = len(spec.get("bits") or [])
+        ports.append((kind, name, packed_range_for_width(width)))
+    _PORT_CACHE[key] = ports
+    return list(ports)
 
 
-def parse_ports(path: Path) -> list[tuple[str, str]]:
-    """Return (direction, name) in declaration order."""
-    return [(kind, name) for kind, name, _packed in parse_port_decls(path)]
+def parse_ports(
+    path: Path,
+    incdirs: list[Path] | None = None,
+    module: str | None = None,
+) -> list[tuple[str, str]]:
+    """Return (direction, name) from the Yosys port table."""
+    return [
+        (kind, name)
+        for kind, name, _packed in parse_port_decls(path, incdirs=incdirs, module=module)
+    ]
+
+
+def port_width_map(
+    path: Path,
+    incdirs: list[Path] | None = None,
+    module: str | None = None,
+) -> dict[str, int]:
+    return {
+        name: packed_width(packed)
+        for _k, name, packed in parse_port_decls(path, incdirs=incdirs, module=module)
+    }
 
 
 def collect_blackbox_findings(check: str = "lint") -> list[Finding]:

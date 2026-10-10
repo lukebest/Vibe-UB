@@ -50,7 +50,7 @@ SPEC §2.2 变体：同一叶子多组参数 → `rtl/<layer>/<叶子>_<标签>.
 
 `rtl/pyc_lib/` **等 #21 合入才出现**。目录在就按锁定 pyCircuit 逐字节比对；缺了只报告跳过，不失败。其它目录出现 `pyc_*` 原语仍拦截。`handwritten.yml` 里的 `pyc_reg` 临时项由 #21 自己撤，本分册不撤。
 
-### 0.2 导入根与 `lib/`（守门人已定；Xia 会在 SPEC §2.2 对齐）
+### 0.2 导入根与 `lib/`（SPEC §2.2 已定）
 
 调用 pyCircuit 叶子（`pycircuit.cli emit`、`scripts/emit_rtl.py`、以及会 `import` 叶子的 tb-selfcheck）时：
 
@@ -166,9 +166,9 @@ PRODUCT 与 HOOKS 两套网表（SPEC §11）只要落在上述目录，都会�
 | ID | 规则 | 来源 | 日期 |
 | --- | --- | --- | --- |
 | GATE-SYN-001 | Yosys 对每个 PRODUCT 模块 `synth -noabc` | PROCESS §2；CODING_STYLE §1 | 2026-10-10 |
-| GATE-SYN-002 | 不得出现 `$dlatch` / `$adlatch` / `$dlatchsr` | 综合结构 | 2026-10-10 |
+| GATE-SYN-002 | 不得出现真 latch（`stat` 的 `$dlatch` / `$adlatch` / `$dlatchsr` / `$_DLATCH*`，或 `Latch inferred`）。`$adff` / `$dffsr` / `$_DFF_PN0_`（`always @(posedge clk or negedge rst_n)`）是异步复位 FF，不算 LATCH。不按模块名豁免 `ub_rst_sync` | 综合结构；#16 | 2026-10-10 |
 | GATE-SYN-003 | 不得出现多驱动 | 综合结构 | 2026-10-10 |
-| GATE-SYN-004 | 不得出现组合环（Yosys `scc` / loop 报告） | 综合结构 | 2026-10-10 |
+| GATE-SYN-004 | 不得出现组合环（`Warning: found logic loop` / `Found an SCC` / `Found N SCCs` 且 N≥1）。`Executing SCC pass (detecting logic loops)` 横幅不算 | 综合结构；#16 | 2026-10-10 |
 | GATE-SYN-005 | 打印 `stat`；**不做**面积 / 时序 / QoR 对比 | TEAM §1；实现侧 quick_synth | 2026-10-10 |
 | GATE-SYN-006 | `ltp -noff` 报告每个叶子最大组合逻辑级数（**只数逻辑门**）；只报告。与实现快速综合对照时用 #31 已合入的 `logic depth` 列（等于 `--no-buffer` 级数；`depth incl. buf` 是含缓冲级数）；slack / 面积用带缓冲器版本 | PM | 2026-10-10 |
 | GATE-SYN-007 | `blackbox.yml` 模块用 `read_verilog -lib` | §1.2 | 2026-10-10 |
@@ -229,7 +229,7 @@ M1 单时钟 `core_clk`（SPEC §4.1）。`rst_n` 异步置位、同步释放，
 | GATE-EMIT-002 | 非 legacy、非白名单手写叶子必须有 `rtl/<layer>/hooks/<module>.v` | SPEC §11 | 2026-10-10 |
 | GATE-EMIT-003 | 未上 `scripts/gate/handwritten.yml` 的手写 `.v` / `.sv` 记 `HANDWRITTEN_UNLISTED` | D6；§1.1 | 2026-10-10 |
 | GATE-EQY-001 | PRODUCT≡HOOKS。本环境 **eqy 装不上**，主工具是 Yosys `equiv_make` / `equiv_simple` / `equiv_induct` / `equiv_status -assert`。eqy 若在 PATH 再用。报告写明 `tool=yosys-equiv` 或 `tool=eqy`。按 SPEC §2.2 变体逐个跑；`_placeholder` 不做等价 | SPEC §11 (d)；设计 spike | 2026-10-10 |
-| GATE-EQY-002 | 无钩子叶子：端口一一对应后直接比对。有钩子模块：`tb_test_mode=0`，并把 `tb_inj_*`、`tb_<inst>_bd_*`、`tb_<inst>_bd_vld_*` 拉低后再比对 | SPEC §11 (d)(f) | 2026-10-10 |
+| GATE-EQY-002 | 只比 PRODUCT 端口。包装层按 PRODUCT 原位宽声明与连接（修总线位宽丢失 / `Can't match gold port csr_addr_gold`）。HOOKS 多出的 `tb_test_mode` / §10 `tb_*` 输入（含 `tb_<inst>_bd_*`、`tb_<inst>_bd_vld_*`）按原位宽接 0，`tb_<inst>_obs_*` 不参加比对。主路径 Yosys `equiv_*` 全证；否则 `miter`+`sat -tempinduct`；两边由 pycc 分别生成、结构不同以致 k-induction 合不上时，再用 `sat -seq N -set-init-zero` 从同一初值 BMC。报告写明方法 | SPEC §11 (d)(f) | 2026-10-10 |
 | GATE-EQY-003 | 上层等价把 DEPTH×WIDTH 超阈值的 `ub_cmn_mem_1r1w` 变体当黑盒，**两边同一份**。原语 ≤4096 bit（含 `d64w64m16`）跑完整 PRODUCT≡HOOKS；更大的不跑完整 equiv，改为除模块名外逐字节一致 + 端口检查 | 实现对齐 | 2026-10-10 |
 | GATE-EQY-004 | 公式参考等价（`formal/<层>/ref/` + `scripts/gate/equiv_ref.sh`）满足以下**其一**即通过：(1) Yosys `equiv_make` / `equiv_simple` / `equiv_induct` 全部证明，没有未证的 `$equiv`；(2) `miter -equiv -flatten` 加 `sat -tempinduct -prove` 证明通过。报告必须写明用的是哪一种。每个参考都要配故意做错的假网表（例如 lane 用正向映射 `CA<i*N+j>`，BCRC 改错一位 CRC）；假网表必须报失败，否则这一项不算通过 | PM | 2026-10-10 |
 
@@ -262,7 +262,7 @@ Xia 裁定（SPEC §11 (f)）。钩子清单：`scripts/gate/hooks_ports.yml`，
 
 | ID | 规则 | 来源 | 日期 |
 | --- | --- | --- | --- |
-| GATE-HOOK-001 | 独立 job `hooks-port-consistency` 按表核对端口名与方向 | SPEC §10 / §11 (f) | 2026-10-10 |
+| GATE-HOOK-001 | 独立 job `hooks-port-consistency` 按表核对端口名、方向与位宽。端口表来自 Yosys `read_verilog -sv -I rtl/pyc_lib` + `write_json`（不用正则） | SPEC §10 / §11 (f) | 2026-10-10 |
 | GATE-HOOK-002 | 未上表 / 未按 §10 登记的 `tb_*` / `tb_test_mode` 失败 | 同上 | 2026-10-10 |
 | GATE-HOOK-003 | 上表模块缺 PRODUCT 口、缺表列额外口、或多出口失败 | 同上 | 2026-10-10 |
 | GATE-HOOK-004 | 后门必须是 `tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`；只在 HOOKS | Xia | 2026-10-10 |
@@ -349,7 +349,7 @@ PR 审查清单见 §11。本条不写自动 finding，避免误杀尚未补齐�
 | GATE-PROV-004 | 白名单手写 SV 不受此项约束。`ub_cmn_mem_1r1w` 按普通叶子检查 | Xia | 2026-10-10 |
 | GATE-PROV-005 | 参数变体按 SPEC §2.2 逐个发现与比对。`_placeholder` 变体只跑 lint 与 TB，报告标出，不算 PRODUCT | SPEC §2.2 | 2026-10-10 |
 | GATE-PROV-006 | PRODUCT 网表不得例化 `_placeholder`；placeholder 源码必须有 `PLACEHOLDER_SOURCE` | SPEC §2.2 | 2026-10-10 |
-| GATE-PROV-007 | 导入根是 `<repo>/pycircuit`（`from <层>.lib`）；仓库根不得进 `sys.path`（`IMPORT_ROOT_SHADOW`）。叶子只扫 `pycircuit/<层>/*.py`，跳过 `lib/` 与 `__init__.py`。`lib/` 不 emit，仍扫禁止拼接 Verilog 文本 | 守门人；#27 | 2026-10-10 |
+| GATE-PROV-007 | 导入根是 `<repo>/pycircuit`（`from <层>.lib`）；仓库根不得进 `sys.path`（`IMPORT_ROOT_SHADOW`）。叶子只扫 `pycircuit/<层>/*.py`，跳过 `lib/` 与 `__init__.py`。`lib/` 不 emit，仍扫禁止拼接 Verilog 文本 | SPEC §2.2 | 2026-10-10 |
 
 违规报告「迁移待办」栏列出 main、PR #5、#7、#12，以及 PR #11 的 `pycircuit/csr/ub_csr_regs.py`（状态「已迁」）。
 
@@ -392,7 +392,7 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 | VER-GATE-014 | `ub_cmn_mem_1r1w` 时钟口为 `core_clk` | Xia | 2026-10-10 |
 | VER-GATE-015 | 公式参考等价（`formal/<层>/ref/`）：Yosys `equiv_*` 全证或 `miter`+`sat -tempinduct` 其一通过，报告写明路径；每个参考须有假网表且必须失败 | PM | 2026-10-10 |
 | VER-GATE-016 | 大网表走 `rtl/<层>/manifest.yml`；超阈值 `.v` / 清单生成不出拦截；`rtl/pyc_lib/` 缺了跳过、有了逐字节；`tb_<inst>_obs_*` 只出；sby bind 信号必须存在；D10/迁移名册缺文件标已删除并扣总数；COMBO_DEPTH 只数逻辑门 | 本分册 v0.5 | 2026-10-10 |
-| VER-GATE-017 | 导入根 `<repo>/pycircuit` 置 `PYTHONPATH` 最前；仓库根不进 `sys.path`；叶子不含 `lib/`；`lib/` 只做拼接扫描 | 本分册 v0.6 | 2026-10-10 |
+| VER-GATE-017 | 导入根 `<repo>/pycircuit` 置 `PYTHONPATH` 最前；仓库根不进 `sys.path`；叶子不含 `lib/`；`lib/` 只做拼接扫描 | SPEC §2.2 | 2026-10-10 |
 
 ---
 

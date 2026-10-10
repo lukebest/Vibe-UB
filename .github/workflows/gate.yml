@@ -26,8 +26,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install gate Python
-        run: pip install -r scripts/gate/requirements.txt
+      - name: Install Yosys + gate Python
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys
+          pip install -r scripts/gate/requirements.txt
       - name: gate self-tests (deliberate-fail fixtures)
         run: scripts/gate/selftest.sh
 
@@ -104,8 +107,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install gate Python
-        run: pip install -r scripts/gate/requirements.txt
+      - name: Install Yosys + gate Python
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys
+          pip install -r scripts/gate/requirements.txt
       - name: hooks-port-consistency
         run: scripts/gate/hooks_port_consistency.sh
 

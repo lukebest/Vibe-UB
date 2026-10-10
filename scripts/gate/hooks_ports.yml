@@ -78,8 +78,40 @@ entries:
     approved_date: 2026-10-10
     review_when: SPEC §10 top-level hook list changes
 
-  # SPEC §10: ub_mem_tlb leaf observe + way-0..3 backdoors. HOOKS only.
-  # tb_<inst>_obs_* are read-only outputs (not gated by tb_test_mode).
+  # CSR TEST window (SPEC §3.2.3 / §10 / §11). Names from #11 bfcd0b0
+  # hooks_ports.yml / HOOKS netlist — extra is only tb_test_mode.
+  # Variant module names are listed because hooks_extra_for rsplit-once
+  # cannot reduce ub_csr_product_x4_vl2 → ub_csr.
+  - id: HOOKS-UB-CSR
+    module: ub_csr
+    extra_ports:
+      - tb_test_mode
+    reason: SPEC §3.2.3 / §10 / §11 — TEST window gated by tb_test_mode
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 TEST window hook list for ub_csr changes
+
+  - id: HOOKS-UB-CSR-PRODUCT-X4-VL2
+    module: ub_csr_product_x4_vl2
+    extra_ports:
+      - tb_test_mode
+    reason: SPEC §3.2.3 / §10 / §11 — TEST window gated by tb_test_mode
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 TEST window hook list for ub_csr changes
+
+  - id: HOOKS-UB-CSR-PRODUCT-X8-VL2
+    module: ub_csr_product_x8_vl2
+    extra_ports:
+      - tb_test_mode
+    reason: SPEC §3.2.3 / §10 / §11 — TEST window gated by tb_test_mode
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 TEST window hook list for ub_csr changes
+
+  # SPEC §10 (main) + #27 19e9f292 HOOKS netlist: observe + way-0..3
+  # backdoors. Valid preload is tb_<inst>_bd_vld_we / bd_vld_wdata
+  # (not bd_vld_n). tb_<inst>_obs_* are read-only outputs.
   - id: HOOKS-UB-MEM-TLB
     module: ub_mem_tlb
     extra_ports:
@@ -96,25 +128,29 @@ entries:
       - tb_mem_tlb_w0_bd_wdata
       - tb_mem_tlb_w0_bd_re
       - tb_mem_tlb_w0_bd_rdata
-      - tb_mem_tlb_w0_bd_vld_n
+      - tb_mem_tlb_w0_bd_vld_we
+      - tb_mem_tlb_w0_bd_vld_wdata
       - tb_mem_tlb_w1_bd_we
       - tb_mem_tlb_w1_bd_addr
       - tb_mem_tlb_w1_bd_wdata
       - tb_mem_tlb_w1_bd_re
       - tb_mem_tlb_w1_bd_rdata
-      - tb_mem_tlb_w1_bd_vld_n
+      - tb_mem_tlb_w1_bd_vld_we
+      - tb_mem_tlb_w1_bd_vld_wdata
       - tb_mem_tlb_w2_bd_we
       - tb_mem_tlb_w2_bd_addr
       - tb_mem_tlb_w2_bd_wdata
       - tb_mem_tlb_w2_bd_re
       - tb_mem_tlb_w2_bd_rdata
-      - tb_mem_tlb_w2_bd_vld_n
+      - tb_mem_tlb_w2_bd_vld_we
+      - tb_mem_tlb_w2_bd_vld_wdata
       - tb_mem_tlb_w3_bd_we
       - tb_mem_tlb_w3_bd_addr
       - tb_mem_tlb_w3_bd_wdata
       - tb_mem_tlb_w3_bd_re
       - tb_mem_tlb_w3_bd_rdata
-      - tb_mem_tlb_w3_bd_vld_n
+      - tb_mem_tlb_w3_bd_vld_we
+      - tb_mem_tlb_w3_bd_vld_wdata
     reason: SPEC §10 / §10.5 — ub_mem_tlb observe + mem_tlb_w0..w3 backdoors
     approver: lukebest
     approved_date: 2026-10-10

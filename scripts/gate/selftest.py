@@ -19,6 +19,7 @@ from gatelib import (
     leaf_process_env,
     leaf_python_argv,
     mark_deleted_findings,
+    parse_port_decls,
     repo_root_on_sys_path,
     run_cmd,
     sha256_file,
@@ -27,7 +28,12 @@ from hooks_port_consistency import compare_ports
 from large_mem_manifest import check_large_mem_manifest
 from pyc_lib_check import check_pyc_lib
 from pycircuit_provenance import static_splice_check
-from rtl_emit_consistency import compare_emitted_rtl, emit_unavailable_findings
+from rtl_emit_consistency import (
+    compare_emitted_rtl,
+    emit_unavailable_findings,
+    run_equiv,
+)
+from synth_check import parse_yosys, synth_module
 
 
 def _fail(name: str, detail: str) -> None:
@@ -465,6 +471,331 @@ def test_lib_helper_splice() -> None:
         _expect_rule("lib-helper-splice", hits, "VERILOG_SPLICE")
 
 
+def _write_ansi_csr_shape(path: Path, *, extra: str = "", addr_w: str = "[15:0]") -> None:
+    """pycc-style ANSI list (one port per line). Old regex ate the next `input`."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    extra_decl = f",\n  {extra}" if extra else ""
+    path.write_text(
+        "module ub_csr_toy (\n"
+        "  input core_clk,\n"
+        f"  input {addr_w} csr_addr,\n"
+        "  output port_rst_pulse,\n"
+        "  output csr_irq_en,\n"
+        "  output [31:0] csr_port_cna"
+        + extra_decl
+        + "\n);\nendmodule\n",
+        encoding="utf-8",
+    )
+
+
+def test_yosys_ansi_ports() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        prod = Path(tmp) / "prod.v"
+        _write_ansi_csr_shape(prod)
+        ports = parse_port_decls(prod, module="ub_csr_toy")
+        names = [n for _k, n, _p in ports]
+        if any(n in {"input", "output", "inout"} for n in names):
+            _fail("yosys-ansi-ports", f"direction token eaten as name: {names}")
+        for need in ("port_rst_pulse", "csr_irq_en", "csr_port_cna", "csr_addr"):
+            if need not in names:
+                _fail("yosys-ansi-ports", f"missing {need}: {names}")
+        addr = next(t for t in ports if t[1] == "csr_addr")
+        if addr[2] != "[15:0]":
+            _fail("yosys-ansi-ports", f"csr_addr packed {addr}")
+        print("SELFTEST PASS yosys-ansi-ports: Yosys port table keeps names+widths")
+
+
+def test_hooks_missing_port() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        prod = Path(tmp) / "prod.v"
+        hooks = Path(tmp) / "hooks.v"
+        _write_ansi_csr_shape(prod)
+        hooks.write_text(
+            "module ub_csr_toy (\n"
+            "  input core_clk,\n"
+            "  input [15:0] csr_addr,\n"
+            "  output port_rst_pulse,\n"
+            "  output csr_irq_en\n"
+            ");\nendmodule\n",
+            encoding="utf-8",
+        )
+        hits = compare_ports("ub_csr_toy", prod, hooks, None)
+        _expect_rule("hooks-missing-port", hits, "HOOKS_PORT_MISMATCH")
+
+
+def test_hooks_wrong_width() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        prod = Path(tmp) / "prod.v"
+        hooks = Path(tmp) / "hooks.v"
+        _write_ansi_csr_shape(prod)
+        _write_ansi_csr_shape(hooks, addr_w="[7:0]")
+        hits = compare_ports("ub_csr_toy", prod, hooks, None)
+        _expect_rule("hooks-wrong-width", hits, "HOOKS_PORT_WIDTH")
+
+
+def _wide_combo(path: Path, module: str, width: int, flip_bit: int | None = None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    expr = f"data_in"
+    if flip_bit is not None:
+        expr = f"{{data_in[{width - 1}:{flip_bit + 1}], ~data_in[{flip_bit}], data_in[{flip_bit - 1}:0]}}" if flip_bit else f"{{data_in[{width - 1}:1], ~data_in[0]}}"
+    path.write_text(
+        f"module {module} (\n"
+        f"  input [{width - 1}:0] data_in,\n"
+        f"  output [{width - 1}:0] data_out\n"
+        ");\n"
+        f"  assign data_out = {expr};\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+
+
+def test_equiv_wide_bus_and_flip() -> None:
+    """160-bit (BCRC-style) and 256-bit (lane_dist_x8-style) through the wrapper."""
+    cases = [
+        ("ub_dll_bcrc_bus", 160),
+        ("ub_pcs_lane_dist_x8_bus", 256),
+    ]
+    for module, width in cases:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            prod = root / f"{module}.v"
+            hooks = root / "hooks.v"
+            fake = root / "fake.v"
+            _wide_combo(prod, module, width)
+            _wide_combo(hooks, module, width)
+            _wide_combo(fake, module, width, flip_bit=0)
+            hit = run_equiv(module, prod, hooks, None)
+            if hit is not None:
+                _fail(f"equiv-{module}", f"identical wide bus must prove: {hit.message}")
+            print(f"SELFTEST PASS equiv-{module}: PRODUCT≡HOOKS via wrapper")
+            bad = run_equiv(module, prod, fake, None)
+            if bad is None:
+                _fail(f"equiv-{module}-flip", "one flipped bus bit must fail")
+            if bad.rule != "EQUIV_FAIL":
+                _fail(f"equiv-{module}-flip", f"expected EQUIV_FAIL, got {bad.rule}")
+            print(f"SELFTEST PASS equiv-{module}-flip: fake bit fail")
+
+
+def _git_show(rev: str, rel_path: str, dest: Path) -> bool:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    proc = run_cmd(["git", "show", f"{rev}:{rel_path}"], timeout=30)
+    if proc.returncode != 0 or not (proc.stdout or "").strip():
+        return False
+    dest.write_text(proc.stdout or "", encoding="utf-8")
+    return True
+
+
+def _extract_selftest_rtl(root: Path) -> dict[str, Path] | None:
+    """Pull #11 CSR / #27 TLB / #21 pyc_reg when those objects exist locally."""
+    pyc = root / "pyc_lib"
+    ok = True
+    ok &= _git_show("1293a5bf", "rtl/pyc_lib/pyc_reg.v", pyc / "pyc_reg.v")
+    files = {
+        "csr_prod": root / "csr" / "ub_csr_product_x4_vl2.v",
+        "csr_hooks": root / "csr" / "hooks" / "ub_csr_product_x4_vl2.v",
+        "tlb_prod": root / "mem" / "ub_mem_tlb.v",
+        "tlb_hooks": root / "mem" / "hooks" / "ub_mem_tlb.v",
+        "bcrc": root / "dll" / "ub_dll_bcrc.v",
+        "pyc_reg": pyc / "pyc_reg.v",
+    }
+    ok &= _git_show("bfcd0b0", "rtl/csr/ub_csr_product_x4_vl2.v", files["csr_prod"])
+    ok &= _git_show(
+        "bfcd0b0", "rtl/csr/hooks/ub_csr_product_x4_vl2.v", files["csr_hooks"]
+    )
+    ok &= _git_show("19e9f292", "rtl/mem/ub_mem_tlb.v", files["tlb_prod"])
+    ok &= _git_show("19e9f292", "rtl/mem/hooks/ub_mem_tlb.v", files["tlb_hooks"])
+    if not _git_show("cc0013c", "rtl/dll/ub_dll_bcrc.v", files["bcrc"]):
+        _git_show("e65ff5e", "rtl/gen/dll/ub_dll_bcrc.v", files["bcrc"])
+    if not files["csr_prod"].is_file() or not files["pyc_reg"].is_file():
+        return None
+    stub = root / "cmn" / "ub_cmn_mem_1r1w_d64w109.v"
+    stub.parent.mkdir(parents=True)
+    # Body (not blackbox) so SAT can import the cell. Same stub on both sides.
+    stub.write_text(
+        "module ub_cmn_mem_1r1w_d64w109 (\n"
+        "  input core_clk, input we, input [5:0] waddr, input [108:0] wdata,\n"
+        "  input re, input [5:0] raddr, output reg [108:0] rdata\n"
+        ");\n"
+        "  always @(posedge core_clk) if (re) rdata <= wdata;\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+    files["cmn_stub"] = stub
+    return files
+
+
+def _fake_hooks_xor_bit(
+    dest: Path,
+    module: str,
+    gold_src: Path,
+    ports: list[tuple[str, str, str]],
+    bus: str,
+    extra_inputs: list[str],
+) -> None:
+    """HOOKS wrapper around a renamed gold that xors one bit of *bus*."""
+    gold = gold_src.read_text(encoding="utf-8").replace(
+        f"module {module}", f"module {module}_gold", 1
+    )
+    names = [n for _k, n, _p in ports] + extra_inputs
+    lines = [
+        gold,
+        f"module {module} (",
+        "  " + ",\n  ".join(names),
+        ");",
+    ]
+    for kind, name, packed in ports:
+        rng = f"{packed} " if packed else ""
+        lines.append(f"  {kind} {rng}{name};")
+    for name in extra_inputs:
+        lines.append(f"  input {name};")
+    conns: list[str] = []
+    packed_bus = next((p for _k, n, p in ports if n == bus), "")
+    if packed_bus:
+        hi = packed_bus.strip("[]").split(":")[0]
+        conns.append(f".{bus}({{{bus}[{hi}:1], ~{bus}[0]}})")
+    else:
+        conns.append(f".{bus}(~{bus})")
+    for _k, name, _p in ports:
+        if name != bus:
+            conns.append(f".{name}({name})")
+    lines.append(f"  {module}_gold u_g (")
+    lines.append("    " + ",\n    ".join(conns))
+    lines.append("  );")
+    lines.append("endmodule")
+    dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_equiv_real_csr_tlb() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        files = _extract_selftest_rtl(Path(tmp))
+        if files is None:
+            print(
+                "SELFTEST SKIP equiv-real-csr-tlb: "
+                "#11/#21/#27 blobs not in this clone"
+            )
+            return
+        inc = [files["pyc_reg"].parent]
+        csr = run_equiv(
+            "ub_csr_product_x4_vl2",
+            files["csr_prod"],
+            files["csr_hooks"],
+            ["tb_test_mode"],
+            incdirs=inc,
+        )
+        if csr is not None:
+            _fail("equiv-csr-#11", csr.message)
+        print("SELFTEST PASS equiv-csr-#11: PRODUCT≡HOOKS (tb_test_mode tied)")
+        ports = parse_port_decls(
+            files["csr_prod"], incdirs=inc, module="ub_csr_product_x4_vl2"
+        )
+        fake = Path(tmp) / "csr_fake.v"
+        _fake_hooks_xor_bit(
+            fake,
+            "ub_csr_product_x4_vl2",
+            files["csr_prod"],
+            ports,
+            "csr_addr",
+            ["tb_test_mode"],
+        )
+        bad = run_equiv(
+            "ub_csr_product_x4_vl2",
+            files["csr_prod"],
+            fake,
+            ["tb_test_mode"],
+            incdirs=inc,
+        )
+        if bad is None:
+            _fail("equiv-csr-#11-flip", "csr_addr[0] flipped HOOKS must fail")
+        print("SELFTEST PASS equiv-csr-#11-flip: fake bus bit fail")
+
+        if files.get("bcrc") and files["bcrc"].is_file():
+            bcrc_hooks = Path(tmp) / "bcrc_hooks.v"
+            bcrc_hooks.write_text(files["bcrc"].read_text(encoding="utf-8"), encoding="utf-8")
+            bhit = run_equiv("ub_dll_bcrc", files["bcrc"], bcrc_hooks, None, incdirs=inc)
+            if bhit is not None:
+                _fail("equiv-bcrc", bhit.message)
+            print("SELFTEST PASS equiv-bcrc: 160-bit data_in through wrapper")
+            bports = parse_port_decls(files["bcrc"], incdirs=inc, module="ub_dll_bcrc")
+            bfake = Path(tmp) / "bcrc_fake.v"
+            _fake_hooks_xor_bit(bfake, "ub_dll_bcrc", files["bcrc"], bports, "data_in", [])
+            bbad = run_equiv("ub_dll_bcrc", files["bcrc"], bfake, None, incdirs=inc)
+            if bbad is None:
+                _fail("equiv-bcrc-flip", "data_in[0] flipped HOOKS must fail")
+            print("SELFTEST PASS equiv-bcrc-flip: fake bus bit fail")
+
+        if files["tlb_prod"].is_file() and files["tlb_hooks"].is_file():
+            tlb = run_equiv(
+                "ub_mem_tlb",
+                files["tlb_prod"],
+                files["tlb_hooks"],
+                ["tb_test_mode"],
+                extra_rtl=[files["cmn_stub"]],
+                incdirs=inc,
+            )
+            if tlb is not None:
+                _fail("equiv-tlb-#27", tlb.message)
+            print("SELFTEST PASS equiv-tlb-#27: PRODUCT≡HOOKS (obs open, bd tied)")
+            tports = parse_port_decls(
+                files["tlb_prod"], incdirs=inc, module="ub_mem_tlb"
+            )
+            tfake = Path(tmp) / "tlb_fake.v"
+            _fake_hooks_xor_bit(
+                tfake, "ub_mem_tlb", files["tlb_prod"], tports, "lk_page", ["tb_test_mode"]
+            )
+            tbad = run_equiv(
+                "ub_mem_tlb",
+                files["tlb_prod"],
+                tfake,
+                ["tb_test_mode"],
+                extra_rtl=[files["cmn_stub"]],
+                incdirs=inc,
+            )
+            if tbad is None:
+                _fail("equiv-tlb-#27-flip", "lk_page[0] flipped HOOKS must fail")
+            print("SELFTEST PASS equiv-tlb-#27-flip: fake bus bit fail")
+
+
+def test_synth_async_ff_not_latch() -> None:
+    """ub_rst_sync-style async-reset FF must not be LATCH / COMBO_LOOP."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "ub_rst_sync.sv"
+        path.write_text(
+            "module ub_rst_sync (\n"
+            "  input core_clk, input rst_n, output rst_n_sync\n"
+            ");\n"
+            "  reg r1, r2;\n"
+            "  always @(posedge core_clk or negedge rst_n) begin\n"
+            "    if (!rst_n) begin r1 <= 1'b0; r2 <= 1'b0; end\n"
+            "    else begin r1 <= 1'b1; r2 <= r1; end\n"
+            "  end\n"
+            "  assign rst_n_sync = r2;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        hits, _text = synth_module("ub_rst_sync", path, [path], [])
+        bad = [h for h in hits if h.rule in {"LATCH", "COMBO_LOOP"}]
+        if bad:
+            _fail(
+                "synth-async-ff",
+                f"async-reset FF misclassified: "
+                f"{[(h.rule, h.message[:80]) for h in bad]}",
+            )
+        print("SELFTEST PASS synth-async-ff: $adff/$_DFF_PN0_ not LATCH/COMBO_LOOP")
+
+
+def test_synth_real_latch() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "bad_latch.v"
+        path.write_text(
+            "module bad_latch(input en, input d, output reg q);\n"
+            "  always @* if (en) q = d;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        hits, _text = synth_module("bad_latch", path, [path], [])
+        _expect_rule("synth-real-latch", hits, "LATCH")
+
+
 def main() -> int:
     tests = [
         test_emit_skip_missing_script,
@@ -485,6 +816,13 @@ def main() -> int:
         test_helper_at_layer_root_is_leaf,
         test_repo_root_on_path_shadows,
         test_lib_helper_splice,
+        test_yosys_ansi_ports,
+        test_hooks_missing_port,
+        test_hooks_wrong_width,
+        test_equiv_wide_bus_and_flip,
+        test_equiv_real_csr_tlb,
+        test_synth_async_ff_not_latch,
+        test_synth_real_latch,
     ]
     for fn in tests:
         fn()

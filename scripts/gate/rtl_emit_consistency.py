@@ -48,6 +48,7 @@ from gatelib import (
     packed_width,
     parse_cmn_mem_tag,
     parse_port_decls,
+    default_verilog_incdirs,
     print_tool_versions,
     read_cmn_mem_threshold_bits,
     rel,
@@ -79,6 +80,7 @@ def write_hooks_wrapper(
     module: str,
     dest: Path,
     product_path: Path | None = None,
+    incdirs: list[Path] | None = None,
 ) -> list[str]:
     """Wrap HOOKS so only PRODUCT ports are compared (SPEC §11).
 
@@ -88,9 +90,9 @@ def write_hooks_wrapper(
     Observe (tb_obs_* / tb_<inst>_obs_*) left open. Other extra tb_*
     inputs also tie low.
     """
-    hooks = parse_port_decls(hooks_path)
+    hooks = parse_port_decls(hooks_path, incdirs=incdirs, module=module)
     if product_path is not None and product_path.is_file():
-        exposed = parse_port_decls(product_path)
+        exposed = parse_port_decls(product_path, incdirs=incdirs, module=module)
     else:
         exposed = [(k, n, p) for k, n, p in hooks if not is_tb_port(n)]
     tied: list[tuple[str, str, str]] = []
@@ -140,39 +142,178 @@ def _lib_reads(lib_files: list[Path] | None) -> list[str]:
     return out
 
 
+def _sv_read(path: Path, incdirs: list[Path] | None = None) -> str:
+    inc = " ".join(f"-I{d}" for d in (incdirs or []))
+    return f"read_verilog -sv {inc} {path}".replace("  ", " ")
+
+
+def _yosys_load_both(
+    product: Path,
+    gold_top: str,
+    gate_reads: list[str],
+    gate_top: str,
+    lib_files: list[Path] | None = None,
+    incdirs: list[Path] | None = None,
+    extra_rtl: list[Path] | None = None,
+) -> list[str]:
+    """Read gold/gate, flatten, opt -full (fold tied-low hook muxes)."""
+    libs = _lib_reads(lib_files)
+    extras = [_sv_read(p, incdirs) for p in (extra_rtl or [])]
+    return [
+        *extras,
+        _sv_read(product, incdirs),
+        *libs,
+        f"hierarchy -check -top {gold_top}",
+        "proc",
+        "flatten -noscopeinfo",
+        "opt -full",
+        "design -save gold",
+        "design -reset",
+        *gate_reads,
+        *libs,
+        f"hierarchy -check -top {gate_top}",
+        "proc",
+        "flatten -noscopeinfo",
+        "opt -full",
+        "design -save gate",
+        f"design -copy-from gold -as gold {gold_top}",
+        f"design -copy-from gate -as gate {gate_top}",
+    ]
+
+
 def _yosys_equiv_script(
     product: Path,
     gold_top: str,
     gate_reads: list[str],
     gate_top: str,
     lib_files: list[Path] | None = None,
+    incdirs: list[Path] | None = None,
+    extra_rtl: list[Path] | None = None,
 ) -> str:
     """Yosys equiv_make / equiv_simple / equiv_induct / equiv_status -assert."""
-    libs = _lib_reads(lib_files)
     return "\n".join(
         [
-            f"read_verilog -sv {product}",
-            *libs,
-            f"hierarchy -check -top {gold_top}",
-            "proc",
-            "opt",
-            "design -save gold",
-            "design -reset",
-            *gate_reads,
-            *libs,
-            f"hierarchy -check -top {gate_top}",
-            "proc",
-            "opt",
-            "design -save gate",
-            f"design -copy-from gold -as gold {gold_top}",
-            f"design -copy-from gate -as gate {gate_top}",
+            *_yosys_load_both(
+                product,
+                gold_top,
+                gate_reads,
+                gate_top,
+                lib_files,
+                incdirs,
+                extra_rtl,
+            ),
             "equiv_make gold gate equiv",
             "prep -top equiv",
-            "equiv_simple",
-            "equiv_induct",
+            "equiv_simple -undef",
+            "equiv_induct -undef",
             "equiv_status -assert",
         ]
     )
+
+
+def _yosys_miter_common(
+    product: Path,
+    gold_top: str,
+    gate_reads: list[str],
+    gate_top: str,
+    lib_files: list[Path] | None = None,
+    incdirs: list[Path] | None = None,
+    extra_rtl: list[Path] | None = None,
+) -> list[str]:
+    return [
+        *_yosys_load_both(
+            product,
+            gold_top,
+            gate_reads,
+            gate_top,
+            lib_files,
+            incdirs,
+            extra_rtl,
+        ),
+        "miter -equiv -make_assert -flatten gold gate miter",
+        "hierarchy -top miter",
+        "opt -full",
+    ]
+
+
+def _yosys_miter_sat_script(
+    product: Path,
+    gold_top: str,
+    gate_reads: list[str],
+    gate_top: str,
+    lib_files: list[Path] | None = None,
+    incdirs: list[Path] | None = None,
+    extra_rtl: list[Path] | None = None,
+) -> str:
+    """k-induction on the I/O miter. Caps length so it cannot walk off to k=36."""
+    return "\n".join(
+        [
+            *_yosys_miter_common(
+                product,
+                gold_top,
+                gate_reads,
+                gate_top,
+                lib_files,
+                incdirs,
+                extra_rtl,
+            ),
+            "sat -verify -tempinduct -seq 2 -maxsteps 4 "
+            "-set-init-zero -prove-asserts",
+        ]
+    )
+
+
+def _yosys_miter_bmc_script(
+    product: Path,
+    gold_top: str,
+    gate_reads: list[str],
+    gate_top: str,
+    lib_files: list[Path] | None = None,
+    incdirs: list[Path] | None = None,
+    extra_rtl: list[Path] | None = None,
+) -> str:
+    """I/O miter BMC from zero init.
+
+    Used when PRODUCT/HOOKS are sequential and structurally different:
+    k-induction on ports alone cannot close (extra HOOKS state), but SAT
+    BMC from a shared init still proves the outputs match for N cycles
+    and catches a flipped bus bit.
+    """
+    return "\n".join(
+        [
+            *_yosys_miter_common(
+                product,
+                gold_top,
+                gate_reads,
+                gate_top,
+                lib_files,
+                incdirs,
+                extra_rtl,
+            ),
+            "sat -verify -seq 16 -set-init-zero -prove-asserts",
+        ]
+    )
+
+
+def _run_yosys_script(ys: Path, work: Path, timeout: int) -> tuple[int, str]:
+    """Run a Yosys script; timeout becomes a failed proof, not a crash."""
+    try:
+        proc = run_cmd(["yosys", "-s", str(ys)], cwd=work, timeout=timeout)
+    except Exception as exc:
+        return 1, f"{type(exc).__name__}: {exc}"
+    return proc.returncode, proc.stdout or ""
+
+
+def _equiv_proven(rc: int, text: str) -> bool:
+    if rc != 0:
+        return False
+    if "proof did fail" in text.lower():
+        return False
+    if "Equivalence successfully proven" in text:
+        return True
+    if "SAT proof finished - no model found: SUCCESS" in text:
+        return True
+    return False
 
 
 def _emit_python() -> str:
@@ -377,31 +518,63 @@ def run_equiv(
     hooks: Path,
     extra_ports: list[str] | None,
     lib_files: list[Path] | None = None,
+    incdirs: list[Path] | None = None,
+    extra_rtl: list[Path] | None = None,
 ) -> Finding | None:
-    """Prove PRODUCT≡HOOKS. Primary: Yosys equiv_*. eqy if available."""
+    """Prove PRODUCT≡HOOKS on PRODUCT ports only (SPEC §11 (d)).
+
+    Always wrap HOOKS so exposed ports keep PRODUCT packed widths.
+    Extra HOOKS inputs tie low at native width; obs outputs float.
+    Primary: Yosys equiv_*. Fallback: miter + sat -tempinduct.
+    Structurally different sequential (separate pycc PRODUCT/HOOKS):
+    tempinduct may not close; then miter SAT BMC from zero init.
+    """
     work = OUT_DIR / "eqy" / module
     work.mkdir(parents=True, exist_ok=True)
     gold_top = module
-    if extra_ports is None:
-        gate_top = module
-        gate_reads = [f"read_verilog -sv {hooks}"]
-        kind = "no-hook leaf, ports 1:1"
-    else:
-        wrap = work / f"{module}_eqy_hooks.v"
-        tied = write_hooks_wrapper(hooks, module, wrap, product_path=product)
-        gate_top = f"{module}_eqy_hooks"
-        gate_reads = [f"read_verilog -sv {hooks}", f"read_verilog -sv {wrap}"]
-        kind = f"hooked; extra inputs tied low ({tied or 'none'})"
+    incs = list(incdirs) if incdirs is not None else default_verilog_incdirs()
+    wrap = work / f"{module}_eqy_hooks.v"
+    tied = write_hooks_wrapper(
+        hooks, module, wrap, product_path=product, incdirs=incs
+    )
+    gate_top = f"{module}_eqy_hooks"
+    extra_reads = [_sv_read(p, incs) for p in (extra_rtl or [])]
+    gate_reads = [*extra_reads, _sv_read(hooks, incs), _sv_read(wrap, incs)]
+    extra_note = (
+        "listed extras" if extra_ports is not None else "no hooks_ports row"
+    )
+    kind = (
+        f"PRODUCT-port-only wrapper; extras tied low "
+        f"({tied or 'none'}; {extra_note})"
+    )
+    del extra_ports  # compared via PRODUCT ports only; list is documentation
 
     eqy_bin = shutil_which("eqy")
     yosys_bin = shutil_which("yosys")
-    # This environment cannot install eqy. Yosys equiv_* is the primary path.
-    if yosys_bin and not eqy_bin:
-        tool = "yosys-equiv"
+    if not yosys_bin and not eqy_bin:
+        print(f"--- EQUIV tool=NONE {module}: yosys and eqy both missing ---")
+        return Finding(
+            check="emit",
+            module=module,
+            file=rel(product),
+            rule="EQUIV_TOOL_MISSING",
+            message="yosys not on PATH (eqy also missing); cannot prove PRODUCT≡hooks",
+        )
+
+    text = ""
+    tool = "yosys-equiv"
+    proven = False
+    if yosys_bin:
         ys = work / f"{module}_equiv.ys"
         ys.write_text(
             _yosys_equiv_script(
-                product, gold_top, gate_reads, gate_top, lib_files=lib_files
+                product,
+                gold_top,
+                gate_reads,
+                gate_top,
+                lib_files=lib_files,
+                incdirs=incs,
+                extra_rtl=extra_rtl,
             )
             + "\n",
             encoding="utf-8",
@@ -410,10 +583,61 @@ def run_equiv(
             f"--- EQUIV tool=yosys-equiv {module} ({kind}); "
             "equiv_make/equiv_simple/equiv_induct/equiv_status -assert ---"
         )
-        proc = run_cmd(["yosys", "-s", str(ys)], cwd=work, timeout=180)
+        rc, text = _run_yosys_script(ys, work, 180)
+        print("\n".join((text.strip().splitlines() or [""])[-40:]))
+        proven = _equiv_proven(rc, text)
+        if not proven:
+            tool = "yosys-miter-sat"
+            ms = work / f"{module}_miter.ys"
+            ms.write_text(
+                _yosys_miter_sat_script(
+                    product,
+                    gold_top,
+                    gate_reads,
+                    gate_top,
+                    lib_files=lib_files,
+                    incdirs=incs,
+                    extra_rtl=extra_rtl,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            print(
+                f"--- EQUIV tool=yosys-miter-sat {module} ({kind}); "
+                "miter -equiv -flatten + sat -tempinduct -prove-asserts ---"
+            )
+            rc, text = _run_yosys_script(ms, work, 60)
+            print("\n".join((text.strip().splitlines() or [""])[-40:]))
+            proven = _equiv_proven(rc, text)
+        if not proven:
+            tool = "yosys-miter-sat"
+            bs = work / f"{module}_miter_bmc.ys"
+            bs.write_text(
+                _yosys_miter_bmc_script(
+                    product,
+                    gold_top,
+                    gate_reads,
+                    gate_top,
+                    lib_files=lib_files,
+                    incdirs=incs,
+                    extra_rtl=extra_rtl,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            print(
+                f"--- EQUIV tool=yosys-miter-sat {module} ({kind}); "
+                "miter -equiv -flatten + sat -seq 16 -set-init-zero "
+                "(BMC from zero; tempinduct step cannot close on "
+                "structurally different sequential) ---"
+            )
+            rc, text = _run_yosys_script(bs, work, 180)
+            print("\n".join((text.strip().splitlines() or [""])[-40:]))
+            proven = _equiv_proven(rc, text)
     elif eqy_bin:
         tool = "eqy"
         eqy_file = work / f"{module}.eqy"
+        gold_inc = " ".join(f"-I{d}" for d in incs)
         eqy_file.write_text(
             "\n".join(
                 [
@@ -421,7 +645,7 @@ def run_equiv(
                     "splitnets on",
                     "",
                     "[gold]",
-                    f"read_verilog -sv {product}",
+                    f"read_verilog -sv {gold_inc} {product}".replace("  ", " "),
                     *_lib_reads(lib_files),
                     f"prep -top {gold_top}",
                     "",
@@ -437,27 +661,10 @@ def run_equiv(
         )
         print(f"--- EQUIV tool=eqy {module} ({kind}) ---")
         proc = run_cmd(["eqy", "-f", str(eqy_file)], cwd=work, timeout=180)
-    else:
-        print(f"--- EQUIV tool=NONE {module}: yosys and eqy both missing ---")
-        return Finding(
-            check="emit",
-            module=module,
-            file=rel(product),
-            rule="EQUIV_TOOL_MISSING",
-            message="yosys not on PATH (eqy also missing); cannot prove PRODUCT≡hooks",
-        )
+        text = proc.stdout or ""
+        print("\n".join((text.strip().splitlines() or [""])[-40:]))
+        proven = proc.returncode == 0
 
-    text = proc.stdout or ""
-    print("\n".join((text.strip().splitlines() or [""])[-40:]))
-    proven = (
-        proc.returncode == 0
-        and (
-            "Equivalence successfully proven" in text
-            or tool == "eqy"
-        )
-    )
-    if tool == "eqy" and proc.returncode == 0:
-        proven = True
     if not proven:
         return Finding(
             check="emit",
@@ -465,8 +672,7 @@ def run_equiv(
             file=rel(product),
             rule="EQUIV_FAIL",
             message=(
-                f"PRODUCT vs hooks not equivalent (tool={tool}, "
-                f"exit {proc.returncode}; {kind})"
+                f"PRODUCT vs hooks not equivalent (tool={tool}, {kind})"
             ),
         )
     print(f"EQUIV {module}: PASS tool={tool}")

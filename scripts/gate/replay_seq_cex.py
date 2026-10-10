@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -106,6 +107,8 @@ def beat_rx(rst: int, start: int, valid: int, last: int, data: int, recv: int) -
 
 
 def compile_run(tb: Path, srcs: list[Path], inc: list[Path]) -> tuple[int, str]:
+    if not shutil.which("iverilog"):
+        return 127, "ERROR: iverilog is not on PATH; Icarus (TOOLCHAIN.lock icarus_lock) is required"
     out = tb.parent / "sim.vvp"
     cmd = ["iverilog", "-g2012", "-o", str(out)]
     for d in inc:

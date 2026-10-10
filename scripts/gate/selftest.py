@@ -23,9 +23,11 @@ from gatelib import (
     leaf_python_argv,
     mark_deleted_findings,
     parse_port_decls,
+    print_tool_versions,
     repo_root_on_sys_path,
     run_cmd,
     sha256_file,
+    shutil_which,
 )
 from hooks_port_consistency import compare_ports
 from large_mem_manifest import check_large_mem_manifest
@@ -1037,6 +1039,13 @@ def test_equiv_ref_real_compare() -> None:
 
 
 def main() -> int:
+    print_tool_versions(["python", "yosys", "icarus"])
+    if not shutil_which("iverilog"):
+        print(
+            "ERROR: iverilog is not on PATH; gate-selftest flip/carry replay "
+            "needs Icarus (TOOLCHAIN.lock icarus_lock)"
+        )
+        return 1
     tests = [
         test_emit_skip_missing_script,
         test_emit_skip_pycc,

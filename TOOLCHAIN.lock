@@ -22,6 +22,8 @@ uvm-python_note = "fork of tpoikela/uvm-python 0.4.0"
 
 [simulators]
 # D7: Icarus 12.0 is the pass/fail gate.
+# tb-selfcheck and gate-selftest (flip/carry Icarus replay) both use this pin.
+# Do not add a second Icarus version.
 icarus_lock = "12.0"
 # Design spike (ubuntu-24.04 apt): Verilator 5.020. D7 5.032 is not on noble apt.
 verilator_lock = "5.020"

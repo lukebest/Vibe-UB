@@ -24,7 +24,7 @@ make gate
 
 与 CI 同一套脚本。快速综合的 QoR 趋势归实现（`scripts/impl/quick_synth.sh`），**不**拦合入；本门禁的 `synth-check` 只判过 / 不过（latch / 多驱动 / 组合环）。
 
-工具版本**只**从仓库根 `TOOLCHAIN.lock` 读。出现第二份 `TOOLCHAIN.lock` 记 `TOOLCHAIN_LOCK_CONFLICT`（拦截）。装不到锁定版本时，job 日志打印 `locked=` 与 `actual=`，并写明 MISMATCH，不静默当成已锁定。
+工具版本**只**从仓库根 `TOOLCHAIN.lock` 读。出现第二份 `TOOLCHAIN.lock` 记 `TOOLCHAIN_LOCK_CONFLICT`（拦截）。装不到锁定版本时，job 日志打印 `locked=` 与 `actual=`，并写明 MISMATCH，不静默当成已锁定。`gate-selftest` 与 `tb-selfcheck` 都装 Icarus，版本用已有 `icarus_lock`（12.0），不另钉一版；flip/carry 时序反例要在 Icarus 端口上复现。
 
 机器可读名单在 `scripts/gate/`（与 `waivers/` 同一套批准约束：`approver` 必须是 `waivers/approvers.yml` 里的守门人）。`waivers/pending/` 草稿只展示、不生效。
 

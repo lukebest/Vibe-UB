@@ -29,6 +29,7 @@
 
 ### Changed
 
+- gate-selftest CI installs Icarus from the existing `TOOLCHAIN.lock` `icarus_lock` (12.0), same apt `iverilog` as tb-selfcheck, so flip/carry BMC CEX replay can run.
 - GATE-EQY-004 case 1 (extra/missing/width): PM chose `seq`. `regpair=NOTAPPLICABLE(set-mismatch)` then uncut output induction; the `fail` switch and UNCONFIRMED placeholder are removed. GATE-SYN-DEADREG is always on the PRODUCT/DUT netlist: flatten, no `opt_clean`, any FF Q that cannot reach an output FAILs; `bcrc_extra_reg` must be caught here (independent of pairing). Pairing key = every wire on the FF Q bit-group, minus pycc auto-names (`pyc_reg_N`, `pyc_comb_N`, `__…L<line>`), intersected with the other side (exactly one name). Official seq is `write_aiger -zinit` + ABC `bmc3` from reset-valued init; do not use `-set-init-zero` or `-set-init-def`.
 - SPEC §2.6：BCRC `last` 拍给出 `crc_word` 后 CRC 寄存器回到初值全 1；块首未带 `start` 的 `valid_in` 按全 1 计入，块中间未带 `start` 的 `valid_in` 接着当前 CRC 折入。上游仍应在每块首 flit 给 `start`。
 - BCRC formula ref (`formal/dll/ref/ub_dll_bcrc.sv`): after `valid_in && last`, `crc` reloads INIT while `crc_word` still takes `nxt` (PR #39 / Xia). Mid-block no-start `valid_in` still folds. Directed TB cases cover first-block-no-start, last-then-no-start, and chained single-flit blocks vs `tb/models` (model unchanged).

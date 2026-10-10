@@ -39,12 +39,12 @@ from pycircuit import Circuit, module, u
 #   d5w8         — formal/cmn default (DEPTH=5, non-power-of-2), Xia BMC
 #   d8w16        — model pytest power-of-2, whole-word (N=1)
 #   d64w64m16    — required small masked case (N=4, 4096 array bits)
-#   d512w512m64  — C-line style (N=8); gate treats as black box
+# A larger C-line tag (e.g. d512w512m64) can be re-added later via a
+# manifest-only flow; WMASK_W support in build() stays.
 VARIANTS = {
     "d5w8": {"DEPTH": 5, "WIDTH": 8, "WMASK_W": 8},
     "d8w16": {"DEPTH": 8, "WIDTH": 16, "WMASK_W": 16},
     "d64w64m16": {"DEPTH": 64, "WIDTH": 64, "WMASK_W": 16},
-    "d512w512m64": {"DEPTH": 512, "WIDTH": 512, "WMASK_W": 64},
 }
 
 LEAF = "ub_cmn_mem_1r1w"

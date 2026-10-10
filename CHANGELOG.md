@@ -4,7 +4,7 @@
 
 ### Added
 
-- `pycircuit/cmn/ub_cmn_mem_1r1w.py` → `rtl/cmn/` 与 `rtl/cmn/hooks/` 的 `ub_cmn_mem_1r1w_{d5w8,d8w16,d64w64m16,d512w512m64}.v`：pycc 固定网表（SPEC §2.2，`d<DEPTH>w<WIDTH>`，N>1 加 `m<WMASK_W>`）。PRODUCT=`TEST_HOOKS=0`，HOOKS=`TEST_HOOKS=1`；§10 无 `tb_*`，两套端口与模块名相同。时钟 `core_clk`；无复位口（业务叶标准名 `rst_pyc`，本原语不引出）。生成参数 `WMASK_W`（默认 = `WIDTH`，整字写；`WIDTH` 须整除）；N=`WIDTH/WMASK_W`>1 时多 `wmask[N-1:0]`，bit i 写段 i，其余段保持；同址同拍 per-segment read-old。1R1W、读 1 拍；阵列与 `rdata` 无复位 / 无零初始化；越界不截断。`scripts/emit_rtl.py` / `make emit` 再现。
+- `pycircuit/cmn/ub_cmn_mem_1r1w.py` → `rtl/cmn/` 与 `rtl/cmn/hooks/` 的 `ub_cmn_mem_1r1w_{d5w8,d8w16,d64w64m16}.v`：pycc 固定网表（SPEC §2.2，`d<DEPTH>w<WIDTH>`，N>1 加 `m<WMASK_W>`）。PRODUCT=`TEST_HOOKS=0`，HOOKS=`TEST_HOOKS=1`；§10 无 `tb_*`，两套端口与模块名相同。时钟 `core_clk`；无复位口（业务叶标准名 `rst_pyc`，本原语不引出）。生成参数 `WMASK_W`（默认 = `WIDTH`，整字写；`WIDTH` 须整除）；N=`WIDTH/WMASK_W`>1 时多 `wmask[N-1:0]`，bit i 写段 i，其余段保持；同址同拍 per-segment read-old。1R1W、读 1 拍；阵列与 `rdata` 无复位 / 无零初始化；越界不截断。`scripts/emit_rtl.py` / `make emit` 再现。较大 C 线变体（如 `d512w512m64`）不在本登记表，可经清单流后补。
 - `model/ub_cmn_mem_1r1w.py` + `formal/cmn/`：1R1W 存储原语参考模型与接口断言（CODING_STYLE §10 / PR #20 时序提案；`ASSERT_NO_UNINIT_READ` 默认 1；formal 用 anyconst 单地址抽象）。
 - `scripts/impl/quick_synth.sh`：合入前叶子快速综合（Yosys flatten + Sky130 hd tt proxy + OpenSTA 最差建立路径）。Informational；不进验证门禁。规则见 `docs/rules/impl_quick_synth.md`。
 - `TOOLCHAIN.lock` + `tb/` uvm-python 骨架、golden-model 接口、双网表自检入口（叠在 M1 SPEC 上；不改 `rtl/` / SPEC 类文档）。

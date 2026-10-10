@@ -36,7 +36,6 @@ LEAVES: list[dict] = [
             {"label": "d5w8", "depth": 5, "width": 8, "wmask_w": 8},
             {"label": "d8w16", "depth": 8, "width": 16, "wmask_w": 16},
             {"label": "d64w64m16", "depth": 64, "width": 64, "wmask_w": 16},
-            {"label": "d512w512m64", "depth": 512, "width": 512, "wmask_w": 64},
         ],
     },
 ]

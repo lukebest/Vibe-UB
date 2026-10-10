@@ -130,7 +130,7 @@ PMA 模型在仿真里实例化，与 PCS 的边界是 M1 的 **PHY 数字/模�
 
 用占位值生成的网表（例如扰码抽头 / 种子仍待定，见 §13）tag 后缀 `_placeholder`，供 lint / TB 使用；PRODUCT 只收录已闭合参数的变体。是否提交占位变体由 PM 定。
 
-**超阈值变体不提交网表（PM 已定）：** [impl_quick_synth.md](rules/impl_quick_synth.md) 黑盒阈值（默认 `depth × width` **4096** bit）以上的生成变体，**不**把 `.v` 提交进库。改为提交 **manifest 条目**：变体参数、pycc / 工具链版本（根目录 [`TOOLCHAIN.lock`](../TOOLCHAIN.lock)）、该变体 PRODUCT 与 HOOKS 各自的 sha256。manifest 的路径与格式以 [verif_gate.md](rules/verif_gate.md) 为准（**验证**所有；本文件不另定路径）。门禁用 pycc 经 `scripts/emit_rtl.py` 再生，核对 sha256 与端口，并核对 PRODUCT 与 HOOKS **除模块名外字节相同**。其余生成 `.v` 仍提交。见 §11 (f)。
+**超阈值变体不提交网表（PM 已定；口径对齐验证门禁）：** [impl_quick_synth.md](rules/impl_quick_synth.md) 黑盒阈值（默认 `depth × width` **4096** bit）以上的生成变体，**不**把 `.v` 提交进库。每层一份 `rtl/<layer>/manifest.yml`，**每个**超阈值变体一条。字段：变体名、参数、pycc 版本、PRODUCT 网表 sha256、HOOKS 网表 sha256。门禁按根目录 [`TOOLCHAIN.lock`](../TOOLCHAIN.lock) 安装 pycc，经 `scripts/emit_rtl.py` 再生，核 sha256 与端口，并核 PRODUCT 与 HOOKS **除模块名外字节相同**。把超阈值变体当成 `.v` 提交则 **拒绝**；manifest 条目再生失败则 **拒绝**。规则细则见 [verif_gate.md](rules/verif_gate.md)（**验证**所有）。其余生成 `.v` 仍提交。见 §11 (f)。
 
 ### 2.3 PMA 模型边界
 
@@ -888,7 +888,7 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 
 **(e) 覆盖率 waiver。** 钩子 mux 不另开 waiver（见 (b)）。信用下溢（`CRD_UF` 计数与 irq 分支）在正确设计中不可达，须 **具名覆盖率 waiver**（§13.4）。
 
-**(f) 超阈值网表不入库（PM）。** [impl_quick_synth.md](rules/impl_quick_synth.md) 黑盒阈值以上的变体 **不**提交 `.v`，只提交 manifest 条目（参数、`TOOLCHAIN.lock` 版本、PRODUCT / HOOKS sha256）。路径与格式见 [verif_gate.md](rules/verif_gate.md)（验证所有）。门禁经 `scripts/emit_rtl.py` 用 pycc 再生，核 sha256 与端口；PRODUCT 与 HOOKS **除模块名外字节相同**。其余生成 `.v` 仍入库，并走 (d)。见 §2.2。
+**(f) 超阈值网表不入库（PM；对齐验证）。** [impl_quick_synth.md](rules/impl_quick_synth.md) 黑盒阈值以上的变体 **不**提交 `.v`。每层 `rtl/<layer>/manifest.yml`，每变体一条：变体名、参数、pycc 版本、PRODUCT sha256、HOOKS sha256。门禁按 `TOOLCHAIN.lock` 安装 pycc，经 `scripts/emit_rtl.py` 再生，核 sha256 与端口；PRODUCT 与 HOOKS **除模块名外字节相同**。超阈值 `.v` 入库 **拒绝**；manifest 再生失败 **拒绝**。细则见 [verif_gate.md](rules/verif_gate.md)。其余生成 `.v` 仍入库，并走 (d)。见 §2.2。
 
 ---
 

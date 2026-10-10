@@ -8,7 +8,7 @@
 
 ## 1. 生成与网表
 
-- 源码是 Python（pyCircuit）。提交的产品 `.v` 必须能从当前 Python **再现**。**例外（PM）：** 超过 [impl_quick_synth.md](rules/impl_quick_synth.md) 黑盒阈值（默认 4096 bit）的变体 **不**提交 `.v`，只提交 manifest 条目（变体参数、`TOOLCHAIN.lock` 中的 pycc / 工具链版本、PRODUCT 与 HOOKS 的 sha256）。路径与格式见 [verif_gate.md](rules/verif_gate.md)（验证所有，本文件不定路径）。门禁用 pycc 经 `scripts/emit_rtl.py` 再生，核 sha256 与端口；PRODUCT 与 HOOKS 除模块名外字节相同。其余生成 `.v` 仍提交。见 SPEC §2.2、§11 (f)。
+- 源码是 Python（pyCircuit）。提交的产品 `.v` 必须能从当前 Python **再现**。**例外（PM；对齐验证）：** 超过 [impl_quick_synth.md](rules/impl_quick_synth.md) 黑盒阈值（默认 4096 bit）的变体 **不**提交 `.v`。每层 `rtl/<layer>/manifest.yml`，每变体一条：变体名、参数、pycc 版本、PRODUCT sha256、HOOKS sha256。门禁按 `TOOLCHAIN.lock` 安装 pycc，经 `scripts/emit_rtl.py` 再生，核 sha256 与端口；PRODUCT 与 HOOKS 除模块名外字节相同。超阈值 `.v` 入库 **拒绝**；manifest 再生失败 **拒绝**。细则见 [verif_gate.md](rules/verif_gate.md)。其余生成 `.v` 仍提交。见 SPEC §2.2、§11 (f)。
 - `TEST_HOOKS` 在 **Python 生成期** 展开，产出两套 Verilog。规则见 [SPEC.md](SPEC.md) **§11**，此处不重复例外：
   - **PRODUCT**（`TEST_HOOKS=0`）：无 `tb_*` 端口；lint / CDC / 综合 / 实现 / FPGA **只认这一套**。
   - **HOOKS**（`TEST_HOOKS=1`）：须过 lint 与 CDC，**不得**实现。回归与行覆盖率在此网上跑（`tb_test_mode` 为 0 与 1）；覆盖率分母含钩子 mux，钩子代码不另开 waiver。

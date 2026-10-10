@@ -12,6 +12,8 @@
 
 PM 每周汇总打版本。每个后期 bug 复盘至少产出一条规则。合入前快速综合的面积 / 时序反馈写入本分册。
 
+合入前快速综合的流程、proxy 口径与「不门禁」边界见 [impl_quick_synth.md](impl_quick_synth.md)（Sky130 hd tt，直到 PR #9 §13 工艺由 Luke 决定）。
+
 ---
 
 ## 约束

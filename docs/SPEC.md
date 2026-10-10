@@ -125,10 +125,12 @@ PMA 模型在仿真里实例化，与 PCS 的边界是 M1 的 **PHY 数字/模�
 | 对象 | 约定 |
 | --- | --- |
 | 模块名与文件名 | `<leaf>_<tag>`。例：`ub_pcs_lane_dist_x4` / `ub_pcs_lane_dist_x8` |
-| 产品网表 | `rtl/<blk>/<leaf>_<tag>.v` |
-| 钩子网表 | 同名，放 `rtl/<blk>/hooks/`（§11） |
+| 产品网表 | `rtl/<blk>/<leaf>_<tag>.v`（超阈值变体见下，**不**提交 `.v`） |
+| 钩子网表 | 同名，放 `rtl/<blk>/hooks/`（§11；超阈值同样不提交 `.v`） |
 
 用占位值生成的网表（例如扰码抽头 / 种子仍待定，见 §13）tag 后缀 `_placeholder`，供 lint / TB 使用；PRODUCT 只收录已闭合参数的变体。是否提交占位变体由 PM 定。
+
+**超阈值变体不提交网表（PM 已定）：** [impl_quick_synth.md](rules/impl_quick_synth.md) 黑盒阈值（默认 `depth × width` **4096** bit）以上的生成变体，**不**把 `.v` 提交进库。改为提交 **manifest 条目**：变体参数、pycc / 工具链版本（根目录 [`TOOLCHAIN.lock`](../TOOLCHAIN.lock)）、该变体 PRODUCT 与 HOOKS 各自的 sha256。manifest 的路径与格式以 [verif_gate.md](rules/verif_gate.md) 为准（**验证**所有；本文件不另定路径）。门禁用 pycc 经 `scripts/emit_rtl.py` 再生，核对 sha256 与端口，并核对 PRODUCT 与 HOOKS **除模块名外字节相同**。其余生成 `.v` 仍提交。见 §11 (f)。
 
 ### 2.3 PMA 模型边界
 
@@ -885,6 +887,8 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 **(d) 形式等价门禁。** 规范工具是 Yosys **`equiv`**（版本见 `TOOLCHAIN.lock`）。eqy 在可安装后可作为可选补充，**不**替代 `equiv` 门禁。只比较 **PRODUCT 已有的端口**；`tb_<inst>_obs_*` 仅 HOOKS 存在，**不参加**比较。HOOKS 侧 `tb_test_mode=0`，全部 `tb_*` 钩子**输入**接低（含 `tb_inj_*` 接到复位不介入值、§10 点名存储的 `tb_<inst>_bd_*` 与 `tb_<inst>_bd_vld_*`）。两者必须等价；不等价则 **阻断交付**。TEST 窗在这两种条件下都是「已映射、读 0、写忽略、`csr_err=0`」，因此不破坏等价。
 
 **(e) 覆盖率 waiver。** 钩子 mux 不另开 waiver（见 (b)）。信用下溢（`CRD_UF` 计数与 irq 分支）在正确设计中不可达，须 **具名覆盖率 waiver**（§13.4）。
+
+**(f) 超阈值网表不入库（PM）。** [impl_quick_synth.md](rules/impl_quick_synth.md) 黑盒阈值以上的变体 **不**提交 `.v`，只提交 manifest 条目（参数、`TOOLCHAIN.lock` 版本、PRODUCT / HOOKS sha256）。路径与格式见 [verif_gate.md](rules/verif_gate.md)（验证所有）。门禁经 `scripts/emit_rtl.py` 用 pycc 再生，核 sha256 与端口；PRODUCT 与 HOOKS **除模块名外字节相同**。其余生成 `.v` 仍入库，并走 (d)。见 §2.2。
 
 ---
 

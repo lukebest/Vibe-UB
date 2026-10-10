@@ -267,6 +267,8 @@ def main() -> int:
     assert "parameter" not in bcrc
     assert "pyc_reg" in bcrc
     assert "n_eat" not in bcrc
+    assert 'pyc.name="crc"' in bcrc
+    assert "zero_q" not in bcrc
 
     chk = (rtl / "dll/ub_dll_bcrc_check.v").read_text(encoding="utf-8")
     chk_ports = _ports_block(chk)
@@ -277,6 +279,10 @@ def main() -> int:
     assert re.search(r"\berror_flag\b", chk_ports) is None or "error_flag_rx" in chk_ports
     assert "parameter" not in chk
     assert "pyc_reg" in chk
+    assert "zero_q" not in chk
+    assert 'pyc.name="recv_q"' in chk
+    assert 'pyc.name="crc"' in chk
+    assert chk.strip().split("module ", 1)[1].split("(", 1)[0].strip() == "ub_dll_bcrc_check"
 
     for nlane in (1, 4, 8):
         width = nlane * P.PMA_W

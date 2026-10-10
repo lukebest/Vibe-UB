@@ -20,23 +20,26 @@ module ub_dll_bcrc (
   output done
 );
 
-wire [29:0] crc_q; // pyc.name="crc_q"
-wire [29:0] crc_q__next; // pyc.name="crc_q__next"
-wire done_q; // pyc.name="done_q"
-wire done_q__next; // pyc.name="done_q__next"
-wire pyc_and_3819; // op=pyc.and
-wire pyc_comb_3816; // op=pyc.comb
-wire [29:0] pyc_comb_3817; // op=pyc.comb
-wire [29:0] pyc_comb_3818; // op=pyc.comb
-wire pyc_comb_3822; // op=pyc.comb
-wire [31:0] pyc_comb_3823; // op=pyc.comb
+wire [29:0] crc; // pyc.name="crc"
+wire [29:0] crc__next; // pyc.name="crc__next"
+wire [31:0] crc_word_2; // pyc.name="crc_word"
+wire [31:0] crc_word__next; // pyc.name="crc_word__next"
+wire done_2; // pyc.name="done"
+wire done__next; // pyc.name="done__next"
+wire pyc_and_3814; // op=pyc.and
+wire pyc_and_3821; // op=pyc.and
+wire pyc_comb_3818; // op=pyc.comb
+wire [29:0] pyc_comb_3819; // op=pyc.comb
+wire [29:0] pyc_comb_3820; // op=pyc.comb
+wire pyc_comb_3824; // op=pyc.comb
+wire [31:0] pyc_comb_3825; // op=pyc.comb
 wire pyc_comb_5; // op=pyc.comb
 wire [29:0] pyc_comb_6; // op=pyc.comb
 wire [31:0] pyc_comb_7; // op=pyc.comb
 wire pyc_comb_8; // op=pyc.comb
 wire [29:0] pyc_concat_2142; // op=pyc.concat
 wire [29:0] pyc_concat_3811; // op=pyc.concat
-wire [31:0] pyc_concat_3820; // op=pyc.concat
+wire [31:0] pyc_concat_3822; // op=pyc.concat
 wire pyc_constant_1; // op=pyc.constant
 wire [29:0] pyc_constant_2; // op=pyc.constant
 wire [31:0] pyc_constant_3; // op=pyc.constant
@@ -362,10 +365,11 @@ wire pyc_extract_98; // op=pyc.extract
 wire pyc_extract_99; // op=pyc.extract
 wire [29:0] pyc_mux_12; // op=pyc.mux
 wire [29:0] pyc_mux_3812; // op=pyc.mux
-wire [29:0] pyc_mux_3813; // op=pyc.mux
 wire [29:0] pyc_mux_3815; // op=pyc.mux
-wire [31:0] pyc_mux_3821; // op=pyc.mux
-wire pyc_or_3814; // op=pyc.or
+wire [29:0] pyc_mux_3817; // op=pyc.mux
+wire [31:0] pyc_mux_3823; // op=pyc.mux
+wire pyc_not_3813; // op=pyc.not
+wire pyc_or_3816; // op=pyc.or
 wire [31:0] pyc_reg_10; // op=pyc.reg
 wire pyc_reg_11; // op=pyc.reg
 wire [29:0] pyc_reg_9; // op=pyc.reg
@@ -3847,11 +3851,10 @@ wire pyc_xor_996; // op=pyc.xor
 wire pyc_xor_997; // op=pyc.xor
 wire pyc_xor_998; // op=pyc.xor
 wire pyc_xor_999; // op=pyc.xor
-wire [31:0] word_q; // pyc.name="word_q"
-wire [31:0] word_q__next; // pyc.name="word_q__next"
 
 // --- Combinational (netlist)
-assign crc_q = pyc_reg_9;
+assign crc = pyc_reg_9;
+assign crc_word_2 = pyc_reg_10;
 assign pyc_constant_1 = 1'd1;
 assign pyc_constant_2 = 30'd1073741823;
 assign pyc_constant_3 = 32'd0;
@@ -3860,8 +3863,8 @@ assign pyc_comb_5 = pyc_constant_1;
 assign pyc_comb_6 = pyc_constant_2;
 assign pyc_comb_7 = pyc_constant_3;
 assign pyc_comb_8 = pyc_constant_4;
-assign done_q = pyc_reg_11;
-assign pyc_mux_12 = (start ? pyc_comb_6 : crc_q);
+assign done_2 = pyc_reg_11;
+assign pyc_mux_12 = (start ? pyc_comb_6 : crc);
 assign pyc_extract_13 = pyc_mux_12[0];
 assign pyc_extract_14 = pyc_mux_12[2];
 assign pyc_extract_15 = pyc_mux_12[8];
@@ -7662,28 +7665,29 @@ assign pyc_xor_3809 = (pyc_xor_3807 ^ pyc_xor_3808);
 assign pyc_xor_3810 = (pyc_xor_3809 ^ pyc_xor_3806);
 assign pyc_concat_3811 = {pyc_xor_3810, pyc_xor_3764, pyc_xor_3720, pyc_xor_3678, pyc_xor_3633, pyc_xor_3584, pyc_xor_3544, pyc_xor_3496, pyc_xor_3455, pyc_xor_3412, pyc_xor_3369, pyc_xor_3317, pyc_xor_3266, pyc_xor_3213, pyc_xor_3157, pyc_xor_3112, pyc_xor_3069, pyc_xor_3018, pyc_xor_2964, pyc_xor_2914, pyc_xor_2865, pyc_xor_2812, pyc_xor_2763, pyc_xor_2704, pyc_xor_2649, pyc_xor_2586, pyc_xor_2522, pyc_xor_2448, pyc_xor_2367, pyc_xor_2271};
 assign pyc_mux_3812 = (last ? pyc_concat_3811 : pyc_concat_2142);
-assign pyc_mux_3813 = (valid_in ? pyc_mux_3812 : pyc_comb_6);
-assign pyc_or_3814 = (start | valid_in);
-assign pyc_mux_3815 = (pyc_or_3814 ? pyc_mux_3813 : crc_q);
-assign pyc_comb_3816 = done_q;
-assign pyc_comb_3817 = pyc_mux_3812;
-assign pyc_comb_3818 = pyc_mux_3815;
-assign crc_q__next = pyc_comb_3818;
-assign word_q = pyc_reg_10;
-assign pyc_and_3819 = (valid_in & last);
-assign pyc_concat_3820 = {pyc_comb_8, pyc_comb_8, pyc_comb_3817};
-assign pyc_mux_3821 = (pyc_and_3819 ? pyc_concat_3820 : word_q);
-assign pyc_comb_3822 = pyc_and_3819;
-assign pyc_comb_3823 = pyc_mux_3821;
-assign done_q__next = pyc_comb_3822;
-assign word_q__next = pyc_comb_3823;
+assign pyc_not_3813 = (~last);
+assign pyc_and_3814 = (valid_in & pyc_not_3813);
+assign pyc_mux_3815 = (pyc_and_3814 ? pyc_mux_3812 : pyc_comb_6);
+assign pyc_or_3816 = (start | valid_in);
+assign pyc_mux_3817 = (pyc_or_3816 ? pyc_mux_3815 : crc);
+assign pyc_comb_3818 = done_2;
+assign pyc_comb_3819 = pyc_mux_3812;
+assign pyc_comb_3820 = pyc_mux_3817;
+assign crc__next = pyc_comb_3820;
+assign pyc_and_3821 = (valid_in & last);
+assign pyc_concat_3822 = {pyc_comb_8, pyc_comb_8, pyc_comb_3819};
+assign pyc_mux_3823 = (pyc_and_3821 ? pyc_concat_3822 : crc_word_2);
+assign pyc_comb_3824 = pyc_and_3821;
+assign pyc_comb_3825 = pyc_mux_3823;
+assign crc_word__next = pyc_comb_3825;
+assign done__next = pyc_comb_3824;
 
 // --- Sequential primitives
 pyc_reg #(.WIDTH(32)) pyc_reg_10_inst (
   .clk(core_clk),
   .rst(rst_pyc),
   .en(pyc_comb_5),
-  .d(word_q__next),
+  .d(crc_word__next),
   .init(pyc_comb_7),
   .q(pyc_reg_10)
 );
@@ -7691,7 +7695,7 @@ pyc_reg #(.WIDTH(1)) pyc_reg_11_inst (
   .clk(core_clk),
   .rst(rst_pyc),
   .en(pyc_comb_5),
-  .d(done_q__next),
+  .d(done__next),
   .init(pyc_comb_8),
   .q(pyc_reg_11)
 );
@@ -7699,13 +7703,13 @@ pyc_reg #(.WIDTH(30)) pyc_reg_9_inst (
   .clk(core_clk),
   .rst(rst_pyc),
   .en(pyc_comb_5),
-  .d(crc_q__next),
+  .d(crc__next),
   .init(pyc_comb_6),
   .q(pyc_reg_9)
 );
 
-assign crc_word = word_q;
-assign done = pyc_comb_3816;
+assign crc_word = crc_word_2;
+assign done = pyc_comb_3818;
 
 endmodule
 

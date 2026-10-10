@@ -524,6 +524,8 @@ def synthesize_one(
         (outdir / "generic_synth_stat.txt").read_text(errors="replace")
     )
     mapped = parse_stat((outdir / "mapped_stat.txt").read_text(errors="replace"))
+    if mapped["cells"] == 0 and mapped["area_um2"] is None:
+        mapped["area_um2"] = 0.0
     ltp = parse_ltp((outdir / "ltp.txt").read_text(errors="replace"))
     loops = parse_scc((outdir / "scc_synth.txt").read_text(errors="replace"))
     loops += parse_scc((outdir / "scc_proc.txt").read_text(errors="replace"))
@@ -605,8 +607,19 @@ def detect_anomalies(r: dict[str, Any], src_text: str, yosys_log: str) -> list[s
     cells = r.get("cells_mapped")
     area = r.get("area_um2")
     flops = r.get("flops") or 0
+    proc_cells = r.get("cells_proc_opt")
     sequential_src = bool(re.search(r"always\s+@\s*\(\s*posedge", src_text))
-    if cells == 0:
+    # Pure wiring (bit permute) maps to 0 std cells; that is not a sweep-away.
+    wiring_only = (
+        cells == 0
+        and (proc_cells in (0, None))
+        and not sequential_src
+    )
+    if wiring_only:
+        r.setdefault("notes", []).append(
+            "combinational wiring only (0 std cells after map; bit permute / assign)"
+        )
+    elif cells == 0:
         a.append("near_zero_cells_after_map (module optimized away)")
     elif sequential_src and flops == 0 and cells is not None and cells <= 2:
         a.append("near_zero_cells_after_map (possible unused/undriven sweep)")

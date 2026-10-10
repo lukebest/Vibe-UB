@@ -55,6 +55,7 @@ LAYER_SKIP = {
     "include",
     "__pycache__",
     "lib",
+    "pyc_lib",
     "tests",
     "out",
     "filelists",
@@ -569,12 +570,20 @@ def looks_like_stub_or_blackbox(path: Path) -> bool:
     return bool(STUB_ATTR_RE.search(text) or STUB_COMMENT_RE.search(text))
 
 
+def rtl_pyc_lib() -> Path | None:
+    """SPEC §2.2 single copy of pyc_* primitives. Include dir, not a leaf."""
+    path = REPO_ROOT / "rtl" / "pyc_lib"
+    return path.resolve() if path.is_dir() else None
+
+
 def iter_rtl_sources() -> list[Path]:
     rtl = REPO_ROOT / "rtl"
     if not rtl.is_dir():
         return []
     out: list[Path] = []
     for path in sorted(rtl.rglob("*")):
+        if "pyc_lib" in path.parts:
+            continue
         if path.is_file() and path.suffix.lower() in RTL_SOURCE_SUFFIXES:
             out.append(path)
     return out
@@ -1085,8 +1094,12 @@ def discover_rtl() -> dict[str, Any]:
     for d in incdirs:
         if d not in uniq_inc and d.is_dir():
             uniq_inc.append(d)
-    # Always add rtl/ and rtl/common when present
-    for extra in (REPO_ROOT / "rtl", REPO_ROOT / "rtl" / "common"):
+    # Always add rtl/, rtl/common, and rtl/pyc_lib (SPEC §2.2 `include).
+    for extra in (
+        REPO_ROOT / "rtl",
+        REPO_ROOT / "rtl" / "common",
+        REPO_ROOT / "rtl" / "pyc_lib",
+    ):
         if extra.is_dir() and extra.resolve() not in uniq_inc:
             uniq_inc.append(extra.resolve())
 
@@ -1615,17 +1628,30 @@ PORT_CHUNK_RE = re.compile(
 PORT_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
-def parse_ports(path: Path) -> list[tuple[str, str]]:
-    """Return (direction, name) in declaration order."""
+def parse_port_decls(path: Path) -> list[tuple[str, str, str]]:
+    """Return (direction, name, packed) in declaration order.
+
+    packed is '' or '[15:0]'. Needed so eqy wrappers keep bus widths
+    (Yosys equiv_make cannot match a 16-bit gold port to a 1-bit gate port).
+    """
     text = strip_verilog_comments(path.read_text(encoding="utf-8", errors="replace"))
     skip = {"input", "output", "inout", "wire", "reg", "logic", "signed"}
-    ports: list[tuple[str, str]] = []
+    ports: list[tuple[str, str, str]] = []
     for kind, blob in PORT_CHUNK_RE.findall(text):
+        packed = ""
+        m = re.search(r"\[([^\]]+)\]", blob)
+        if m:
+            packed = f"[{m.group(1)}]"
         for name in PORT_IDENT_RE.findall(blob):
             if name.lower() in skip:
                 continue
-            ports.append((kind.lower(), name))
+            ports.append((kind.lower(), name, packed))
     return ports
+
+
+def parse_ports(path: Path) -> list[tuple[str, str]]:
+    """Return (direction, name) in declaration order."""
+    return [(kind, name) for kind, name, _packed in parse_port_decls(path)]
 
 
 def collect_blackbox_findings(check: str = "lint") -> list[Finding]:

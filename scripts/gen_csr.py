@@ -215,6 +215,7 @@ def _py_repr_table(
 # and builds the CSR with the pyc4.0 Circuit API. Verilog is pycc, not strings.
 _ENGINE_SRC = r'''
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -613,18 +614,37 @@ def _compile_design(test_hooks: int, variant: str | None = None):
     return compile(fn, name=f"ub_csr_{tag}")
 
 
-def emit_verilog(test_hooks: bool, variant: str | None = None) -> str:
-    """Lower one TEST_HOOKS × variants: tag netlist: compile() → pycc --emit=verilog."""
-    th = 1 if test_hooks else 0
-    tag = variant or DEFAULT_VARIANT
-    design = _compile_design(th, tag)
-    body = _pycc_verilog(design.emit_mlir())
-    text = _verilog_banner(th, tag) + body
+def product_verilog_from_hooks(hooks_text: str) -> str:
+    """PRODUCT is HOOKS with tb_test_mode tied off (SPEC §11). Same pycc body.
+
+    Compiling TEST_HOOKS=0 separately lets pycc constant-fold the TEST muxes
+    into a different netlist that Yosys equiv_* cannot match. Projecting
+    HOOKS → PRODUCT keeps one Circuit API design and makes PRODUCT ≡ HOOKS
+    @ tb_test_mode=0 a structural identity.
+    """
+    if not re.search(r"\binput\s+tb_test_mode\b", hooks_text):
+        raise RuntimeError("HOOKS netlist missing input tb_test_mode")
+    text = re.sub(r"^[ \t]*input[ \t]+tb_test_mode,?[ \t]*\n", "", hooks_text, count=1, flags=re.M)
+    text = text.replace("TEST_HOOKS=1", "TEST_HOOKS=0 (HOOKS with test port tied off)", 1)
+    text = re.sub(r"\btb_test_mode\b", "1'b0", text)
+    if re.search(r"\binput\s+tb_test_mode\b", text) or "tb_test_mode" in text:
+        raise RuntimeError("PRODUCT netlist must not contain tb_test_mode")
     if "`ifdef" in text:
         raise RuntimeError("generated Verilog must not use ifdef TEST_HOOKS")
-    if not test_hooks and "tb_test_mode" in text:
-        raise RuntimeError("PRODUCT netlist must not contain tb_test_mode port")
     return text
+
+
+def emit_verilog(test_hooks: bool, variant: str | None = None) -> str:
+    """Lower one variants: tag netlist: compile() HOOKS → pycc; PRODUCT is a projection."""
+    tag = variant or DEFAULT_VARIANT
+    design = _compile_design(1, tag)
+    body = _pycc_verilog(design.emit_mlir())
+    hooks = _verilog_banner(1, tag) + body
+    if "`ifdef" in hooks:
+        raise RuntimeError("generated Verilog must not use ifdef TEST_HOOKS")
+    if test_hooks:
+        return hooks
+    return product_verilog_from_hooks(hooks)
 
 
 def elaborate(test_hooks: int = 0, variant: str | None = None) -> dict:

@@ -16,6 +16,9 @@
 - `docs/DECISIONS.md` D17：团队分工与流程（Luke Liu via Firstmate，2026-10-10 16:48 Asia/Shanghai）。
 - `docs/DECISIONS.md` D18：全层级范围，作为完整 UB 控制器（Luke Liu via Firstmate，2026-10-10 17:04 Asia/Shanghai）；D18 取代 D2 的分阶段范围。
 - `docs/DECISIONS.md` D19：三线并行与新增角色（Luke Liu via Firstmate，2026-10-10 17:22 Asia/Shanghai）。
+- `docs/arch/MODULE_INVENTORY.md`：77 模块（S12 / M34 / L31；M1 覆盖 20）。列含 **线 A/B/C**（D19）；可选标延后；优先通路标 ★。其余列：钩子、数据通路、时钟复位+频率、存储深×宽（SRAM / 行为 stub 时序）、软件可见面。
+- `docs/arch/LAYER_CONTRACTS.md`：§1–§3（DLL↔NW / NW↔TP / TP↔TA）先写最详，卡线 A/B；§4 TA↔FUN；§5–§7 线 C。DLL↔NW 锁 160 b、1 flit/拍。
+- `docs/arch/TRADEOFFS.md`：PM 四项标 **已定 D19**（3 线 A/B/C；LS 优先通路；必做先；附录 M10 后）。保留影响面/S/M/L；Sky130 代理至 PR #9 工艺。截止 Tue 2026-10-13。不改 DECISIONS/TEAM/PROCESS。
 
 ### Changed
 
@@ -29,3 +32,6 @@
 - `LMSM_CTRL.START` 更名为 `CTRL.LMSM_START`（REGMAP `0x0000` bit1）。关闭 `STATUS.RETRY_REQ_ST` / `RETRY_ACK_ST` 与 `PARAM_PHY.NUM_LANES_{TX,RX}` 编码（二进制 1/2/4/8）；保留值 RTL 不产出、TB assert。
 - `docs/TEAM.md`、`docs/PROCESS.md`：按 D18 写全层级范围；PROCESS §6 为「全层级推进」。
 - `docs/TEAM.md`、`docs/PROCESS.md`：按 D19 写入三条轨道、轨道所有权，以及「设计-B」/「验证-B」、「设计-C」/「验证-C」新角色。
+- `docs/SPEC.md` §1 / `docs/SPEC_INDEX.md` Phase 列：D18 全控制器；D19 线 A/B/C + 优先通路；§1.4 按线写里程碑草案。不改 TEAM/PROCESS/DECISIONS；不改 `regmap.yaml`。不展开 PR #9 的 §6/§13 针脚。
+- `docs/arch/MODULE_INVENTORY.md` 存储列：行为 stub 时序（Xia 提案，非规范）默认读 1 拍寄存、1R1W、同址 read-old；换 SRAM 宏不改口/测试。第 9 章 UMMU 大表钩子列：每表 `tb_*` backdoor 预载（we/addr/wdata）+ 回读（re/rdata），仅 HOOKS；宽随表项格式（未关前 **未知**）；待与表格式一并写入 SPEC §10。§11 计数与行对齐：PHY S1/M4/L4，合计 S12/M34/L31。
+- `docs/arch/MODULE_INVENTORY.md` 存储列挂到统一原语 `ub_cmn_mem_1r1w`：线 B RTP 重传/重排、TA 未决与线 C UMMU/decoder **须**例化；其它 SRAM/stub **应当**例化。口形/时序见该原语（CODING_STYLE 存储节，另 PR）。不改 TEAM/PROCESS/DECISIONS。

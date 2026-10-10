@@ -4,7 +4,7 @@
 | --- | --- |
 | 分册 | `docs/rules/impl_quick_synth.md` |
 | 所有者 | 后端实现 |
-| 版本 | v0.4 (2026-10-10) |
+| 版本 | v0.5 (2026-10-10) |
 | 类别 | 合入前快速综合的面积 / 时序反馈（proxy，非签核） |
 | 配套 | [backend.md](backend.md)、[TEAM.md](../TEAM.md)、[PROCESS.md](../PROCESS.md)、[SPEC.md](../SPEC.md) |
 | 脚本 | `scripts/impl/quick_synth.sh` |
@@ -55,7 +55,10 @@
    - 单时钟，SDC 名 **`core_clk`**。模块口若叫 `clk` 等，映射到该名。
    - 周期取 [SPEC.md](../SPEC.md) 已写的目标频率（M1：`F_CORE` ≈ 80.57 MHz，§4.1 / §9，`2.578125e9/32` → **12.412121212 ns**）。SPEC **未**写频率时用 **500 MHz（2.0 ns）** 并标明 `placeholder`。
    - 输入 / 输出 0 delay、ideal；不加 wire-load（只用 liberty 默认）。
-   - 最差建立路径：**max comb logic depth（cell levels）**、**data arrival (ns)**、**该周期下 slack**。
+   - 最差建立路径拆两列深度：
+     - **`logic depth`**：最差建立路径上的组合级数，**不计** `sky130_fd_sc_hd__buf_*` / `clkbuf_*` / 插入的 `qs_fbuf_*`。与 `--no-buffer` 的深度、门禁 COMBO_DEPTH、以及日后 pycc `--logic-depth` 对照列同一口径。
+     - **`depth incl. buf`**：同一路径上含缓冲的级数（当前 STA 全路径 cell 数，扣 flop）。
+     - **slack / area / cells** 仍来自**缓冲后**网表。QoR >10% 的 depth 用 `logic depth`（不含 buf）。
    - 纯组合叶子：虚时钟约束 I/O，arrival 为组合延迟。
    - 黑盒 `ub_cmn_mem_1r1w`：STA stub 把 **rdata 建成 1 拍 registered read**（每 bit 一只 `sky130_fd_sc_hd__dfxtp_1`，D 接 0），下游 compare / select 从该 launch 计时。存储本身不建模。
 4. **相对 baseline 的趋势**
@@ -63,7 +66,7 @@
    - 同名叶子对同名 + 同 variant（HOOKS 优先对 HOOKS，否则 PRODUCT）。
    - 迁移后的 tag 可用 `--baseline-map NEW=OLD[:VARIANT]`。无显式 map 时启发式：`_x4` → 旧模块 `PRODUCT`（历史上 `NUM_LANES=4`），`_x8` → `PRODUCT_NUM_LANES=8`，BCRC 等无 tag 的同名对 PRODUCT。例：`ub_pcs_lane_dist_x4` vs 报告 `2026-10-10_PR5_6875f611` 的 `ub_pcs_lane_dist` PRODUCT。
    - 新模块：delta = `new`。
-   - **QoR >10%**：cells / area / max comb logic depth / slack 任一相对 baseline 的 `|Δ| / |baseline| > 10%` 则标旗（0 vs 0 不标；baseline 为 0 且新值非 0 则标）。只标旗，不门禁。
+   - **QoR >10%**：cells / area / **`logic depth`（不含 buf）** / slack 任一相对 baseline 的 `|Δ| / |baseline| > 10%` 则标旗（0 vs 0 不标；baseline 为 0 且新值非 0 则标）。只标旗，不门禁。日后 pycc `--logic-depth` 对照同一列。
 5. **SRAM 估算列（estimate，不是宏）**
    - 共享存储原语：`ub_cmn_mem_1r1w`（pycc `pycircuit/cmn/`，网表 `rtl/cmn/`，变体按 §2.2 命名）。若存在 `scripts/gate/blackbox.yml`，其中列出的模块同样参加判断。
    - `depth × width >` **`--sram-bit-threshold`（默认 4096，环境变量 `QS_SRAM_BIT_THRESHOLD`）**：综合作黑盒，面积走 **SRAM est** 列，不进 stdcell 面积。
@@ -110,7 +113,7 @@ OPEN §13 参数已按 §2.2 做成 `_placeholder` 固定网表时：综合进 p
 | --- | --- | --- | --- |
 | IMP-QS-001 | 合入前快速综合用 Sky130 hd tt_025C_1v80 作 proxy，直到 Luke 在 PR #9 §13 定工艺；数字是趋势，不是签核 | 本分册；SPEC §8 / §9 工艺未知 | 2026-10-10 |
 | IMP-QS-002 | 本报告 informational；合入 pass/fail 归验证门禁，快速综合不单独 block merge | PROCESS §2；TEAM 工具守门 | 2026-10-10 |
-| IMP-QS-003 | 不报顶层 WNS/TNS；只报叶子最差建立路径（max comb logic depth、arrival、slack @ SPEC `F_CORE`） | 本分册 | 2026-10-10 |
+| IMP-QS-003 | 不报顶层 WNS/TNS；只报叶子最差建立路径（`logic depth` 不含 buf、`depth incl. buf`、arrival、slack @ SPEC `F_CORE`）。日后 pycc `--logic-depth` 对 `logic depth` | 本分册 | 2026-10-10 |
 | IMP-QS-004 | 默认 PRODUCT 网表；PR 若带 HOOKS 变体则另报，不把 HOOKS 面积当产品面积 | SPEC §11 | 2026-10-10 |
 | IMP-QS-005 | SPEC §2.2 固定网表：每文件一个 top，无必经 `chparam`。`--chparam` 仅为可选覆盖，不得改 RTL / pycircuit 填默认 | SPEC §2.2 / §13 | 2026-10-10 |
 | IMP-QS-006 | `_placeholder` 变体单独列表，不计入 PRODUCT 面积合计 | SPEC §2.2 | 2026-10-10 |
@@ -118,7 +121,7 @@ OPEN §13 参数已按 §2.2 做成 `_placeholder` 固定网表时：综合进 p
 | IMP-QS-008 | `ub_cmn_mem_1r1w`（及 `scripts/gate/blackbox.yml` 中的模块）depth×width 超过可配阈值（默认 4096 bit）作黑盒，SRAM est 列用标明的 bit 面积公式；小实例按 flop 综合；STA 按 1 拍 registered read。阈值与公式在工艺确定后重看 | 本分册；PR #9 §13 | 2026-10-10 |
 | IMP-QS-009 | Yosys 默认 `-I rtl/pyc_lib`（TOOLCHAIN.lock 钉住的 pyCircuit 原语）。目录未到时回退 `rtl/common` 并 WARN。`--incdir` / `QS_INCDIRS` 为额外路径。`pyc_*` 不作报告 top | 本分册；#21 / #5 | 2026-10-10 |
 | IMP-QS-010 | `ub_dll_crc32` / `ub_dll_crc_check` / `ub_controller_tx` / `ub_controller_rx` 只报「待删除 / to be deleted」，不进合计、不对 baseline | 本分册 | 2026-10-10 |
-| IMP-QS-011 | abc 映射后默认对高扇出数据网插确定性 `buf_4`/`buf_8` 树（max fanout 16）。`--no-buffer` 可关。每叶子报告缓冲后 max fanout。时钟 / 复位网不插。这是 proxy，用来避免无 wire-load 时单 cell 灌数千 load 的悲观 WNS | 本分册 | 2026-10-10 |
+| IMP-QS-011 | abc 映射后默认对高扇出数据网插确定性 `buf_4`/`buf_8` 树（max fanout 16）。`--no-buffer` 可关。每叶子报告缓冲后 max fanout。时钟 / 复位网不插。`logic depth` 不计这些 buf，须与 `--no-buffer` 深度一致；slack/area 仍用缓冲后网表。这是 proxy，用来避免无 wire-load 时单 cell 灌数千 load 的悲观 WNS | 本分册 | 2026-10-10 |
 
 ---
 

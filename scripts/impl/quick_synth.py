@@ -43,6 +43,7 @@ PLACEHOLDER_PERIOD_NS = 2.0  # 500 MHz, only if SPEC states no frequency
 # fixed netlist named <leaf>_<tag>. Placeholder tags are lint/TB only.
 PLACEHOLDER_TAG = "_placeholder"
 QOR_DELTA_THRESHOLD = 0.10  # flag |Δ| / |baseline| > 10%
+# logic_depth is buffer-excluded (COMBO_DEPTH / future pycc --logic-depth).
 QOR_COMPARE_FIELDS = ("cells_mapped", "area_um2", "logic_depth", "slack_ns")
 QOR_FIELD_SHORT = {
     "cells_mapped": "cells",
@@ -463,6 +464,17 @@ def parse_select_list(text: str) -> list[str]:
 _SEQ_CELL_RE = re.compile(
     r"sky130_fd_sc_hd__(?:edf|sdf|df)[a-z0-9_]+", re.IGNORECASE
 )
+# Fanout / clock buffers: not COMBO_DEPTH. Matches buf_1..16, clkbuf_*, qs_fbuf_*.
+_BUF_CELL_RE = re.compile(
+    r"sky130_fd_sc_hd__(?:clk)?buf[0-9]*_", re.IGNORECASE
+)
+
+
+def is_fanout_buf_cell(cell: str, inst: str = "") -> bool:
+    """True for liberty buf/clkbuf and inserted qs_fbuf_* instances."""
+    if inst.startswith("qs_fbuf_"):
+        return True
+    return bool(_BUF_CELL_RE.search(cell or ""))
 
 
 def _parse_sta_block(block: str) -> dict[str, Any] | None:
@@ -478,6 +490,7 @@ def _parse_sta_block(block: str) -> dict[str, Any] | None:
     slack = float(slacks[0][0]) if slacks else None
     data = block.split("data arrival time")[0]
     combo: list[str] = []
+    combo_logic: list[str] = []
     for line in data.splitlines():
         m = re.search(r"\((sky130_fd_sc_hd__[A-Za-z0-9_]+)\)", line)
         if not m:
@@ -489,12 +502,16 @@ def _parse_sta_block(block: str) -> dict[str, Any] | None:
         key = pin.group(1) if pin else cell
         if key not in combo:
             combo.append(key)
+            if not is_fanout_buf_cell(cell, key):
+                combo_logic.append(key)
     return {
         "group": group,
         "arrival_ns": arrival,
         "slack_ns": slack,
-        "logic_depth": len(combo),
+        "logic_depth": len(combo_logic),
+        "logic_depth_incl_buf": len(combo),
         "path_cells": combo,
+        "path_cells_logic": combo_logic,
     }
 
 
@@ -519,7 +536,9 @@ def parse_sta(text: str) -> dict[str, Any]:
             "arrival_ns": None,
             "slack_ns": None,
             "logic_depth": None,
+            "logic_depth_incl_buf": None,
             "path_cells": [],
+            "path_cells_logic": [],
             "raw": text,
         }
     return {**chosen, "raw": text}
@@ -650,9 +669,10 @@ def parse_baseline_markdown(text: str) -> list[dict[str, Any]]:
                 ),
                 "flops": _parse_num(col("flops") or (cols[4] if len(cols) > 4 else "")),
                 "logic_depth": _parse_num(
-                    col("max comb logic depth", "logic depth")
+                    col("logic depth", "max comb logic depth")
                     or (cols[5] if len(cols) > 5 else "")
                 ),
+                "logic_depth_incl_buf": _parse_num(col("depth incl. buf")),
                 "arrival_ns": _parse_num(
                     col("arrival ns") or (cols[6] if len(cols) > 6 else "")
                 ),
@@ -1386,7 +1406,12 @@ def synthesize_one(
     result["sta_rc"] = s.returncode
     setup_rpt = outdir / "sta_worst_setup.rpt"
     unc_rpt = outdir / "sta_unconstrained.rpt"
-    sta_parsed = {"arrival_ns": None, "slack_ns": None, "logic_depth": None}
+    sta_parsed = {
+        "arrival_ns": None,
+        "slack_ns": None,
+        "logic_depth": None,
+        "logic_depth_incl_buf": None,
+    }
     if setup_rpt.is_file():
         sta_parsed = parse_sta(setup_rpt.read_text(errors="replace"))
     if sta_parsed.get("arrival_ns") is None and unc_rpt.is_file():
@@ -1401,6 +1426,12 @@ def synthesize_one(
     result["arrival_ns"] = sta_parsed.get("arrival_ns")
     result["slack_ns"] = sta_parsed.get("slack_ns")
     result["logic_depth"] = sta_parsed.get("logic_depth")
+    result["logic_depth_incl_buf"] = sta_parsed.get("logic_depth_incl_buf")
+    if (
+        result.get("logic_depth_incl_buf") is None
+        and result.get("logic_depth") is not None
+    ):
+        result["logic_depth_incl_buf"] = result["logic_depth"]
     if clk is None:
         notes.append("no clock port; virtual core_clk used for I/O delay")
     elif clk != "core_clk":
@@ -1467,11 +1498,11 @@ def fmt_num(v: Any, digits: int = 3) -> str:
 def write_markdown_table(rows: list[dict[str, Any]]) -> str:
     hdr = (
         "| module | variant | cells (mapped) | area um^2 | SRAM est um^2 | flops | "
-        "max fanout | max comb logic depth | arrival ns | slack @ period | "
+        "max fanout | logic depth | depth incl. buf | arrival ns | slack @ period | "
         "vs baseline | QoR >10% | notes |"
     )
     sep = (
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |"
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | --- |"
     )
     lines = [hdr, sep]
     for r in rows:
@@ -1486,7 +1517,7 @@ def write_markdown_table(rows: list[dict[str, Any]]) -> str:
         delta = r.get("delta_vs_baseline") or r.get("delta_vs_main") or "new"
         lines.append(
             "| {mod} | {var} | {cells} | {area} | {sram} | {flops} | {fo} | "
-            "{depth} | {arr} | {sl} | {delta} | {flag} | {notes} |".format(
+            "{depth} | {dbuf} | {arr} | {sl} | {delta} | {flag} | {notes} |".format(
                 mod=r.get("top", ""),
                 var=r.get("variant", ""),
                 cells=fmt_num(r.get("cells_mapped"), 0),
@@ -1495,6 +1526,7 @@ def write_markdown_table(rows: list[dict[str, Any]]) -> str:
                 flops=fmt_num(r.get("flops"), 0),
                 fo=fmt_num(r.get("max_fanout"), 0),
                 depth=fmt_num(r.get("logic_depth"), 0),
+                dbuf=fmt_num(r.get("logic_depth_incl_buf"), 0),
                 arr=fmt_num(r.get("arrival_ns"), 3),
                 sl=fmt_num(r.get("slack_ns"), 3),
                 delta=str(delta).replace("|", "/"),
@@ -1748,6 +1780,39 @@ def self_check() -> int:
                 cp.returncode == 0,
                 f"yosys include read failed:\n{(cp.stdout or '')[-400:]}",
             )
+
+    expect(is_fanout_buf_cell("sky130_fd_sc_hd__buf_8", "_x"), "buf_8 is buf")
+    expect(is_fanout_buf_cell("sky130_fd_sc_hd__clkbuf_4", "_x"), "clkbuf is buf")
+    expect(
+        is_fanout_buf_cell("sky130_fd_sc_hd__inv_2", "qs_fbuf_hot_L0_0"),
+        "qs_fbuf instance is buf",
+    )
+    expect(
+        not is_fanout_buf_cell("sky130_fd_sc_hd__a2111oi_0", "_05266_"),
+        "logic cell is not buf",
+    )
+    sta_fix = """
+Startpoint: ff0 (rising edge-triggered flip-flop clocked by core_clk)
+Endpoint: ff1 (rising edge-triggered flip-flop clocked by core_clk)
+Path Group: core_clk
+Path Type: max
+                   0.0000    0.0000    0.0000 ^ ff0/CLK (sky130_fd_sc_hd__dfxtp_1)
+                   0.1000    0.2000    0.2000 ^ ff0/Q (sky130_fd_sc_hd__dfxtp_1)
+                   0.0100    0.0500    0.2500 ^ qs_fbuf_n_L0_0/A (sky130_fd_sc_hd__buf_8)
+                   0.0500    0.1500    0.4000 ^ qs_fbuf_n_L0_0/X (sky130_fd_sc_hd__buf_8)
+                   0.0100    0.1000    0.5000 ^ g0/A (sky130_fd_sc_hd__nor2_1)
+                   0.0500    0.2000    0.7000 ^ g0/Y (sky130_fd_sc_hd__nor2_1)
+                   0.0100    0.0500    0.7500 ^ qs_fbuf_n_L0_1/A (sky130_fd_sc_hd__buf_4)
+                   0.0500    0.1000    0.8500 ^ qs_fbuf_n_L0_1/X (sky130_fd_sc_hd__buf_4)
+                   0.0100    0.1000    0.9500 ^ g1/A (sky130_fd_sc_hd__nand2_1)
+                   0.0500    0.1500    1.1000 ^ g1/Y (sky130_fd_sc_hd__nand2_1)
+                   0.0100    0.0500    1.1500 v ff1/D (sky130_fd_sc_hd__dfxtp_1)
+                                       1.1500   data arrival time
+                                       10.0000   slack (MET)
+"""
+    sta_p = parse_sta(sta_fix)
+    expect(sta_p.get("logic_depth") == 2, f"logic depth excl buf {sta_p}")
+    expect(sta_p.get("logic_depth_incl_buf") == 4, f"depth incl buf {sta_p}")
 
     expect(choose_buf(1) == "sky130_fd_sc_hd__buf_4", "buf_4 for small group")
     expect(choose_buf(4) == "sky130_fd_sc_hd__buf_4", "buf_4 at 4")

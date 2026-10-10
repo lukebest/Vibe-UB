@@ -38,7 +38,7 @@ os.environ["PATH"] = f"{_root / 'bin'}:{os.environ.get('PATH', '')}"
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from dll.bcrc_matrix import next_crc as matrix_next_crc
+from dll.lib import next_crc as matrix_next_crc
 from emit import emit_all
 from lib import params as P
 from lib.elab_open import ELAB_LFSR_INIT, ELAB_SCR_TAPS, elab_seed_map
@@ -172,8 +172,8 @@ MIGRATED_PY = (
     HERE / "pcs/ub_pcs_lane_dedist.py",
     HERE / "dll/ub_dll_bcrc.py",
     HERE / "dll/ub_dll_bcrc_check.py",
-    HERE / "dll/bcrc_hw.py",
-    HERE / "dll/bcrc_matrix.py",
+    HERE / "dll/lib/bcrc_hw.py",
+    HERE / "dll/lib/bcrc_matrix.py",
 )
 
 FORBIDDEN_WORDS = re.compile(r"(?<!@)\b(module|endmodule|always)\b")

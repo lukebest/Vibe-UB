@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pycircuit import Circuit, mux, u
 
-from dll.bcrc_matrix import (
+from dll.lib.bcrc_matrix import (
     BCRC_BYTES,
     CRC_W,
     FLIT_W,

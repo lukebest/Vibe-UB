@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from pycircuit import Circuit, module, mux, u
 
-from dll.bcrc_hw import drive_gen, next_crc_hw
-from dll.bcrc_matrix import CRC_W, FLIT_W, INIT, WORD_W
+from dll.lib import drive_gen, next_crc_hw
+from dll.lib import CRC_W, FLIT_W, INIT, WORD_W
 
 LEAF = "ub_dll_bcrc"
 VARIANTS: dict[str, dict] = {

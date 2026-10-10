@@ -30,8 +30,7 @@ os.environ["PATH"] = (
 
 from pycircuit import Circuit, module  # noqa: E402
 
-from dll.bcrc_hw import next_crc_hw  # noqa: E402
-from dll.bcrc_matrix import CRC_W, FLIT_W  # noqa: E402
+from dll.lib import CRC_W, FLIT_W, next_crc_hw  # noqa: E402
 from lib.pycc_emit import compile_to_verilog  # noqa: E402
 
 

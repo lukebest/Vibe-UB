@@ -46,6 +46,7 @@ def _build_and_test(
         / f"{variant.netlist}_{variant.module}_a{int(assert_no_uninit_read)}_c{int(tb_check)}"
     )
     build_dir.mkdir(parents=True, exist_ok=True)
+    _clear_stale_results(build_dir)
     wrapper = emit_wrapper(
         build_dir / "ub_cmn_mem_1r1w_tb.sv",
         dut_module=variant.module,
@@ -124,6 +125,14 @@ def _require_formal_bind_ports() -> None:
         )
     ports = parse_module_ports_file(FORMAL_PROPS, "ub_cmn_mem_1r1w_if_props")
     check_leaf_ports(ports, module="ub_cmn_mem_1r1w_if_props")
+
+
+def _clear_stale_results(build_dir: Path) -> None:
+    for path in build_dir.iterdir():
+        if path.is_file() and (
+            path.name == "results.xml" or path.name.endswith(".None")
+        ):
+            path.unlink()
 
 
 def _find_cocotb_results(build_dir: Path) -> Path:

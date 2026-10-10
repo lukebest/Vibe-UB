@@ -4,7 +4,7 @@
 | --- | --- |
 | 分册 | `docs/rules/verif_gate.md` |
 | 所有者 | 工具守门（验证负责人兼任，见 [TEAM.md](../TEAM.md) §4） |
-| 版本 | v0.2 (2026-10-10) |
+| 版本 | v0.3 (2026-10-10) |
 | 类别 | 每次提交的 lint / CDC / formal / 综合 / regmap / TB / emit / 端口 / 来源 / 等价 / spec-leak |
 | 配套 | [verification.md](verification.md)、[PROCESS.md](../PROCESS.md)、[CODING_STYLE.md](../CODING_STYLE.md) §7、[DECISIONS.md](../DECISIONS.md) D6 / D7 / D10 / D17 |
 
@@ -273,6 +273,23 @@ A 线 lane dist 漏检：只跑分发→收集自环，映射方向反了也能�
 
 PR 审查清单见 §11。本条不写自动 finding，避免误杀尚未补齐的 D10 台。
 
+### 8.0.1 记分板比对次数（审查项，不自动拦截）
+
+记分板必须统计**实际执行的比对次数**（每次 `compare(expected, actual)` 计 1，被跳过的激励不计）。测试结束时断言：
+
+| 要求 | 说明 |
+| --- | --- |
+| 比对次数 `> 0` | 防止激励全部跳过（空测）仍显示通过 |
+| 比对次数等于该用例声明的预期次数 | 防止部分跳过 / 少比仍显示通过 |
+
+`tb/vibe_uvm/scoreboard.py` 的 `ScoreboardBase` 已累计 `n_compare` / `n_mismatch`；`check_phase` 目前只拦 mismatch，**不**拦 `n_compare == 0` 或与预期不符。审查时核对各用例是否声明预期次数并断言这两条。
+
+| ID | 规则 | 来源 | 日期 | 门禁 |
+| --- | --- | --- | --- | --- |
+| GATE-TB-SB-001 | 记分板统计实际比对次数；结束时断言次数 `> 0` 且等于预期 | 空测 / 全跳过仍 PASS | 2026-10-10 | **审查清单，不自动拦截** |
+
+本条不写自动 finding，不改 `tb/` 基类行为。
+
 ---
 
 ## 8.1 pycircuit-provenance
@@ -321,6 +338,7 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 | VER-GATE-008 | 成对模块 TB 两侧独立 vs `model/` + 定向用例；审查项，不自动拦截 | A 线 lane dist | 2026-10-10 |
 | VER-GATE-009 | SPEC §2.2 变体逐个跑；`_placeholder` 只 lint/TB；PRODUCT 不得例化；源码须有 `PLACEHOLDER_SOURCE` | SPEC §2.2 | 2026-10-10 |
 | VER-GATE-010 | spec-leak：私有规范标记 / `fmt.py` / PDF / 违规 PNG/JPG 不得进公开仓库 | 隔离 | 2026-10-10 |
+| VER-GATE-011 | 记分板统计实际比对次数；结束时断言次数 `> 0` 且等于预期；审查项，不自动拦截 | 空测 / 全跳过 | 2026-10-10 |
 
 ---
 
@@ -337,3 +355,13 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 - [ ] 自环 / loopback 若存在，只作补充，不是唯一检查
 
 A 线 lane dist 反例：只做分发再收集自环时，条带方向反了仍能过。
+
+### 记分板比对次数（GATE-TB-SB-001）
+
+适用于所有接入记分板的用例（unit / subsys / top）：
+
+- [ ] 记分板累计实际比对次数（每次 compare 计 1；跳过的激励不计）
+- [ ] 测试结束断言比对次数 `> 0`（空测不得 PASS）
+- [ ] 测试结束断言比对次数等于该用例声明的预期次数（少比不得 PASS）
+
+反例：激励全被 `if` / `skip` 掉，记分板 0 mismatch、0 compare，仿真仍显示通过。

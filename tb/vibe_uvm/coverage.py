@@ -33,6 +33,16 @@ def export_functional(path: str | Path) -> None:
         }
         detailed = getattr(node, "detailed_coverage", None)
         if detailed:
-            entry["detailed"] = {str(k): v for k, v in detailed.items()}
+            entry["detailed"] = _jsonable(detailed)
         payload[name] = entry
     dest.write_text(json.dumps(payload, indent=2) + "\n")
+
+
+def _jsonable(obj):
+    if isinstance(obj, dict):
+        return {str(k): _jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_jsonable(v) for v in obj]
+    if isinstance(obj, (int, float, str, bool)) or obj is None:
+        return obj
+    return str(obj)

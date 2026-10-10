@@ -46,6 +46,7 @@ class BcrcCheckLeafTest(LeafUvmTest):
             if last:
                 self.dut.crc_recv.value = recv
             await RisingEdge(self.dut.core_clk)
+            await wait_ps(1)
         self.dut.valid_in.value = 0
         self.dut.last.value = 0
         return {
@@ -199,6 +200,7 @@ class BcrcCheckLeafTest(LeafUvmTest):
             await wait_ps(20)
             pre_done = as_int(self.dut.done, "done")
             await RisingEdge(self.dut.core_clk)
+            await wait_ps(1)
             if pre_done != 0:
                 raise AssertionError("done on the last input beat (0-cycle, expected 1)")
             if as_int(self.dut.done, "done") != 1:

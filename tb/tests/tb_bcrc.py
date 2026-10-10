@@ -41,6 +41,7 @@ class BcrcLeafTest(LeafUvmTest):
             self.dut.data_in.value = flit
             self.dut.last.value = int(i == len(flits) - 1)
             await RisingEdge(self.dut.core_clk)
+            await wait_ps(1)
         self.dut.valid_in.value = 0
         self.dut.last.value = 0
         done = as_int(self.dut.done, "done")

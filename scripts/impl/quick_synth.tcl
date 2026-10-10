@@ -70,6 +70,10 @@ yosys "tee -o [file join $outdir scc_synth.txt] scc"
 yosys "dfflibmap -liberty $liberty"
 yosys "abc -liberty $liberty"
 yosys {opt_clean -purge}
+# Pre-buffer snapshot. The Python driver inserts buf_4/buf_8 trees
+# (or skips when --no-buffer) then re-emits mapped.v / mapped_stat.txt.
+yosys "write_json [file join $outdir mapped_prebuf.json]"
+yosys "tee -o [file join $outdir mapped_prebuf_stat.txt] stat -liberty $liberty"
 yosys "tee -o [file join $outdir mapped_stat.txt] stat -liberty $liberty"
 yosys "tee -o [file join $outdir latch_mapped.txt] select -list t:*dlatch* t:*DLATCH* t:sky130_fd_sc_hd__dl*"
 

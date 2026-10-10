@@ -7,6 +7,10 @@ This registry currently holds ``ub_cmn_mem_1r1w`` only. SPEC §10 lists no
 HOOKS (``rtl/cmn/hooks/<leaf>_<tag>.v``, TEST_HOOKS=1) share the same
 module name and port list.
 
+pycc runtime primitives (``pyc_reg.v``) are copied unmodified into
+``rtl/pyc_lib/`` only — never into per-layer dirs. Netlists
+`` `include "pyc_reg.v" ``; consumers pass ``-I rtl/pyc_lib``.
+
 Do not put the repo root on PYTHONPATH (the toolchain package is also
 named ``pycircuit``). ``scripts/emit_rtl.py`` inserts this directory.
 """
@@ -23,6 +27,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 RTL = REPO / "rtl"
+# pycc runtime primitives live only here (SPEC §2.2). One copy repo-wide.
+PYC_LIB = RTL / "pyc_lib"
 
 # LEAVES table — one row per source module. Variants follow SPEC §2.2
 # ``<leaf>_<tag>``. hooks=True writes rtl/<layer>/hooks/ via TEST_HOOKS=1.
@@ -144,14 +150,32 @@ def _header(leaf: str, label: str, depth: int, width: int, wmask_w: int) -> str:
     )
 
 
-def _write_pyc_reg(out_root: Path, pyc_reg: Path) -> Path:
-    dest = out_root / "cmn" / "pyc_reg.v"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    text = pyc_reg.read_text(encoding="utf-8")
-    if not text.endswith("\n"):
-        text += "\n"
-    dest.write_text(text, encoding="utf-8")
-    return dest
+def _pyc_lib_dir(out_root: Path) -> Path:
+    """``rtl/pyc_lib`` when emitting into the repo; ``<out>/pyc_lib`` otherwise."""
+    if out_root.resolve() == RTL.resolve():
+        return PYC_LIB
+    return out_root / "pyc_lib"
+
+
+def _write_pyc_lib(out_root: Path, pyc_reg: Path) -> list[Path]:
+    """Copy pinned pycc runtime primitives into ``rtl/pyc_lib/`` only.
+
+    Byte-for-byte, unmodified. Netlists `` `include "pyc_reg.v" ``; consumers
+    add ``-I rtl/pyc_lib``. Do not write ``pyc_*`` into per-layer dirs.
+    """
+    dest_dir = _pyc_lib_dir(out_root)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / "pyc_reg.v"
+    dest.write_bytes(pyc_reg.read_bytes())
+    written = [dest]
+    # Stale per-layer copies must not come back on regenerate.
+    for stale in (
+        out_root / "cmn" / "pyc_reg.v",
+        out_root / "cmn" / "hooks" / "pyc_reg.v",
+    ):
+        if stale.is_file():
+            stale.unlink()
+    return written
 
 
 def emit_variant(
@@ -217,20 +241,12 @@ def emit_all(out_root: Path = RTL) -> list[Path]:
     _ensure_pycircuit()
     pycc = _find_pycc()
     pyc_reg = _find_pyc_reg(pycc)
-    written: list[Path] = [_write_pyc_reg(out_root, pyc_reg)]
+    written: list[Path] = _write_pyc_lib(out_root, pyc_reg)
     for leaf in LEAVES:
         source = HERE / leaf["source"]
         hooks_dir = out_root / leaf["layer"] / "hooks"
         if leaf.get("hooks"):
-            # pyc_reg.v next to HOOKS so `include "pyc_reg.v"` resolves when
-            # TB +incdir is rtl/<layer>/hooks/ (same text as PRODUCT).
             hooks_dir.mkdir(parents=True, exist_ok=True)
-            hooks_reg = hooks_dir / "pyc_reg.v"
-            hooks_reg.write_text(
-                (out_root / leaf["layer"] / "pyc_reg.v").read_text(encoding="utf-8"),
-                encoding="utf-8",
-            )
-            written.append(hooks_reg)
         for var in leaf["variants"]:
             module = f"{leaf['name']}_{var['label']}"
             dest = out_root / leaf["layer"] / f"{module}.v"

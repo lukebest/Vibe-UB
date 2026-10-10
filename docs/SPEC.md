@@ -733,20 +733,23 @@ Retry 深度下界公式见 UB-DL §4.7.3.2（含 FEC 120/128 与 RTT）。M1 25
 
 ### 10.1 门控
 
-每个钩子同时受下列两者门控：
+`tb_inj_*`、`tb_obs_*`（顶层观察）与 `tb_<inst>_bd_*` 同时受下列两者门控：
 
 1. 编译参数 `TEST_HOOKS`（产品综合默认 0，仿真 1）。
 2. 顶层输入端口 `tb_test_mode`。
 
+`tb_<inst>_obs_*`（叶子只读观察，§10.5）**只**受 `TEST_HOOKS` 门控，**不受** `tb_test_mode` 门控。
+
 规则（两套网表的生成与门禁见 §11）：
 
 - `TEST_HOOKS=0`：钩子端口与 mux **综合掉**；产品网表无 `tb_*`。
-- `TEST_HOOKS=1` 且 `tb_test_mode=0`：端口存在，但注入 **不介入**（mux 选功能路径）；观察口输出保持 0。
-- `TEST_HOOKS=1` 且 `tb_test_mode=1`：注入/观察生效。
+- `TEST_HOOKS=1` 且 `tb_test_mode=0`：端口存在，但注入与 `tb_<inst>_bd_*` **不介入**（mux 选功能路径）；顶层 `tb_obs_*` 输出保持 0。`tb_<inst>_obs_*` 仍输出真实观察值。
+- `TEST_HOOKS=1` 且 `tb_test_mode=1`：注入 / 顶层观察 / backdoor 生效；`tb_<inst>_obs_*` 仍只输出、不回灌。
 - **复位值 = 不介入**：`tb_test_mode` 复位为 0；所有 `tb_inj_*` 视为 0 或不驱动功能路径；测试寄存器复位为不缩放 / 检查使能。
 - **TEST 窗 CSR：** `tb_test_mode=0` 或 `TEST_HOOKS=0` 时该窗已映射：读 0、写忽略、`csr_err=0`（不是未映射错误）。见 §3.2.3、§11 (d)。
 - `tb_inj_crd_cells` 在 `tb_test_mode=1` 时每拍 mux 覆盖 VL0 cell，HOOKS **不**为此增加存储寄存器。
 - 注入只做 **mux 进目标模块输入**，**不回灌** 源模块输出（例如不改写 PCS 的 `pcs_am_locked` 端口）。
+- **未在本 §10 登记的 `tb_*` 端口，门禁拒绝。**
 
 `tb_test_mode` 与全部 `tb_*` 均在 `core_clk` 域，同步采样。`tb_inj_*` 为电平，不是脉冲。
 
@@ -820,7 +823,7 @@ Retry 深度下界公式见 UB-DL §4.7.3.2（含 FEC 120/128 与 RTT）。M1 25
 | --- | --- |
 | force / deposit FSM 当前态或非法态 | 禁止。默认分支用 [CODING_STYLE.md](CODING_STYLE.md) 的 **具名 waiver** 覆盖。到达 `Link_Active` 必须走真实转移，并用 `LMSM_TMR_SCALE` 缩短等待 |
 | PCS RX unpack 中 `n==0 && have` 的 drain 分支 | **待定：验证确认端口可达性，否则删除分支或 waiver**。不为此加产品钩子 |
-| CRC / FEC / deskew / 缓冲等叶子内部状态 | 不在产品顶层加钩子。叶子端口或 wrapper 共仿真观察。**例外：** 下表点名的存储阵列 |
+| CRC / FEC / deskew / 缓冲等叶子内部状态 | 不在产品顶层加钩子。叶子端口或 wrapper 共仿真观察。**例外：** 下表点名的存储 backdoor，以及本节点名的 `tb_<inst>_obs_*` |
 | 内部信号 `force` / `deposit` | 禁止。只允许端口、`tb_*`、寄存器 |
 
 **存储 backdoor 例外（仅下表点名阵列）：** HOOKS 网表可出预载 / 回读口，口名保持 `tb_<inst>_bd_*`。仅 `TEST_HOOKS=1`；`tb_test_mode` 门控（为 0 时不介入：写忽略、读数据保持 0）。PRODUCT 无这些口。等价检查：`tb_test_mode=0` 且全部 `tb_<inst>_bd_*`（含 `tb_<inst>_bd_vld_*`）输入接低。**不得**再给其它叶子内部缓冲加钩子。口宽随表项格式；格式未关前 **未知**。阵列本体例化 `ub_cmn_mem_1r1w`（[CODING_STYLE.md](CODING_STYLE.md) §10）。
@@ -845,6 +848,20 @@ Retry 深度下界公式见 UB-DL §4.7.3.2（含 FEC 120/128 与 RTT）。M1 25
 | `tb_<inst>_bd_rdata` | out | `core_clk` | 点名阵列 | 回读数据 |
 | `tb_<inst>_bd_vld_*` | in | `core_clk` | 原语外 valid flop | 预载该实例有效位；不进 `ub_cmn_mem_1r1w` |
 
+**叶子只读观察口（`tb_<inst>_obs_*`，与 `tb_<inst>_bd_*` 并列）：** 仅 HOOKS 网表；**只出不进**；**不受** `tb_test_mode` 门控；**不回灌** 功能路径。等价检查 **只比 PRODUCT 已有端口**，因此观察口不参加比较。PRODUCT 网表与 quick-synth **不受影响**。禁止用 keep 类属性钉内部层次名。每个叶子的观察口必须在本 §10 逐条登记；未登记的 `tb_*` 门禁拒绝。
+
+用途：`formal/mem/` 等 bind 到 HOOKS 网表上的这些口做断言，不 force / deposit 内部信号。
+
+首个登记叶子：`ub_mem_tlb`（线 C 内存管理）。
+
+| 端口 | 方向 | 宽度 | 时钟域 | 接入 | 含义 |
+| --- | --- | --- | --- | --- | --- |
+| `tb_mem_tlb_obs_hit` | out | 4 | `core_clk` | `ub_mem_tlb` | 标签比较后、选择前的 per-way hit 向量 |
+| `tb_mem_tlb_obs_vld` | out | 4 | `core_clk` | `ub_mem_tlb` | 本次查到的 set 的 per-way valid |
+| `tb_mem_tlb_obs_tag_w0`…`w3` | out | 各 60 | `core_clk` | `ub_mem_tlb` | 本次查到的 set 的 per-way tag |
+
+断言意图（formal，HOOKS bind）：one-hot hit、无重复 tag、invalid way 不得 hit。不在此展开表项字段布局。
+
 ---
 
 ## 11. 两套生成网表（`TEST_HOOKS`）
@@ -858,13 +875,13 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 
 规则：
 
-**(a) 实现只用 PRODUCT。** lint / CDC / 综合 / P&R / FPGA 的签字网表是 `TEST_HOOKS=0`。`TEST_HOOKS=1` 也必须过 lint 与 CDC，但永不进入实现。
+**(a) 实现只用 PRODUCT。** lint / CDC / 综合 / P&R / FPGA / quick-synth 的签字网表是 `TEST_HOOKS=0`。`tb_<inst>_obs_*` **不**出现在 PRODUCT，quick-synth 不受影响。`TEST_HOOKS=1` 也必须过 lint 与 CDC，但永不进入实现。
 
 **(b) 回归与覆盖率跑 HOOKS。** 在 `TEST_HOOKS=1` 网上跑，且 **两种** `tb_test_mode` 都要覆盖：`tb_test_mode=0` 与 `tb_test_mode=1`。行覆盖率分母是 `TEST_HOOKS=1` 网表（含钩子 mux 代码）；钩子代码 **不另开 waiver**。
 
 **(c) PRODUCT 烟测。** `TEST_HOOKS=0` 网表跑一套与钩子无关的 smoke 子集（证明无钩子端口时功能闭环）。
 
-**(d) 形式等价门禁。** 规范工具是 Yosys **`equiv`**（版本见 `TOOLCHAIN.lock`）。eqy 在可安装后可作为可选补充，**不**替代 `equiv` 门禁。`TEST_HOOKS=0` 对比 `TEST_HOOKS=1`，且后者 `tb_test_mode=0`、全部 `tb_*` 钩子输入接低（含 `tb_inj_*` 接到复位不介入值、§10 点名存储的 `tb_<inst>_bd_*` 与 `tb_<inst>_bd_vld_*`）。两者必须等价；不等价则 **阻断交付**。TEST 窗在这两种条件下都是「已映射、读 0、写忽略、`csr_err=0`」，因此不破坏等价。
+**(d) 形式等价门禁。** 规范工具是 Yosys **`equiv`**（版本见 `TOOLCHAIN.lock`）。eqy 在可安装后可作为可选补充，**不**替代 `equiv` 门禁。只比较 **PRODUCT 已有的端口**；`tb_<inst>_obs_*` 仅 HOOKS 存在，**不参加**比较。HOOKS 侧 `tb_test_mode=0`，全部 `tb_*` 钩子**输入**接低（含 `tb_inj_*` 接到复位不介入值、§10 点名存储的 `tb_<inst>_bd_*` 与 `tb_<inst>_bd_vld_*`）。两者必须等价；不等价则 **阻断交付**。TEST 窗在这两种条件下都是「已映射、读 0、写忽略、`csr_err=0`」，因此不破坏等价。
 
 **(e) 覆盖率 waiver。** 钩子 mux 不另开 waiver（见 (b)）。信用下溢（`CRD_UF` 计数与 irq 分支）在正确设计中不可达，须 **具名覆盖率 waiver**（§13.4）。
 

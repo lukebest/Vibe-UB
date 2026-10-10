@@ -28,7 +28,7 @@ package = "pycircuit-hisi"
 package_version = "0.1.0"
 release = "pyc4.0"
 install = "pip install git+https://github.com/lukebest/pyCircuit@43cc5918e3d09ecc0c814cabef6c1384cb9980ae"
-note = "Editable/frontend-only. pycc (Circuit→Verilog) needs LLVM 19; PRODUCT .v is emit_verilog."
+note = "Frontend pip install of this pin. pycc (Circuit→Verilog) needs LLVM 19; PRODUCT .v is compile()+pycc --emit=verilog."
 
 [simulators]
 # D7: Icarus 12.0 is the pass/fail gate.

@@ -13,9 +13,9 @@
 #
 # Frontend import path remains `pycircuit`. Compiler command is `pycc`.
 # Editable install is frontend-only. `pycc` (Verilog via MLIR) needs LLVM 19.
-# This repo's PRODUCT .v is reproduced by emit_verilog / `make -C rtl/csr gen`
-# so the netlist does not depend on LLVM. `elaborate()` calls compile()
-# (frontend MLIR) when pycircuit is installed.
+# D5: PRODUCT .v is compile() + `pycc --emit=verilog` (not string-templated).
+# `elaborate()` calls compile() (frontend MLIR) when pycircuit is installed.
+# See docs/regmap/README.md for timed pyc4.0 + pycc install steps.
 
 PYCIRCUIT_REPO=https://github.com/lukebest/pyCircuit
 PYCIRCUIT_COMMIT=43cc5918e3d09ecc0c814cabef6c1384cb9980ae

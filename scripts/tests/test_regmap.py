@@ -131,29 +131,72 @@ def test_global_rules():
     assert bus["write_latency_cycles"] == 1
 
 
-def test_csr_yaml_driven_ports_and_hooks_split():
+def test_csr_uses_pycircuit_api_not_string_verilog():
+    """D5: leaf imports Circuit API; no string-templated Verilog in the source."""
     from gen_csr import emit_ub_csr_regs
 
-    ns: dict = {"__file__": str(SCRIPT_DIR.parent / "pycircuit" / "csr" / "ub_csr_regs.py")}
-    exec(compile(emit_ub_csr_regs(load_regmap()), "<ub_csr_regs>", "exec"), ns)
+    src = emit_ub_csr_regs(load_regmap())
+    assert "from pycircuit import Circuit, compile, module, u" in src
+    assert "compile(fn, name=\"ub_csr\")" in src
+    assert "--emit=verilog" in src
+    assert "def _csr_circuit(" in src
+    assert "@module(name=\"ub_csr\")" in src
+    for banned in (
+        "always @(posedge",
+        "assign irq =",
+        "module ub_csr (",
+        "csr_rvalid <= req_fire",
+        "|(irq_sticky & ~irq_mask_w)",
+        "5'd16",
+        "write cycle: next csr_rvalid=0",
+    ):
+        assert banned not in src, banned
+
+
+def test_csr_compile_ports_and_hooks_split():
+    """compile() ports for PRODUCT/HOOKS; pycc Verilog when the backend is present."""
+    import runpy
+    import shutil
+
+    path = SCRIPT_DIR.parent / "pycircuit" / "csr" / "ub_csr_regs.py"
+    ns = runpy.run_path(str(path))
+    s0 = ns["elaborate"](0)
+    s1 = ns["elaborate"](1)
+    assert s0["elaborated"], s0.get("reason")
+    assert s1["elaborated"], s1.get("reason")
+    assert "ub_csr" in s0["modules"]
+    assert "tb_test_mode" not in s0["arg_names"]
+    assert "tb_test_mode" in s1["arg_names"]
+    for name in (
+        "port_rst_pulse",
+        "ev_fec_uncorr",
+        "inc_fec_uncorr",
+        "inc_crd_uf",
+        "csr_lmsm_start",
+        "csr_err",
+        "irq",
+        "csr_rvalid",
+    ):
+        ports = list(s0["arg_names"]) + list(s0["result_names"])
+        assert name in ports, name
+    if not shutil.which("pycc") and not ns["_find_pycc"]():
+        return
     v0 = ns["emit_verilog"](False)
     v1 = ns["emit_verilog"](True)
-    assert "input  wire        tb_test_mode" not in v0
-    assert "input  wire        tb_test_mode" in v1
+    assert "module ub_csr" in v0
+    assert "tb_test_mode" not in v0
+    assert "tb_test_mode" in v1
     for token in (
         "port_rst_pulse",
         "ev_fec_uncorr",
         "inc_fec_uncorr",
         "inc_crd_uf",
         "csr_lmsm_start",
-        "assign irq =",
-        "5'd16",
         "csr_err",
+        "irq",
     ):
         assert token in v0, token
-    assert "|(irq_sticky & ~irq_mask_w)" in v0
-    assert "csr_rvalid <= req_fire & ~csr_wr" in v0
-    assert "write cycle: next csr_rvalid=0" in v0
+    assert "`ifdef" not in v0 and "`ifdef" not in v1
 
 
 def test_ral_lives_under_tb_ral():

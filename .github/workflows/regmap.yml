@@ -25,8 +25,9 @@ jobs:
           python3 -c "import runpy; ns=runpy.run_path('pycircuit/csr/ub_csr_regs.py');
           s0=ns['elaborate'](0); s1=ns['elaborate'](1); print(s0); print(s1);
           assert s0['elaborated'] and s1['elaborated']"
-      - name: Verilator lint CSR (temp emit; rtl/ .v is emit_rtl.py follow-up)
+      - name: Verilator lint CSR (pycc .v when backend present)
         run: |
           sudo apt-get update
           sudo apt-get install -y verilator
           python3 scripts/lint_csr.sh
+          # lint_csr.sh SKIP-exits 0 when pycc is absent (GH runner has no LLVM 19).

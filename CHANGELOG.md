@@ -17,6 +17,7 @@
 - `docs/DECISIONS.md` D18：全层级范围，作为完整 UB 控制器（Luke Liu via Firstmate，2026-10-10 17:04 Asia/Shanghai）；D18 取代 D2 的分阶段范围。
 - `docs/DECISIONS.md` D19：三线并行与新增角色（Luke Liu via Firstmate，2026-10-10 17:22 Asia/Shanghai）。
 - 寄存器表单一来源 `docs/regmap/regmap.yaml` + `scripts/gen_regmap.py`：生成 `docs/REGMAP.md`、`pycircuit/csr/ub_csr_regs.py`、`tb/ral/ub_regmodel.py`、`sw/include/ub_regs.h`、`sw/hal/ub_regs_access.{h,c}`、`model/regs.py`。检查：`python3 scripts/gen_regmap.py --check`。CI：`.github/workflows/regmap.yml`。CSR Python 在 `pycircuit/csr/`（`rtl/` 只放生成 Verilog）。RAL 在 `tb/ral/`。写响应下一拍 `csr_rvalid=0` 写入 YAML 总线规则（SPEC §3.2.3）。`scripts/emit_rtl.py` 注册 `ub_csr` 为 PR #5 合入后的 follow-up，本 PR 不手写 / 不提交 `rtl/csr/*.v`。
+- D5：`pycircuit/csr/ub_csr_regs.py` 用 pyc4.0 Circuit API（`Circuit` / `compile` / `module` / `u`，lukebest/pyCircuit @43cc5918）描述 CSR；Verilog 由 `pycc --emit=verilog`（LLVM 19）降低，不再字符串拼接。`elaborate(0/1)` 走 frontend；lint 在有 pycc 时对 pycc `.v` 跑 verilator。
 
 ### Changed
 

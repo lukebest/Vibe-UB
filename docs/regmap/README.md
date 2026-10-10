@@ -45,9 +45,13 @@ Directory convention (PM): pyCircuit sources live in `pycircuit/<layer>/`.
 
 RAL lives at `tb/ral/ub_regmodel.py`. `gen/tb_ral/` is removed.
 
-Generator: `python3` + PyYAML only. `emit_verilog(False/True)` is the PRODUCT /
-HOOKS netlist text. `elaborate(0)` / `elaborate(1)` call `pycircuit.compile()`
-when the frontend is installed.
+Generator: `python3` + PyYAML only. The CSR leaf imports
+`from pycircuit import Circuit, compile, module, u` and builds `ub_csr` on the
+Circuit API. `elaborate(0)` / `elaborate(1)` call `pycircuit.compile()`.
+`emit_verilog(False/True)` writes the compile() MLIR and runs
+`pycc <file.pyc> --emit=verilog --logic-depth=64 -o <out.v>` (LLVM 19). Verilog is not
+string-templated. GitHub CI has the frontend only; verilator lint runs when
+`pycc` is on `PATH`.
 
 ### Verilog emit (follow-up — PR #5 not on main)
 
@@ -112,8 +116,40 @@ Do not put that fanout inside `ub_csr_regs.py`.
   `rtl/`. `pyc_reg` = sync flop on `core_clk` / `rst_pyc`. `elaborate(0/1)` uses
   `from pycircuit import Circuit, compile, module, u` (`lukebest/pyCircuit`
   @ `43cc5918`, see `pycircuit/TOOLCHAIN.lock`). `compile()` produces frontend
-  MLIR. `pycc` (Circuit→Verilog, LLVM 19) is **not** required. Do not put the
+  MLIR. PRODUCT `.v` is `pycc --emit=verilog` (LLVM 19). Do not put the
   repo root on `PYTHONPATH` (shadows the toolchain package named `pycircuit`).
+
+### Install pyc4.0 + pycc (timed on this environment)
+
+```bash
+# 1) Frontend wheel/sdist (~6 s)
+python3 -m pip install git+https://github.com/lukebest/pyCircuit@43cc5918e3d09ecc0c814cabef6c1384cb9980ae
+
+# 2) LLVM 19 + build deps (~29 s apt)
+sudo apt-get install -y ninja-build llvm-19 llvm-19-dev llvm-19-tools \
+  libmlir-19-dev mlir-19-tools clang-19 g++ libstdc++-13-dev \
+  libzstd-dev libedit-dev libcurl4-openssl-dev
+# llvm-config-19 --version → 19.1.1
+
+# 3) Clone pin + build pycc (~34 s with CC=gcc CXX=g++)
+git clone https://github.com/lukebest/pyCircuit /tmp/pyCircuit
+git -C /tmp/pyCircuit checkout 43cc5918e3d09ecc0c814cabef6c1384cb9980ae
+export LLVM_DIR=/usr/lib/llvm-19/lib/cmake/llvm
+export MLIR_DIR=/usr/lib/llvm-19/lib/cmake/mlir
+export CC=gcc CXX=g++
+bash /tmp/pyCircuit/flows/scripts/pyc build
+export PATH=/tmp/pyCircuit/.pycircuit_out/toolchain/install/bin:$PATH
+export PYC_TOOLCHAIN_ROOT=/tmp/pyCircuit/.pycircuit_out/toolchain/install
+# pycc lives at $PYC_TOOLCHAIN_ROOT/bin/pycc
+# primitives: $PYC_TOOLCHAIN_ROOT/include/verilog  (or /tmp/pyCircuit/runtime/verilog)
+```
+
+Clean-path wall time is about 70 s (pip 6 + apt 29 + pyc build 34). Clang 18
+without libstdc++ and a missing `zstd` CMake target each fail configure; use
+`CC=gcc CXX=g++` and `libzstd-dev`. `pyc-opt` may be skipped if
+`MLIRRegisterAllPasses` is absent — `pycc --emit=verilog` is enough.
+
+Verilator lint of the pycc netlist needs `-I` to those primitives (`pyc_reg.v`).
 - uvm-python RAL: `UVMReg` / `UVMRegField.configure(parent, size, lsb_pos, access,
   volatile, reset, has_reset, is_rand, individually_accessible)` from
   `lukebest/uvm-python`. The generated model imports uvm-python when present and

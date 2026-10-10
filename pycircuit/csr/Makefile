@@ -1,8 +1,9 @@
 # Local elaborate + lint for ub_csr.
-# Verilog is not committed here. scripts/emit_rtl.py (PR #5) will write
+# Verilog is compile()+pycc --emit=verilog (D5), not committed here.
+# scripts/emit_rtl.py (PR #5) will write
 #   PRODUCT → rtl/csr/ub_csr.v
 #   HOOKS   → rtl/csr/hooks/ub_csr.v
-# until then, lint emits to a temp dir.
+# until then, lint emits to a temp dir when pycc is on PATH.
 
 PYTHON ?= python3
 

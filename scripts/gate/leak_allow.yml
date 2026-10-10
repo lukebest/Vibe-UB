@@ -1,0 +1,21 @@
+# Paths allowed to mention private-spec leak tokens (the checker and
+# the documented pattern list). Same approval rules as waivers/:
+# approver must be a verification gatekeeper.
+#
+# Do not add product RTL, TB, or docs other than the rule book.
+# CODEOWNERS: this file is gatekeeper-owned.
+
+entries:
+  - id: LEAK-ALLOW-CHECKER
+    file: scripts/gate/spec_leak.py
+    reason: checker enumerates the forbidden tokens
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: token list changes
+
+  - id: LEAK-ALLOW-VERIF-GATE
+    file: docs/rules/verif_gate.md
+    reason: rule book lists the same tokens for reviewers
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: token list changes

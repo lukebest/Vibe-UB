@@ -29,3 +29,4 @@ entries:
     approver: 验证
     approved_date: 2026-10-10
     review_when: TOOLCHAIN.lock pyCircuit pin or pyc_reg.v source changes
+

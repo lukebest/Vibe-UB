@@ -1,0 +1,16 @@
+# Tool-gatekeeper surfaces. Written approval is required for waivers and
+# for changing what the gate blocks (workflow + D10 legacy list).
+# Owner = repository owner / verification lead (lukebest).
+
+/waivers/ @lukebest
+/scripts/gate/*.yml @lukebest
+/scripts/gate/*.txt @lukebest
+/scripts/gate/blackbox.yml @lukebest
+/scripts/gate/handwritten.yml @lukebest
+/scripts/gate/hooks_ports.yml @lukebest
+/scripts/gate/legacy.txt @lukebest
+/scripts/gate/pycircuit_migrate.txt @lukebest
+/scripts/gate/leak_allow.yml @lukebest
+/.github/workflows/gate.yml @lukebest
+/.github/CODEOWNERS @lukebest
+/scripts/gate/cdc_rules.yml @lukebest

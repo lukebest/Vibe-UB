@@ -114,6 +114,15 @@ def build(
     re = m.input("re", width=1)
     raddr = m.input("raddr", width=aw)
 
+    # Extract mask/data segments once so pycc does not emit unused bit
+    # slices of per-cell wmask copies (Verilator UNUSEDSIGNAL).
+    wmask_bits = []
+    wdata_segs = []
+    if nseg > 1:
+        for s in range(nseg):
+            wmask_bits.append(m.extract(wmask, lsb=s, width=1))
+            wdata_segs.append(m.extract(wdata, lsb=s * wmask_w, width=wmask_w))
+
     # Forward range only (JIT rejects reversed range). 2**AW cells: no
     # DEPTH compare in the netlist. Avoid m.cat(*list): concat two at a time.
     cells = []
@@ -133,7 +142,7 @@ def build(
         else:
             word = None
             for s in range(nseg):
-                en = wr_hit & m.extract(wmask, lsb=s, width=1)
+                en = wr_hit & wmask_bits[s]
                 seg = m.out(
                     f"mem_{i}_{s}",
                     clk=clk,
@@ -142,7 +151,7 @@ def build(
                     init=u(wmask_w, 0),
                     en=en,
                 )
-                seg.set(m.extract(wdata, lsb=s * wmask_w, width=wmask_w))
+                seg.set(wdata_segs[s])
                 if s == 0:
                     word = seg.out()
                 else:

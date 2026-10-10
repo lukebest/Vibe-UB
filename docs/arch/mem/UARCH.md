@@ -4,8 +4,8 @@
 | --- | --- |
 | 作者 | 设计-C |
 | 日期 | 2026-10-10（Asia/Shanghai） |
-| 状态 | **草案**，不冻结端口。计划由 cloud agent 以 docs-only draft PR 提交 |
-| 基准 | main `8e20ca1f`（SPEC §2.2 参数集固定网表、`<leaf>_<tag>` 命名）；D17–D19；PR #18（MODULE_INVENTORY / LAYER_CONTRACTS 草案）；PR #20（统一存储原语与具名后门，草案）；PR #21（原语参考模型与形式断言，草案） |
+| 状态 | **草案**，不冻结端口。已作为 PR #23 提交 |
+| 基准 | main `0a4a54d7`（SPEC §2.2 参数集固定网表、`<leaf>_<tag>` 命名）；D17–D19；PR #18（MODULE_INVENTORY / LAYER_CONTRACTS 草案）；PR #20（统一存储原语与具名后门，草案）；PR #21（原语参考模型与形式断言，草案） |
 | 规范 | UB Base Spec Rev 2.0（D1）第 9 章，旁及 §7.2、§8.2、§8.3、§10.3、§11.4、§11.6、App. C.3.2、App. D.3.3、App. D.4.1 |
 | 引用约定 | 只写章节号和项目自己的短句。本文件不含任何表项字段的比特位置、编码取值或规范原文。表项内部怎么切字段，只出现在「解码叶子」里，解码叶子的源码能否公开等船长决定（见 §11 D-01） |
 | 提案标记 | 凡标「Xia 提案，待船长」的都是架构提案，规范没有裁定 |
@@ -325,21 +325,21 @@ D19 第 3 条：可选功能集中在最后一轮。
 
 ## 10. 大表项表
 
-存储本体一律例化 `ub_cmn_mem_1r1w`，按 SPEC §2.2 每种 深度×宽度 出一份固定网表 `ub_cmn_mem_1r1w_<D>x<W>`。表项有效位放原语外的复位触发器（`valid_outside`），这些实例的 `ASSERT_NO_UNINIT_READ=0`。时序：寄存输出读 1 拍、1R1W、同址读旧值，叶子内做写后读旁路。原语端口照 `model/ub_cmn_mem_1r1w.py`：`we/waddr/wdata`、`re/raddr/rdata`；时钟口统一叫 `core_clk`，复位口命名跟现有叶子一致（`rst_pyc`），阵列本体不复位。
+存储本体一律例化 `ub_cmn_mem_1r1w`，按 SPEC §2.2 每种 深度×宽度 出一份固定网表 `ub_cmn_mem_1r1w_d<DEPTH>w<WIDTH>[m<WMASK_W>]`。表项有效位放原语外的复位触发器（`valid_outside`），这些实例的 `ASSERT_NO_UNINIT_READ=0`。时序：寄存输出读 1 拍、1R1W、同址读旧值，叶子内做写后读旁路。原语端口照 `model/ub_cmn_mem_1r1w.py`：`we/waddr/wdata`、`re/raddr/rdata`；时钟口统一叫 `core_clk`。原语没有复位口；阵列与 `rdata` 都不复位。`rst_pyc` 只用于结构叶子和原语外的 valid 触发器。
 
 后门口统一 `tb_<inst>_bd_*`：预装 `tb_<inst>_bd_we/addr/wdata`、读出 `tb_<inst>_bd_re/rdata`；valid 位在原语外的复位触发器里，预装时由 `tb_<inst>_bd_vld_*` 同拍一起写。全部只在 HOOKS 网表，受 `tb_test_mode` 门控，eqy 时 `tb_test_mode=0`、后门输入接低。后门清单只含下表「测试钩子需求」列出 `tb_*` 的阵列；PLB 等触发器结构不进清单。
 
 | 表名（inst） | 深度 | 位宽（总） | 端口形式 | 每拍访问次数 | 关键路径 | 触发器 / SRAM 初判 | 测试钩子需求 | 参数待 Xia 确认 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| TECT（`mem_cfg`） | 16 | 93 | 原语 1R1W `16x93`；CSR 读回与查找共用读口 | 读 ≤1（查找优先），写 ≤1（CSR） | 否（字段已在写入时解码） | 原语（CODING_STYLE §10 点名）；1,488 bit，后端可映射成触发器 | `tb_mem_cfg_bd_*` + `tb_mem_cfg_bd_vld_*` | 深度 16（Q-A02/Q-C01，待船长）；宽度随 §5.1 |
-| TCT 缓存（`mem_tct`） | 64 | 227 | 原语 1R1W `64x227`，直接映射 | 读 ≤1（查找或扫描），写 ≤1（填充） | 是（P1 标签比较） | SRAM；14,528 bit | `tb_mem_tct_bd_*` + `tb_mem_tct_bd_vld_*` | `TCT_CACHE_DEPTH`、直接映射 |
+| TECT（`mem_cfg`） | 16 | 93 | 原语 1R1W `ub_cmn_mem_1r1w_d16w93`；CSR 读回与查找共用读口 | 读 ≤1（查找优先），写 ≤1（CSR） | 否（字段已在写入时解码） | 原语（CODING_STYLE §10 点名）；1,488 bit，后端可映射成触发器 | `tb_mem_cfg_bd_*` + `tb_mem_cfg_bd_vld_*` | 深度 16（Q-A02/Q-C01，待船长）；宽度随 §5.1 |
+| TCT 缓存（`mem_tct`） | 64 | 227 | 原语 1R1W `ub_cmn_mem_1r1w_d64w227`，直接映射 | 读 ≤1（查找或扫描），写 ≤1（填充） | 是（P1 标签比较） | SRAM；14,528 bit | `tb_mem_tct_bd_*` + `tb_mem_tct_bd_vld_*` | `TCT_CACHE_DEPTH`、直接映射 |
 | L1 TCT 描述符缓存 | 8 | 54 | 触发器，全相联 | 读 1（并比），写 ≤1 | 否（只在缺失路径） | 触发器；432 bit | 不需要 | 深度 8 |
-| TLB 第 0～3 路（`mem_tlb_w0`～`mem_tlb_w3`） | 64 ×4 | 109 | 每路一个原语 1R1W `64x109`，4 路同拍并读 | 每路读 1；写 ≤1（只写替换路） | **是，最关键**（4 路 60 bit 比较 + 4 选 1） | SRAM；27,904 bit | 每路 `tb_mem_tlb_wN_bd_*` + `tb_mem_tlb_wN_bd_vld_*` | `TLB_SETS`、`TLB_WAYS` |
+| TLB 第 0～3 路（`mem_tlb_w0`～`mem_tlb_w3`） | 64 ×4 | 109 | 每路一个原语 1R1W `ub_cmn_mem_1r1w_d64w109`，4 路同拍并读 | 每路读 1；写 ≤1（只写替换路） | **是，最关键**（4 路 60 bit 比较 + 4 选 1） | SRAM；27,904 bit | 每路 `tb_mem_tlb_wN_bd_*` + `tb_mem_tlb_wN_bd_vld_*` | `TLB_SETS`、`TLB_WAYS` |
 | TLB valid + 伪 LRU | 256 + 64 | 1 + 3 | 复位触发器 | 读 4 / 写 ≤4 | 是（与标签比较同拍） | 触发器；448 bit | valid 经各路 `tb_mem_tlb_wN_bd_vld_*` 写；伪 LRU 不需要 | 随 TLB |
 | PLB | 4 | 227 | 复位触发器，全相联范围匹配 | 读 4（并比），写 ≤1 | 是（范围比较在 P0–P1） | 触发器；908 bit。不用原语（要每项并行比） | 不进后门清单 | `PLB_DEPTH` |
-| 译码 L0 表（`mem_dec_b0`～`mem_dec_b7`；片上方案） | 512 ×8 块 | 64 | 8 个原语 1R1W `512x64`，同拍并读 | 读：8 块各 1；写 ≤1 块（CSR / 命令每拍写 64 bit） | 是（读出后现场解码 + 15 bit 范围比较） | SRAM；262,144 bit，全线 C 最大。放片上还是内存待船长（D-14） | 每块 `tb_mem_dec_bN_bd_*` + `tb_mem_dec_bN_bd_vld_*` | 放置方案、宏可用性（PR #9 工艺） |
+| 译码 L0 表（`mem_dec_b0`～`mem_dec_b7`；片上方案） | 512 ×8 块 | 64 | 8 个原语 1R1W `ub_cmn_mem_1r1w_d512w64`，同拍并读 | 读：8 块各 1；写 ≤1 块（CSR / 命令每拍写 64 bit） | 是（读出后现场解码 + 15 bit 范围比较） | SRAM；262,144 bit，全线 C 最大。放片上还是内存待船长（D-14） | 每块 `tb_mem_dec_bN_bd_*` + `tb_mem_dec_bN_bd_vld_*` | 放置方案、宏可用性（PR #9 工艺） |
 | 译码 L0 表备选（`mem_dec_l0`，片上方案） | 512 | 512 | 1 个原语 `ub_cmn_mem_1r1w_d512w512m64`（`WMASK_W=64`，按 64 bit 分段写，同拍同地址各段读旧值） | 读 1（整行 512 bit），写 ≤1 段 | 同上 | SRAM；262,144 bit；单块宏密度优于 8 块小宏（实现建议）。设计-B 已确认 PR #21 出 `WMASK_W` 分段写 | `tb_mem_dec_l0_bd_*` + `tb_mem_dec_l0_bd_vld_*`（宽 8 位）；有效位按段放在原语外，每行 8 位，与模型按段的 `rdata_valid` 一一对应；选用此方案时 SPEC §10 由 8 块改登记为单个阵列 `mem_dec_l0` | 同上 + 原语分段写 |
-| 译码翻译缓存（`mem_dec_tlb`） | 32 | 158 | 原语 1R1W `32x158` | 读 ≤1，写 ≤1 | 中（D1–D2） | 原语；5,056 bit（`_eid128` 变体每项 266 bit，8,512 bit） | `tb_mem_dec_tlb_bd_*` + `tb_mem_dec_tlb_bd_vld_*` | `DEC_TLB_DEPTH`；`EID_W` |
+| 译码翻译缓存（`mem_dec_tlb`） | 32 | 158 | 原语 1R1W `ub_cmn_mem_1r1w_d32w158` | 读 ≤1，写 ≤1 | 中（D1–D2） | 原语；5,056 bit（`_eid128` 变体每项 266 bit，8,512 bit） | `tb_mem_dec_tlb_bd_*` + `tb_mem_dec_tlb_bd_vld_*` | `DEC_TLB_DEPTH`；`EID_W` |
 | UMMU / 译码器 命令预取 FIFO | 4 ×2 | 128 | 触发器 FIFO | 读 ≤1，写 ≤1 | 否 | 触发器；1,024 bit | 不需要 | 命令格式（Q-B08、Q-E09） |
 | UMMU / 译码器 事件 FIFO | 8 ×2 | 256 | 触发器 FIFO | 读 ≤1，写 ≤1 | 否 | 触发器；4,096 bit | 不需要（水位可经 CSR 读） | 事件格式（Q-B08、Q-E09） |
 
@@ -356,7 +356,7 @@ D19 第 3 条：可选功能集中在最后一轮。
 | D-05 | 译码器 L0 PTE / PTRE / L1 PTE 由项目自定的格式，含 PTRE「最后一级」位 | §5.5 宽度标「待」各项、翻译缓存宽度 | 船长 |
 | D-06 | 128 bit EID 的 `_eid128` 变体是否需要、何时出（第一波已定 `EID_W=20`） | 译码结果束、翻译缓存宽度（+108 bit/项） | 船长 |
 | D-07 | **关闭**：阵列名定为 `mem_tlb_w0..w3`、`mem_dec_b0..b7`、`mem_dec_tlb`，删去 `mem_matt` / `mem_mapt`；PLB 用触发器、不进后门清单 | — | 已定（群内结论） |
-| D-08 | **关闭**：原语时钟口统一 `core_clk`，复位口命名跟现有叶子一致 | — | 已定（群内结论）；PR #21 原语 RTL 按此写 |
+| D-08 | **关闭**：原语时钟口统一 `core_clk`；原语没有复位口（阵列与 `rdata` 都不复位）；`rst_pyc` 只用于结构叶子和原语外 valid 触发器 | — | 已定（群内结论）；PR #21 原语 RTL 按此写 |
 | D-09 | **更新**：原语 RTL 由设计-B 在 PR #21 写；线 C 先照 `model/ub_cmn_mem_1r1w.py` 的端口和时序写结构叶子，原语合入后再联调 | 联调时间点 | PM 排期（跟踪 PR #21） |
 | D-10 | **关闭**：valid 位在原语外复位触发器，后门预装时由 `tb_<inst>_bd_vld_*` 一起写，仅 HOOKS、`tb_test_mode` 门控 | — | 已定（群内结论）；需写进 SPEC §10 例外小节与门禁钩子端口表 |
 | D-11 | UMMU 表写口（事件写回）与表读口如何与 FUN/TA 共享内存口 | 顶层端口 | 后续批 Q-C07 / Q-E07 |

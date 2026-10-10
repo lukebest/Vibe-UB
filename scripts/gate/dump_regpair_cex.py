@@ -18,9 +18,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from equiv_regpair import (  # noqa: E402
+    assign_pairing_keys,
     eval_signals,
     extract_flops,
     group_by_key,
+    rematch_q_suffix,
     run_yosys_file,
     run_yosys_p,
     sat_kind,
@@ -50,14 +52,14 @@ def prep_il(leaf: str, net: Path, tmp: Path, extra_gold: list[Path] | None = Non
         f"{reads_g}\n"
         f"hierarchy -check -top {leaf}\n"
         "rename -top gold\n"
-        "proc; flatten; opt_expr; opt_clean; autoname\n"
+        "proc; flatten; autoname\n"
         f"write_json {tmp / 'gold.json'}\n"
         f"write_rtlil {tmp / 'gold.il'}\n"
         "design -reset\n"
         f"read_verilog -sv{inc} {net}\n"
         f"hierarchy -check -top {leaf}\n"
         "rename -top gate\n"
-        "proc; flatten; opt_expr; opt_clean; autoname\n"
+        "proc; flatten; autoname\n"
         f"write_json {tmp / 'gate.json'}\n"
         f"write_rtlil {tmp / 'gate.il'}\n"
     )
@@ -92,29 +94,32 @@ def dump_one(leaf: str, label: str, net: Path) -> None:
         prep_il(leaf, net, tmp)
         gold_mod = json.loads((tmp / "gold.json").read_text(encoding="utf-8"))["modules"]["gold"]
         gate_mod = json.loads((tmp / "gate.json").read_text(encoding="utf-8"))["modules"]["gate"]
-        gmap, gamb = group_by_key(extract_flops(gold_mod))
-        tmap, tamb = group_by_key(extract_flops(gate_mod))
-        if gamb or tamb:
-            print(f"CEX FAIL ambiguous gold={gamb} gate={tamb}")
+        gold_flops = extract_flops(gold_mod)
+        gate_flops = extract_flops(gate_mod)
+        resolve_err = assign_pairing_keys(gold_flops, gate_flops)
+        rematch_q_suffix(gold_flops, gate_flops)
+        gmap, gamb = group_by_key(gold_flops)
+        tmap, tamb = group_by_key(gate_flops)
+        if gamb or tamb or resolve_err:
+            print(f"CEX FAIL pairing gold_amb={gamb} gate_amb={tamb} resolve={resolve_err}")
             return
         keys = sorted(set(gmap) & set(tmap))
         gold_only = sorted(set(gmap) - set(tmap))
         gate_only = sorted(set(tmap) - set(gmap))
         print(f"CEX pairs={len(keys)} keys={' '.join(keys) or '-'}")
         print(f"CEX unmatched gold={gold_only or '-'} gate={gate_only or '-'}")
-        # Analysis only: unique same-width leftovers (crc_word vs word_q).
-        used_g, used_t = set(keys), set(keys)
-        for gk in gold_only:
-            cands = [tk for tk in gate_only if tk not in used_t and tmap[tk].width == gmap[gk].width]
-            if len(cands) == 1:
-                alias = f"{gk}__{cands[0]}"
-                gmap[alias] = gmap[gk]
-                tmap[alias] = tmap[cands[0]]
-                keys.append(alias)
-                used_g.add(gk)
-                used_t.add(cands[0])
-                print(f"CEX width_alias gold={gk} gate={cands[0]} width={gmap[gk].width}")
-        keys = sorted(set(keys))
+        for k in sorted(set(gmap) | set(tmap)):
+            g, t = gmap.get(k), tmap.get(k)
+            if g:
+                print(
+                    f"CEX gold key={k} cell={g.cell} q_port={g.q_name} d_port={g.d_name} "
+                    f"aliases={','.join(g.q_aliases)}"
+                )
+            if t:
+                print(
+                    f"CEX gate key={k} cell={t.cell} q_port={t.q_name} d_port={t.d_name} "
+                    f"aliases={','.join(t.q_aliases)}"
+                )
         pairs_g = [(k, gmap[k]) for k in keys]
         pairs_t = [(k, tmap[k]) for k in keys]
         write_cut_script(
@@ -148,6 +153,8 @@ def dump_one(leaf: str, label: str, net: Path) -> None:
             ("idle_leftover_q", {"rst_pyc": 0, "rp_q_crc": 0x155, "start": 0, "valid_in": 0, "last": 0, "data_in": 0}),
             ("start_only", {"rst_pyc": 0, "rp_q_crc": 0x155, "start": 1, "valid_in": 0, "last": 0, "data_in": 0}),
             ("xia_start_valid_last", {"rst_pyc": 0, "rp_q_crc": INIT, "start": 1, "valid_in": 1, "last": 1, "data_in": 0}),
+            # Design mid-block vector (cell-port cut). data=0 unless they specify.
+            ("design_mid_0f3025ff", {"rst_pyc": 0, "rp_q_crc": 0x0F3025FF, "start": 0, "valid_in": 1, "last": 0, "data_in": 0x95522B20C1A2B75FE014284D66455D40A1227BC3}),
         ]
         for qn in ("rp_q_crc_word", "rp_q_word", "rp_q_done", "rp_q_ok", "rp_q_recv"):
             if qn.replace("rp_q_", "") in keys or qn[5:] in keys:

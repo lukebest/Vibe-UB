@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 """Register-pair compare for scripts/gate/equiv_ref.sh.
 
-After flatten, pair FFs by normalized Q net name (no hand-written map).
-Cut each pair: Q → shared PI `rp_q_<name>`, D → PO `rp_d_<name>`.
-Strip clock (and async-reset used by the cut FFs) so both sides share one
-named interface; leftover original ports keep their names. Name-set
-mismatch is FAIL. Prove with a single Yosys `miter -equiv` (pairs by port
-name, not order) plus combo `sat -prove-asserts` or ABC on that miter.
-Reset kind / polarity / value are checked separately. All must hold.
+Both sides flatten first (pyc_reg → $dff/$adff). Pair after flatten and
+before opt_clean. Walk each flattened $dff/$adff/$dffe/$adffe. rp_q_* is
+the wire on that cell's Q pin; rp_d_* is the same cell's D pin — the
+line after the reset/hold mux, never pyc_reg.d / *.__next. Pairing key:
+collect every wire that shares the FF Q bit-group, drop pycc auto-names
+(`pyc_reg_N`, `pyc_comb_N`, `__…L<line>` suffixes), normalize (last
+hierarchy segment, lower-case), intersect with the other side. Exactly
+one common name pairs; 0 or >1 is FAIL(pairing). Cell names are not
+keys. Extra/missing/width: return code 4; caller treats that as
+regpair=NOTAPPLICABLE(set-mismatch) and switches to uncut output seq
+(PM: GATE-EQY-004). Strip clock (and async-reset used by the cut FFs)
+so both sides share one named interface; leftover original ports keep
+their names. Name-set mismatch is FAIL. Prove with a single Yosys
+`miter -equiv` (pairs by port name, not order) plus combo
+`sat -prove-asserts` or ABC on that miter. Reset kind / polarity / value
+are checked separately (mismatch is FAIL). All must hold.
 """
 
 from __future__ import annotations
@@ -19,6 +28,8 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from deadreg import leftover_pyc_reg
 
 FF_TYPES = {
     "$dff",
@@ -44,10 +55,25 @@ ASYNC_RST_PINS = {
 
 DELETE_SEL = " ".join(f"t:{t}" for t in sorted(FF_TYPES))
 
+# Pairing after flatten only. pyc_reg must already have become $dff/$adff.
+FLAT_FF = {"$dff", "$dffe", "$adff", "$adffe", "$sdff", "$sdffe", "$sdffce", "$ff"}
+
+EXPECTED_KEYS = {
+    "ub_dll_bcrc": ("crc", "crc_word", "done"),
+    "ub_dll_bcrc_check": ("crc", "crc_word", "done", "recv_q", "ok_q", "fail_q", "eflag_q"),
+}
+
+# Design mid-block vector: all five next-states are crc=0, crc_word=0, done=0.
+MIDBLOCK_CRC = 0x0F3025FF
+MIDBLOCK_DATA = 0x95522B20C1A2B75FE014284D66455D40A1227BC3
+
 NORM_HELP = (
-    "strip leading '\\'; last hierarchy component ('.' or '/'); "
-    "strip trailing bit-select; strip trailing '$...'; strip one trailing "
-    "'_q' (case-insensitive); lowercase"
+    "flatten first, then $dff Q/D (D = post reset/hold mux, not pyc_reg.d / "
+    "*__next). Pairing key = all wires on the Q bit-group, minus pycc "
+    "auto-names (pyc_reg_N / pyc_comb_N / __…L<line>), last hierarchy "
+    "segment, intersect both sides; exactly one pairs. Cell names are "
+    "not keys. Pair before opt_clean. extra/missing/width = "
+    "NOTAPPLICABLE(set-mismatch) → uncut output seq (PM)"
 )
 
 
@@ -67,16 +93,51 @@ def _param_int(raw: object) -> int | None:
         return None
 
 
+_PYC_AUTO_SEG = re.compile(r"^(pyc_reg|pyc_comb)_\d+(_inst)?$", re.I)
+_LINE_SFX = re.compile(r"(?:__[A-Za-z_][A-Za-z0-9_]*)*__L\d+$")
+
+
 def normalize_reg_name(name: str) -> str:
+    """Last hierarchy segment after dropping a pycc __…L<line> suffix."""
     n = name.strip()
     if n.startswith("\\"):
         n = n[1:]
     n = n.replace("/", ".")
     n = n.split(".")[-1]
     n = re.sub(r"\[[^\]]+\]$", "", n)
-    n = re.sub(r"\$[^./]*$", "", n)
-    n = re.sub(r"_q$", "", n, flags=re.I)
+    n = re.sub(r"\$.*$", "", n)
+    n = _LINE_SFX.sub("", n)
+    n = n.rstrip("_")
     return n.lower()
+
+
+def is_pycc_auto_name(name: str) -> bool:
+    """pyc_reg_N / pyc_comb_N / pyc_reg_N_inst.q and any path containing those."""
+    raw = name[1:] if name.startswith("\\") else name
+    raw = raw.replace("/", ".")
+    return any(_PYC_AUTO_SEG.fullmatch(seg) for seg in raw.split("."))
+
+
+def strip_q_key(key: str) -> str:
+    return re.sub(r"_q$", "", key, flags=re.I)
+
+
+def net_of_cell_port(mod: dict, bits: list) -> str | None:
+    """Exact bit-vector match only. No subset / alias-superset fallback."""
+    target = _bits_tuple(bits)
+    if not target:
+        return None
+    scored: list[tuple[int, int, int, str]] = []
+    for name, info in (mod.get("netnames") or {}).items():
+        if _bits_tuple(info.get("bits") or []) != target:
+            continue
+        hide = 1 if info.get("hide_name") else 0
+        ugly = 1 if ("$" in name or "func" in name) else 0
+        scored.append((hide, ugly, len(name), name))
+    if not scored:
+        return None
+    scored.sort()
+    return scored[0][3]
 
 
 def yosys_id(name: str) -> str:
@@ -90,28 +151,54 @@ def _bits_tuple(bits: list) -> tuple:
     return tuple(bits)
 
 
-def _net_by_bits(mod: dict, bits: list) -> str | None:
+_LOOP_TEMP = re.compile(r"^(by|bi|i|j|k|n|t|idx|cnt)$", re.I)
+
+
+def is_arch_q_name(name: str) -> bool:
+    """Architectural Q: public, not a $func leftover or loop/block temp."""
+    raw = name[1:] if name.startswith("\\") else name
+    if "$" in raw:
+        return False
+    last = raw.replace("/", ".").split(".")[-1]
+    if _LOOP_TEMP.fullmatch(last):
+        return False
+    return True
+
+
+def public_aliases(mod: dict, bits: list) -> list[str]:
+    """Every net name that shares the exact Q/D bit-group (incl. hidden)."""
     target = _bits_tuple(bits)
-    scored: list[tuple[int, int, int, str]] = []
+    if not target:
+        return []
+    names: list[str] = []
     for name, info in (mod.get("netnames") or {}).items():
-        nb = _bits_tuple(info.get("bits") or [])
-        if nb != target:
+        raw = name[1:] if name.startswith("\\") else name
+        if raw.startswith("$") or "$" in raw:
             continue
-        hide = 1 if info.get("hide_name") else 0
-        ugly = 1 if ("$" in name or "func" in name) else 0
-        scored.append((hide, ugly, len(name), name))
-    if scored:
-        scored.sort()
-        return scored[0][3]
-    for name, info in (mod.get("netnames") or {}).items():
-        if info.get("hide_name"):
+        if _bits_tuple(info.get("bits") or []) != target:
             continue
-        nb = info.get("bits") or []
-        if not nb:
+        names.append(name)
+    return sorted(names)
+
+
+def alias_keys(aliases: list[str]) -> dict[str, str]:
+    """normalized architectural key → first original name.
+
+    Drops pycc auto-names (pyc_reg_N / pyc_comb_N / __…L<line>) before
+    intersecting with the other side.
+    """
+    out: dict[str, str] = {}
+    for name in aliases:
+        if is_pycc_auto_name(name):
             continue
-        if all(b in nb for b in bits):
-            return name
-    return None
+        if not is_arch_q_name(name):
+            continue
+        key = normalize_reg_name(name)
+        if not key or is_pycc_auto_name(key) or _LOOP_TEMP.fullmatch(key):
+            continue
+        if key not in out:
+            out[key] = name
+    return out
 
 
 @dataclass
@@ -128,6 +215,8 @@ class Flop:
     q_bits: tuple = field(default_factory=tuple)
     clk_name: str | None = None
     async_rst: tuple[str, ...] = ()
+    q_aliases: tuple[str, ...] = ()
+    key_candidates: tuple[str, ...] = ()
 
 
 def _ff_reset(ftype: str, params: dict) -> tuple[str, int | None, int | None]:
@@ -155,21 +244,26 @@ def extract_flops(mod: dict) -> list[Flop]:
     found: list[Flop] = []
     for cname, cell in cells.items():
         ftype = cell.get("type") or ""
-        if ftype not in FF_TYPES:
+        ftype_norm = ftype.lstrip("\\")
+        if ftype not in FLAT_FF:
             continue
         params = cell.get("parameters") or {}
         conns = cell.get("connections") or {}
-        width = _param_int(params.get("WIDTH")) or len(conns.get("Q") or []) or 1
-        q_name = _net_by_bits(mod, conns.get("Q") or []) or cname
-        d_name = _net_by_bits(mod, conns.get("D") or [])
-        key = normalize_reg_name(q_name)
-        if not key:
-            key = normalize_reg_name(cname) or f"cell_{len(found)}"
+        q_bits = conns.get("Q") or conns.get("q") or []
+        d_bits = conns.get("D") or conns.get("d") or []
+        width = _param_int(params.get("WIDTH")) or len(q_bits) or 1
+        q_name = net_of_cell_port(mod, q_bits) or cname
+        d_name = net_of_cell_port(mod, d_bits)
+        aliases = public_aliases(mod, q_bits)
+        keys = alias_keys(aliases)
+        if not keys:
+            # Function-proc leftovers / pycc-only names. Not architectural.
+            continue
         kind, pol, val = _ff_reset(ftype, params)
-        clk_name = _net_by_bits(mod, conns.get("CLK") or [])
+        clk_name = net_of_cell_port(mod, conns.get("CLK") or conns.get("clk") or [])
         arst: list[str] = []
         for pin in ASYNC_RST_PINS.get(ftype, ()):
-            n = _net_by_bits(mod, conns.get(pin) or [])
+            n = net_of_cell_port(mod, conns.get(pin) or [])
             if n:
                 arst.append(n)
         found.append(
@@ -179,13 +273,15 @@ def extract_flops(mod: dict) -> list[Flop]:
                 width=width,
                 q_name=q_name,
                 d_name=d_name,
-                key=key,
+                key="",
                 kind=kind,
                 polarity=pol,
                 value=val,
-                q_bits=_bits_tuple(conns.get("Q") or []),
+                q_bits=_bits_tuple(q_bits),
                 clk_name=clk_name,
                 async_rst=tuple(arst),
+                q_aliases=tuple(aliases),
+                key_candidates=tuple(sorted(keys)),
             )
         )
     return found
@@ -195,6 +291,8 @@ def group_by_key(flops: list[Flop]) -> tuple[dict[str, Flop], list[str]]:
     """One flop per normalized key. Ambiguous keys are errors."""
     buckets: dict[str, list[Flop]] = {}
     for ff in flops:
+        if not ff.key:
+            continue
         buckets.setdefault(ff.key, []).append(ff)
     out: dict[str, Flop] = {}
     errors: list[str] = []
@@ -208,6 +306,78 @@ def group_by_key(flops: list[Flop]) -> tuple[dict[str, Flop], list[str]]:
             f"ambiguous key={key} cells={len(group)} widths={sorted(widths)} names={names}"
         )
     return out, errors
+
+
+def assign_pairing_keys(
+    gold_flops: list[Flop],
+    gate_flops: list[Flop],
+) -> list[str]:
+    """Set ff.key from architectural Q aliases. Cell names are never keys.
+
+    Collect every wire on the Q bit-group, drop pycc auto-names, normalize,
+    intersect with the other side. Exactly one common name pairs.
+    A side with one leftover name uses that name. 0 or >1 → FAIL(pairing).
+    """
+    gold_all = {k for ff in gold_flops for k in ff.key_candidates}
+    gate_all = {k for ff in gate_flops for k in ff.key_candidates}
+    errors: list[str] = []
+
+    def resolve(side: str, flops: list[Flop], other: set[str]) -> None:
+        for ff in flops:
+            cands = list(ff.key_candidates)
+            aliases = ",".join(ff.q_aliases) or "-"
+            if len(cands) == 1:
+                ff.key = cands[0]
+                print(
+                    f"equiv_ref REGPAIR resolve {side} cell={ff.cell} "
+                    f"q_port={ff.q_name} d_port={ff.d_name} aliases={aliases} "
+                    f"picked={ff.key} reason=unique"
+                )
+                continue
+            common = sorted(set(cands) & other)
+            if len(common) == 1:
+                ff.key = common[0]
+                print(
+                    f"equiv_ref REGPAIR resolve {side} cell={ff.cell} "
+                    f"q_port={ff.q_name} d_port={ff.d_name} aliases={aliases} "
+                    f"picked={ff.key} reason=both-sides candidates={','.join(cands)}"
+                )
+                continue
+            ff.key = ""
+            msg = (
+                f"{side} cell={ff.cell} q_port={ff.q_name} d_port={ff.d_name} "
+                f"aliases={aliases} candidates={','.join(cands) or '-'} "
+                f"common={','.join(common) or '-'}"
+            )
+            errors.append(msg)
+            print(f"equiv_ref REGPAIR FAIL(pairing) {msg}")
+
+    resolve("gold", gold_flops, gate_all)
+    resolve("gate", gate_flops, gold_all)
+    return errors
+
+
+def rematch_q_suffix(gold_flops: list[Flop], gate_flops: list[Flop]) -> None:
+    """crc vs crc_q: leftover keys that differ only by a trailing _q."""
+    gold_map, _ = group_by_key(gold_flops)
+    gate_map, _ = group_by_key(gate_flops)
+    g_left = [ff for ff in gold_flops if ff.key and ff.key not in gate_map]
+    t_left = [ff for ff in gate_flops if ff.key and ff.key not in gold_map]
+    g_by: dict[str, list[Flop]] = {}
+    t_by: dict[str, list[Flop]] = {}
+    for ff in g_left:
+        g_by.setdefault(strip_q_key(ff.key), []).append(ff)
+    for ff in t_left:
+        t_by.setdefault(strip_q_key(ff.key), []).append(ff)
+    for sk, gffs in g_by.items():
+        tffs = t_by.get(sk) or []
+        if len(gffs) == 1 and len(tffs) == 1:
+            old = tffs[0].key
+            tffs[0].key = gffs[0].key
+            print(
+                f"equiv_ref REGPAIR rematch q-suffix key={gffs[0].key} "
+                f"gate_was={old} gold_cell={gffs[0].cell} gate_cell={tffs[0].cell}"
+            )
 
 
 def reset_port(mod: dict) -> tuple[str | None, int | None]:
@@ -253,10 +423,30 @@ def parse_eval_values(text: str, names: list[str]) -> dict[str, int]:
     return got
 
 
-def eval_signals(rtlil: Path, top: str, assigns: dict[str, int], show: list[str]) -> dict[str, int]:
+def _eval_lit(val: int) -> str:
+    if val < 0:
+        return str(val)
+    if val <= 1:
+        return str(val)
+    bits = max(val.bit_length(), 1)
+    return f"{bits}'h{val:x}"
+
+
+def eval_signals(
+    rtlil: Path,
+    top: str,
+    assigns: dict[str, int],
+    show: list[str],
+    widths: dict[str, int] | None = None,
+) -> dict[str, int]:
     if not show:
         return {}
-    sets = [f"-set {name} {val}" for name, val in assigns.items()]
+    widths = widths or {}
+    sets = []
+    for name, val in assigns.items():
+        w = widths.get(name)
+        lit = f"{w}'h{val:x}" if w else _eval_lit(val)
+        sets.append(f"-set {name} {lit}")
     shows = " ".join(f"-show {n}" for n in show)
     script = (
         f"read_rtlil {rtlil}\n"
@@ -275,6 +465,39 @@ def eval_signals(rtlil: Path, top: str, assigns: dict[str, int], show: list[str]
 
 def eval_d_under_reset(rtlil: Path, top: str, d_names: list[str], rst: str, active: int) -> dict[str, int]:
     return eval_signals(rtlil, top, {rst: active}, d_names)
+
+
+def eval_directed_midblock(tmp: Path, gold_cut_mod: dict) -> None:
+    """Design mid-block vector. Correct cut → both D_crc/D_word/D_done = 0."""
+    ports = gold_cut_mod.get("ports") or {}
+    assigns = {
+        "rst_pyc": 0,
+        "start": 0,
+        "valid_in": 1,
+        "last": 0,
+        "data_in": MIDBLOCK_DATA,
+        "rp_q_crc": MIDBLOCK_CRC,  # 30-bit remainder 0x0F3025FF
+        "rp_q_crc_word": 0,
+        "rp_q_done": 0,
+    }
+    use = {k: v for k, v in assigns.items() if k in ports}
+    show = [n for n in ("rp_d_crc", "rp_d_crc_word", "rp_d_done") if n in ports]
+    widths = {"data_in": 160, "rp_q_crc": 30, "rp_q_crc_word": 32}
+    gvals = eval_signals(tmp / "gold_cut.il", "gold", use, show, widths)
+    tvals = eval_signals(tmp / "gate_cut.il", "gate", use, show, widths)
+    expect = {"rp_d_crc": 0, "rp_d_crc_word": 0, "rp_d_done": 0}
+    equal = all(gvals.get(n) == tvals.get(n) for n in show)
+    zeros = all(gvals.get(n) == expect.get(n, 0) for n in show)
+    match = equal and zeros
+    print(
+        f"equiv_ref REGPAIR directed_midblock "
+        f"Q_crc=0x{MIDBLOCK_CRC:x} start=0 valid=1 last=0 "
+        f"data=0x{MIDBLOCK_DATA:x} "
+        f"gold_D_crc={gvals.get('rp_d_crc')} gate_D_crc={tvals.get('rp_d_crc')} "
+        f"gold_D_word={gvals.get('rp_d_crc_word')} gate_D_word={tvals.get('rp_d_crc_word')} "
+        f"gold_D_done={gvals.get('rp_d_done')} gate_D_done={tvals.get('rp_d_done')} "
+        f"result={'match' if match else 'differ'}"
+    )
 
 
 def abc_kind(log: str) -> str:
@@ -361,12 +584,16 @@ def write_cut_script(
     for key, ff in pairs:
         if not ff.d_name:
             raise SystemExit(f"equiv_ref REGPAIR missing D net for key={key} q={ff.q_name}")
+        q_pin = "Q" if ff.ftype in FF_TYPES else "q"
         lines += [
             f"add -input rp_q_{key} {ff.width}",
             f"add -output rp_d_{key} {ff.width}",
+            # Drive every reader of the FF Q from the cut PI (same net as cell Q).
             f"connect -unset {yosys_id(ff.q_name)}",
             f"connect -set {yosys_id(ff.q_name)} rp_q_{key}",
+            # Export the cell D pin net, not a combo / output alias.
             f"connect -set rp_d_{key} {yosys_id(ff.d_name)}",
+            f"# cut cell={ff.cell} type={ff.ftype} q_pin={q_pin} q_net={ff.q_name} d_net={ff.d_name}",
         ]
     lines += [
         f"delete {DELETE_SEL}",
@@ -632,10 +859,42 @@ def main() -> int:
 
     print(f"equiv_ref REGPAIR norm={NORM_HELP}")
 
+    pyc_g = leftover_pyc_reg(gold_mod)
+    pyc_t = leftover_pyc_reg(gate_mod)
+    if pyc_g or pyc_t:
+        print(f"equiv_ref REGPAIR FAIL leftover_pyc_reg gold={pyc_g or '-'} gate={pyc_t or '-'}")
+        print("equiv_ref REGPAIR regpair=FAIL(flatten)")
+        return 2
+
     gold_flops = extract_flops(gold_mod)
     gate_flops = extract_flops(gate_mod)
+    premux = [
+        (side, ff)
+        for side, flops in (("gold", gold_flops), ("gate", gate_flops))
+        for ff in flops
+        if ff.d_name and "__next" in ff.d_name
+    ]
+    for side, ff in premux:
+        print(
+            f"equiv_ref REGPAIR FAIL pre-mux D {side} cell={ff.cell} d={ff.d_name} "
+            "(must use flattened $dff D after reset/hold mux, not pyc_reg.d)"
+        )
+    if premux:
+        print("equiv_ref REGPAIR regpair=FAIL(cut)")
+        return 1
+    print("equiv_ref REGPAIR csv side,cell,type,q_port,d_port,public_q_aliases,key_candidates")
+    for side, flops in (("gold", gold_flops), ("gate", gate_flops)):
+        for ff in flops:
+            print(
+                f"equiv_ref REGPAIR csv {side},{ff.cell},{ff.ftype},"
+                f"{ff.q_name},{ff.d_name},{'|'.join(ff.q_aliases) or '-'},"
+                f"{'|'.join(ff.key_candidates) or '-'}"
+            )
+    resolve_err = assign_pairing_keys(gold_flops, gate_flops)
+    rematch_q_suffix(gold_flops, gate_flops)
     gold_map, gold_amb = group_by_key(gold_flops)
     gate_map, gate_amb = group_by_key(gate_flops)
+    unresolved = [ff for ff in gold_flops + gate_flops if not ff.key]
     for msg in gold_amb + gate_amb:
         print(f"equiv_ref REGPAIR FAIL {msg}")
 
@@ -668,23 +927,40 @@ def main() -> int:
     for key, g, t in pairs:
         print(
             f"equiv_ref REGPAIR pair key={key} width={g.width} "
-            f"gold={g.q_name} gate={t.q_name} gold_type={g.ftype} gate_type={t.ftype}"
+            f"gold_cell={g.cell} gate_cell={t.cell} "
+            f"gold_q={g.q_name} gate_q={t.q_name} gold_d={g.d_name} gate_d={t.d_name} "
+            f"gold_type={g.ftype} gate_type={t.ftype}"
         )
     for ff in unmatched_gold:
-        print(f"equiv_ref REGPAIR unmatched gold key={ff.key} width={ff.width} name={ff.q_name}")
+        print(
+            f"equiv_ref REGPAIR unmatched gold key={ff.key} width={ff.width} "
+            f"cell={ff.cell} q={ff.q_name} d={ff.d_name}"
+        )
     for ff in unmatched_gate:
-        print(f"equiv_ref REGPAIR unmatched gate key={ff.key} width={ff.width} name={ff.q_name}")
+        print(
+            f"equiv_ref REGPAIR unmatched gate key={ff.key} width={ff.width} "
+            f"cell={ff.cell} q={ff.q_name} d={ff.d_name}"
+        )
     for msg in width_mismatch:
         print(f"equiv_ref REGPAIR width_mismatch {msg}")
 
-    pair_ok = not (gold_amb or gate_amb or unmatched_gold or unmatched_gate or width_mismatch)
-    if not pair_ok:
+    set_mismatch = bool(
+        gold_amb or gate_amb or unmatched_gold or unmatched_gate
+        or width_mismatch or resolve_err or unresolved
+    )
+    exp = EXPECTED_KEYS.get(args.leaf)
+    got = tuple(sorted({k for k, _g, _t in pairs}))
+    if exp:
+        print(f"equiv_ref REGPAIR expected_keys={','.join(exp)}")
+        print(f"equiv_ref REGPAIR got_keys={','.join(got) if got else '-'}")
+    if set_mismatch:
         print("equiv_ref REGPAIR pairing=FAIL")
-        print("equiv_ref REGPAIR cec_line=skipped (pairing failed)")
-        print("equiv_ref REGPAIR reset=skipped (pairing failed)")
-        print("equiv_ref REGPAIR method=regpair result=pairing_fail")
+        print("equiv_ref REGPAIR cec_line=skipped (set-mismatch extra/missing/width)")
+        print("equiv_ref REGPAIR reset=skipped (set-mismatch)")
+        print("equiv_ref REGPAIR method=regpair result=set_mismatch")
         print("equiv_ref REGPAIR regpair=FAIL(pairing)")
-        return 2
+        print("equiv_ref REGPAIR set_mismatch=1")
+        return 4
     print("equiv_ref REGPAIR pairing=PASS")
 
     rst_g, act_g = reset_port(gold_mod)
@@ -734,6 +1010,20 @@ def main() -> int:
         print("equiv_ref REGPAIR reset=PASS")
     else:
         print("equiv_ref REGPAIR reset=FAIL")
+
+    for key, g, t in pairs:
+        g_val, t_val = g.value, t.value
+        if g_val is None and g.d_name and g.d_name in eval_g:
+            g_val = eval_g[g.d_name]
+        if t_val is None and t.d_name and t.d_name in eval_t:
+            t_val = eval_t[t.d_name]
+        print(
+            f"equiv_ref REGPAIR table key={key} width={g.width} "
+            f"gold_cell={g.cell} gate_cell={t.cell} "
+            f"rst_gold={g_val} rst_gate={t_val} "
+            f"gold_q={g.q_name} gate_q={t.q_name} "
+            f"gold_d={g.d_name} gate_d={t.d_name}"
+        )
 
     gold_strip = strip_ports_for([g for _k, g, _t in pairs], gold_mod)
     gate_strip = strip_ports_for([t for _k, _g, t in pairs], gate_mod)
@@ -798,6 +1088,9 @@ def main() -> int:
         print("equiv_ref REGPAIR method=regpair result=ports_fail")
         print("equiv_ref REGPAIR regpair=FAIL(ports)")
         return 2
+
+    if {"crc", "crc_word", "done"} <= {k for k, _g, _t in pairs}:
+        eval_directed_midblock(tmp, gold_cut_mod)
 
     po_names = sorted(set(gold_po) | set(gate_po))
     kind, used, line, wit = prove_miter(tmp, args.tmo, args.abc, po_names)

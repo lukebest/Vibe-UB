@@ -20,8 +20,15 @@ EQUIV_TMO="${EQUIV_TMO:-90}"
 EQUIV_METHODS="${EQUIV_METHODS:-equiv,sat,abc,regpair}"
 # abc family: dsec, cec, both (default). cec skips sequential dsec.
 EQUIV_ABC_STAGE="${EQUIV_ABC_STAGE:-both}"
-# Uncut output-only BMC / tempinduct depth (seq method).
-EQUIV_SEQ_DEPTH="${EQUIV_SEQ_DEPTH:-16}"
+# Official uncut sequential proof. Depth / SAT / ABC are frozen here so
+# design reproduces with this script only. Do not use -set-init-def:
+# Yosys 0.33 and current master still hit satgen.h
+# log_assert(!undef_mode || model_undef) unless -enable_undef is also set.
+SEQ_BMC_DEPTH=8
+SEQ_TMO=40
+SEQ_RST_HOLD="-set-at 1 in_rst_pyc 1 -set-at 2 in_rst_pyc 1"
+# Kept for callers; official seq ignores this and uses SEQ_BMC_DEPTH.
+EQUIV_SEQ_DEPTH="${EQUIV_SEQ_DEPTH:-$SEQ_BMC_DEPTH}"
 
 usage() {
   echo "usage: $0 <leaf> <netlist.v>" >&2
@@ -35,7 +42,7 @@ usage() {
   echo "  EQUIV_INC=dir[:dir] extra include dirs (after the repo primitive dir)." >&2
   echo "  EQUIV_METHODS=equiv,sat,abc,regpair,seq  families to try (default first four)." >&2
   echo "  EQUIV_ABC_STAGE=dsec|cec|both  (default both)." >&2
-  echo "  EQUIV_SEQ_DEPTH=N  uncut output-only BMC/tempinduct (default 16)." >&2
+  echo "  EQUIV_SEQ_DEPTH=N  unused for official seq (SEQ_BMC_DEPTH=8 is frozen)." >&2
   echo "  EQUIV_TMO=seconds per method (default 90). Timeout = unproven." >&2
   exit 2
 }
@@ -501,6 +508,8 @@ fi
 # with those three OK is INCONCLUSIVE(state-encoding): switch to uncut
 # output-only sequential proof. That proof must induct; BMC-only is 未证完.
 REGPAIR_INCONCLUSIVE=0
+# PM: extra/missing/width → NOTAPPLICABLE(set-mismatch) → uncut output seq.
+# Reset kind/value mismatch and DEADREG stay independent FAILs.
 try_regpair() {
   local t0 tmp abc_bin py extra=()
   t0="$(sec_now)"
@@ -517,17 +526,33 @@ try_regpair() {
     return 1
   fi
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/equiv_ref_regpair.XXXXXX")"
+  local yosys_ver abc_ver
+  yosys_ver="$(yosys -V 2>&1 | head -n 1)"
+  abc_ver="$("$abc_bin" -c version 2>&1 | head -n 3 | tr '\n' ' ')"
+  echo "equiv_ref REGPAIR yosys=${yosys_ver}"
+  echo "equiv_ref REGPAIR abc=${abc_ver}"
   echo "equiv_ref note: trying register pairing + name-paired miter (sat/ABC)"
+  echo "equiv_ref note: pair after flatten, before opt_clean (unused extra FFs must remain)"
+  echo "equiv_ref REGPAIR set_mismatch_policy=seq (PM: NOTAPPLICABLE → uncut output seq)"
   if [[ -n "${EQUIV_REGPAIR_OMIT_PO:-}" ]]; then
     extra+=(--omit-po "$EQUIV_REGPAIR_OMIT_PO")
     extra+=(--omit-side "${EQUIV_REGPAIR_OMIT_SIDE:-gold}")
   fi
-  local dump="${prep_gold}${prep_gate}
-design -load gold
+  # Flatten only — no opt_clean. Unused keep-regs (extra) must still pair-fail.
+  local dump="${gold_read}
+${gold_ch}
+hierarchy -check -top ${LEAF}
+rename -top gold
+proc; flatten
 autoname
 write_json ${tmp}/gold.json
 write_rtlil ${tmp}/gold.il
-design -load gate
+design -reset
+${gate_read}
+${gate_ch}
+hierarchy -check -top ${GATE_TOP}
+rename -top gate
+proc; flatten
 autoname
 write_json ${tmp}/gate.json
 write_rtlil ${tmp}/gate.il
@@ -547,10 +572,26 @@ write_rtlil ${tmp}/gate.il
     rm -rf "$tmp"
     return 1
   fi
+  local deadreg="$ROOT/scripts/gate/deadreg.py"
+  local drc=0
+  if [[ -f "$deadreg" ]]; then
+    set +e
+    python3 "$deadreg" --json "${tmp}/gate.json" --top gate --label "dut $(basename "$NET")"
+    drc=$?
+    set -e
+  fi
   set +e
   python3 "$py" --leaf "$LEAF" --tmp "$tmp" --abc "$abc_bin" --tmo "$EQUIV_TMO" "${extra[@]}"
   local prc=$?
   set -e
+  if [[ "$drc" -ne 0 ]]; then
+    echo "equiv_ref DEADREG independent FAIL; seq cannot cancel it"
+    log_time "deadreg" "$t0" "fail"
+    rm -rf "$tmp"
+    echo "equiv_ref METHOD=deadreg" >&2
+    echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (GATE-SYN-DEADREG)" >&2
+    exit 1
+  fi
   if [[ "$prc" -eq 0 ]]; then
     log_time "regpair" "$t0" "equivalent"
     rm -rf "$tmp"
@@ -564,11 +605,21 @@ write_rtlil ${tmp}/gate.il
     rm -rf "$tmp"
     return 0
   fi
+  if [[ "$prc" -eq 4 ]]; then
+    echo "equiv_ref REGPAIR set-mismatch extra/missing/width"
+    echo "equiv_ref REGPAIR regpair=NOTAPPLICABLE(set-mismatch)"
+    echo "equiv_ref note: set-mismatch → uncut output seq (PM)"
+    log_time "regpair" "$t0" "set_mismatch_seq"
+    REGPAIR_INCONCLUSIVE=1
+    rm -rf "$tmp"
+    return 0
+  fi
   if [[ "$prc" -eq 124 ]]; then
     log_time "regpair" "$t0" "timeout"
     rm -rf "$tmp"
     return 1
   fi
+  echo "equiv_ref note: FAIL(ports/reset) is independent; seq cannot cancel it"
   log_time "regpair" "$t0" "not_equivalent"
   rm -rf "$tmp"
   echo "equiv_ref METHOD=regpair" >&2
@@ -576,99 +627,70 @@ write_rtlil ${tmp}/gate.il
   exit 1
 }
 
-# Uncut FFs. Miter asserts leaf outputs only. From reset. Induction must
-# converge to pass. BMC to N with no CEX is 未证完 and FAIL (never a pass).
+# Uncut FFs. Miter asserts leaf outputs only. Each side starts at its own
+# reset value (not -set-init-zero). write_aiger -zinit + ABC bmc3 searches
+# for a CEX. Timeout is neither pass nor disprove. Induction must converge
+# to pass. BMC to N with no CEX is 未证完 and FAIL (never a pass).
+# Asserts are skipped for the rst-hold steps (release afterwards).
 try_seq_out() {
-  local t0 tmp abc_bin tmo depth rst_at script_seq script_bmc log rc kind
-  t0="$(sec_now)"
-  tmo="$EQUIV_TMO"
-  depth="${EQUIV_SEQ_DEPTH:-16}"
+  local t0 tmp abc_bin yosys_ver abc_ver py rc cex_dir inc_args=()
   abc_bin="$(command -v yosys-abc || true)"
-  rst_at=""
-  case "$LEAF" in
-    ub_dll_bcrc|ub_dll_bcrc_check) rst_at="-set-at 1 in_rst_pyc 1 -set-at 2 in_rst_pyc 1" ;;
-  esac
-  echo "equiv_ref note: uncut output-only seq from reset (induction required; BMC-only=未证完)"
-
-  # BMC first: a CEX is a real output FAIL. Clean BMC is not a pass.
-  t0="$(sec_now)"
-  script_bmc="${prep_gold}${prep_gate}${restore}
-miter -equiv -flatten -make_assert gold gate miter
-hierarchy -top miter
-sat -seq ${depth} -verify -prove-asserts -set-init-zero ${rst_at} -timeout ${tmo}
-"
-  echo "equiv_ref note: BMC depth=${depth} (CEX = FAIL; no CEX continues to induction)"
-  if run_yosys "$script_bmc" "$((tmo + 15))"; then
-    log_time "seq-bmc" "$t0" "no_cex"
-    echo "equiv_ref SEQ bmc_depth=${depth} result=no_cex"
-  else
-    fail_if_cex "seq-bmc" "${OUT:-}"
-    if [[ "${RC:-1}" -eq 124 ]]; then
-      log_time "seq-bmc" "$t0" "timeout"
-    else
-      log_time "seq-bmc" "$t0" "unproven"
-    fi
-  fi
-
-  t0="$(sec_now)"
-  script_seq="${prep_gold}${prep_gate}${restore}
-miter -equiv -flatten -make_assert gold gate miter
-hierarchy -top miter
-sat -verify -tempinduct -prove-asserts -set-init-zero ${rst_at} -timeout ${tmo}
-"
-  if run_yosys "$script_seq" "$((tmo + 15))"; then
-    log_time "seq-tempinduct" "$t0" "equivalent"
-    pass_method "uncut output miter + sat -tempinduct -prove-asserts (reset-init)"
-  fi
-  fail_if_cex "seq-tempinduct" "${OUT:-}"
-  if [[ "${RC:-1}" -eq 124 ]]; then
-    log_time "seq-tempinduct" "$t0" "timeout"
-  else
-    log_time "seq-tempinduct" "$t0" "unproven"
-  fi
-
+  yosys_ver="$(yosys -V 2>&1 | head -n 1)"
+  abc_ver="missing"
   if [[ -n "$abc_bin" ]]; then
-    tmp="$(mktemp -d "${TMPDIR:-/tmp}/equiv_ref_seq.XXXXXX")"
-    local script_aig="${prep_gold}${prep_gate}${restore}
-miter -equiv -flatten -make_assert gold gate miter
-hierarchy -top miter
-delete t:\$assert t:\$assume t:\$live t:\$fair
-techmap; opt; aigmap; opt
-write_aiger -symbols -miter ${tmp}/miter.aig
-"
-    t0="$(sec_now)"
-    set +e
-    run_yosys "$script_aig" "$tmo"
-    set -e
-    if [[ -s "${tmp}/miter.aig" ]]; then
-      for cmd in "pdr" "dprove"; do
-        log="${tmp}/${cmd}.log"
-        set +e
-        timeout "$tmo" "$abc_bin" -c "read ${tmp}/miter.aig; ${cmd}" >"$log" 2>&1
-        rc=$?
-        set -e
-        cat "$log"
-        kind="$(abc_parse "$log")"
-        if [[ "$kind" == equivalent ]]; then
-          log_time "seq-abc-${cmd}" "$t0" "equivalent"
-          rm -rf "$tmp"
-          pass_method "uncut output miter + ABC ${cmd}"
-        fi
-        if [[ "$kind" == not_equivalent ]]; then
-          log_time "seq-abc-${cmd}" "$t0" "not_equivalent"
-          rm -rf "$tmp"
-          echo "equiv_ref METHOD=seq-abc-${cmd}" >&2
-          echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (ABC ${cmd}: not equivalent)" >&2
-          exit 1
-        fi
-      done
-    fi
-    rm -rf "$tmp"
+    abc_ver="$("$abc_bin" -c version 2>&1 | head -n 3 | tr '\n' ' ')"
   fi
-
-  echo "equiv_ref SEQ 未证完 (BMC ${depth} cycles, induction did not converge)"
+  py="$ROOT/scripts/gate/seq_bmc.py"
+  echo "equiv_ref SEQ yosys=${yosys_ver}"
+  echo "equiv_ref SEQ abc=${abc_ver}"
+  echo "equiv_ref SEQ depth=${SEQ_BMC_DEPTH} tmo=${SEQ_TMO}"
+  echo "equiv_ref SEQ rst_hold=steps 1..2 prove-skip=2"
+  echo "equiv_ref SEQ forbid=-set-init-zero -set-init-def"
+  echo "equiv_ref SEQ init=reset-value write_aiger=-zinit abc=bmc3"
+  echo "equiv_ref note: uncut output-only seq from reset values (induction required; BMC-only=未证完; timeout≠CEX)"
+  if [[ ! -f "$py" ]]; then
+    echo "equiv_ref note: seq_bmc.py missing"
+    echo "equiv_ref METHOD=seq-unproven" >&2
+    echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (seq: missing seq_bmc.py)" >&2
+    exit 1
+  fi
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/equiv_ref_seq.XXXXXX")"
+  cex_dir="${EQUIV_CEX_DIR:-${TMPDIR:-/tmp}/equiv_seq_cex_${LEAF}_$$}"
+  mkdir -p "$cex_dir"
+  for d in "${INC_FLAGS[@]+"${INC_FLAGS[@]}"}"; do
+    inc_args+=(--inc "$d")
+  done
+  t0="$(sec_now)"
+  set +e
+  python3 "$py" \
+    --leaf "$LEAF" --net "$NET_ABS" --root "$ROOT" --tmp "$tmp" \
+    --abc "${abc_bin:-yosys-abc}" --tmo "$SEQ_TMO" --depth "$SEQ_BMC_DEPTH" \
+    --gate-top "$GATE_TOP" --cex-dir "$cex_dir" \
+    --gold-chparam "$gold_ch" --gate-chparam "$gate_ch" \
+    "${inc_args[@]}"
+  rc=$?
+  set -e
+  if [[ "$rc" -eq 0 ]]; then
+    log_time "seq-bmc3/induct" "$t0" "equivalent"
+    rm -rf "$tmp"
+    pass_method "uncut output miter + reset-valued init + write_aiger -zinit + ABC bmc3 / sat-tempinduct"
+  fi
+  if [[ "$rc" -eq 1 ]]; then
+    log_time "seq-bmc3" "$t0" "not_equivalent"
+    echo "equiv_ref METHOD=seq-bmc3" >&2
+    echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (ABC bmc3 / sat BMC: counterexample)" >&2
+    rm -rf "$tmp"
+    exit 1
+  fi
+  if [[ "$rc" -eq 124 ]]; then
+    log_time "seq-bmc3" "$t0" "timeout"
+  else
+    log_time "seq-bmc3" "$t0" "unproven"
+  fi
+  rm -rf "$tmp"
+  echo "equiv_ref SEQ 未证完 (BMC ${SEQ_BMC_DEPTH} cycles, induction did not converge)"
   echo "equiv_ref METHOD=seq-unproven" >&2
-  echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (seq: 未证完 BMC=${depth})" >&2
+  echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (seq: 未证完 BMC=${SEQ_BMC_DEPTH})" >&2
   exit 1
 }
 

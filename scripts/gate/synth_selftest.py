@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from gatelib import handwritten_modules
-from synth_check import parse_yosys, synth_module
+from synth_check import deadreg_module, parse_yosys, synth_module
 
 
 def _fail(name: str, detail: str) -> None:
@@ -136,8 +136,23 @@ def test_parse_does_not_skip_adff_line() -> None:
     print("SELFTEST PASS synth-parse-no-skip: $adff line still MULTI_DRIVE+COMBO_LOOP")
 
 
+def test_deadreg_catches_extra() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "dead_extra.sv"
+        path.write_text(
+            "module dead_extra (input clk, input d, output reg q);\n"
+            "  reg extra;\n"
+            "  always @(posedge clk) begin q <= d; extra <= extra ^ d; end\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        findings = deadreg_module("dead_extra", path, [path], [])
+        _expect_rule("synth-deadreg-extra", findings, "DEADREG")
+
+
 def main() -> int:
     for fn in (
+        test_deadreg_catches_extra,
         test_parse_does_not_skip_adff_line,
         test_async_ff_not_latch_or_loop,
         test_real_latch,

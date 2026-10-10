@@ -867,13 +867,20 @@ def test_equiv_ref_regpair() -> None:
     gold = root / "formal" / "dll" / "ref" / "ub_dll_bcrc.sv"
     extra = root / "formal" / "dll" / "negative" / "bcrc_extra_reg.sv"
     carry = root / "formal" / "dll" / "negative" / "bcrc_carry_after_last.sv"
+    drop = root / "formal" / "dll" / "negative" / "bcrc_drop_start_flit.sv"
+    flip = root / "formal" / "dll" / "negative" / "bcrc_flip.sv"
+    wrst = root / "formal" / "dll" / "negative" / "bcrc_wrong_reset.sv"
     if not script.is_file() or not gold.is_file():
         _fail("equiv-ref-regpair", "equiv_ref.sh or gold missing")
     env = {**os.environ, "EQUIV_METHODS": "regpair", "EQUIV_TMO": "25", "EQUIV_SEQ_DEPTH": "8"}
+    cex_root = Path(tempfile.mkdtemp(prefix="selftest_cex_"))
+    env["EQUIV_CEX_DIR"] = str(cex_root)
 
     good = run_cmd([str(script), "ub_dll_bcrc", str(gold)], env=env, timeout=90)
     if good.returncode != 0 or "equiv_ref PASS" not in (good.stdout or ""):
         _fail("equiv-ref-regpair-gold", (good.stdout or "")[-400:])
+    if not re.search(r"directed_midblock .*result=match", good.stdout or ""):
+        _fail("equiv-ref-regpair-gold", "expected directed_midblock result=match")
     print("SELFTEST PASS equiv-ref-regpair-gold: gold vs gold")
 
     with tempfile.TemporaryDirectory() as td:
@@ -897,25 +904,89 @@ def test_equiv_ref_regpair() -> None:
     extra_out = bad_extra.stdout or ""
     if bad_extra.returncode == 0:
         _fail("equiv-ref-regpair-extra", "extra-reg fake must fail")
+    if "DEADREG result=FAIL" not in extra_out:
+        _fail("equiv-ref-regpair-extra", f"GATE-SYN-DEADREG must catch extra: {extra_out[-400:]}")
     if "unmatched" not in extra_out:
         _fail("equiv-ref-regpair-extra", "expected unmatched register listing")
-    if "INCONCLUSIVE(state-encoding)" in extra_out:
-        _fail("equiv-ref-regpair-extra", "unmatched flop is FAIL(pairing), not INCONCLUSIVE")
-    print("SELFTEST PASS equiv-ref-regpair-extra: unmatched flop")
+    print("SELFTEST PASS equiv-ref-regpair-extra: DEADREG + unmatched flop")
 
-    bad_carry = run_cmd([str(script), "ub_dll_bcrc", str(carry)], env=env, timeout=120)
+    replay = root / "scripts" / "gate" / "replay_seq_cex.py"
+
+    def _require_bmc_icarus(name: str, net: Path, out: str) -> None:
+        if not re.search(
+            r"was asserted in frame|SAT proof finished - model found|Assert failed|proof did fail|NOT EQUIVALENT",
+            out,
+            re.I,
+        ):
+            _fail(f"equiv-ref-regpair-{name}", f"expected BMC CEX (timeout is not a CEX): {out[-600:]}")
+        if re.search(r"未证完", out) and not re.search(r"was asserted in frame|SAT proof finished", out, re.I):
+            _fail(f"equiv-ref-regpair-{name}", "timeout/未证完 is not a real CEX")
+        prefer = cex_root / f"{net.stem}.csv"
+        csvs = [prefer] if prefer.is_file() else list(cex_root.glob(f"*{net.stem}*.csv"))
+        if not csvs:
+            m = re.search(r"cex_csv=(\S+)", out)
+            if m and Path(m.group(1)).is_file():
+                csvs = [Path(m.group(1))]
+        if not csvs:
+            _fail(f"equiv-ref-regpair-{name}", "BMC CEX produced no CSV sequence")
+        icarus = run_cmd(
+            ["python3", str(replay), "--csv", str(csvs[0]), "--net", str(net), "--leaf", "ub_dll_bcrc"],
+            timeout=60,
+        )
+        icarus_out = icarus.stdout or ""
+        print(icarus_out)
+        if "REPLAY FIRST_DIFF" not in icarus_out:
+            _fail(f"equiv-ref-regpair-{name}", f"Icarus must reproduce a port mismatch: {icarus_out[-400:]}")
+        print(f"SELFTEST PASS equiv-ref-regpair-{name}: BMC CEX + Icarus {re.search(r'REPLAY FIRST_DIFF.*', icarus_out).group(0)}")
+
+    for name, net in (("drop", drop), ("flip", flip), ("wrong_reset", wrst)):
+        if not net.is_file():
+            _fail(f"equiv-ref-regpair-{name}", f"missing {net}")
+        proc = run_cmd([str(script), "ub_dll_bcrc", str(net)], env=env, timeout=180)
+        out = proc.stdout or ""
+        if proc.returncode == 0:
+            _fail(f"equiv-ref-regpair-{name}", "fake must fail")
+        if name == "wrong_reset":
+            if "reset=FAIL" not in out:
+                _fail(f"equiv-ref-regpair-{name}", out[-400:])
+            print(f"SELFTEST PASS equiv-ref-regpair-{name}: reset=FAIL")
+            continue
+        if name == "flip":
+            _require_bmc_icarus(name, net, out)
+            continue
+        if not re.search(
+            r"NOT EQUIVALENT|Assert failed|SAT proof finished - model found|proof did fail|was asserted in frame",
+            out,
+            re.I,
+        ):
+            _fail(f"equiv-ref-regpair-{name}", f"expected real CEX: {out[-400:]}")
+        print(f"SELFTEST PASS equiv-ref-regpair-{name}: real compare FAIL")
+
+    bad_carry = run_cmd([str(script), "ub_dll_bcrc", str(carry)], env=env, timeout=180)
     carry_out = bad_carry.stdout or ""
     if bad_carry.returncode == 0:
         _fail("equiv-ref-regpair-carry", "carry-after-last fake must fail")
     if "INCONCLUSIVE(state-encoding)" not in carry_out:
         _fail("equiv-ref-regpair-carry", f"expected INCONCLUSIVE then seq: {carry_out[-400:]}")
-    if not re.search(
-        r"NOT EQUIVALENT|Assert failed|SAT proof finished - model found|未证完",
-        carry_out,
-        re.I,
-    ):
-        _fail("equiv-ref-regpair-carry", f"expected real seq conclusion: {carry_out[-400:]}")
-    print("SELFTEST PASS equiv-ref-regpair-carry: INCONCLUSIVE then seq FAIL")
+    _require_bmc_icarus("carry", carry, carry_out)
+
+
+def test_deadreg_extra() -> None:
+    """GATE-SYN-DEADREG: extra-reg fake FAIL; gold PASS."""
+    root = Path(__file__).resolve().parents[2]
+    py = root / "scripts" / "gate" / "deadreg.py"
+    extra = root / "formal" / "dll" / "negative" / "bcrc_extra_reg.sv"
+    gold = root / "formal" / "dll" / "ref" / "ub_dll_bcrc.sv"
+    bad = run_cmd(["python3", str(py), "--v", str(extra), "--top", "ub_dll_bcrc", "--label", "extra"], timeout=60)
+    if bad.returncode == 0 or "DEADREG result=FAIL" not in (bad.stdout or ""):
+        _fail("deadreg-extra", bad.stdout or "no FAIL")
+    if "extra" not in (bad.stdout or ""):
+        _fail("deadreg-extra", "expected dead cell extra")
+    print("SELFTEST PASS deadreg-extra: extra Q does not reach an output")
+    good = run_cmd(["python3", str(py), "--v", str(gold), "--top", "ub_dll_bcrc", "--label", "gold"], timeout=60)
+    if good.returncode != 0 or "DEADREG result=PASS" not in (good.stdout or ""):
+        _fail("deadreg-gold", good.stdout or "gold must PASS")
+    print("SELFTEST PASS deadreg-gold: all FF Q reach outputs")
 
 
 def test_equiv_ref_real_compare() -> None:
@@ -990,6 +1061,7 @@ def main() -> int:
         test_hooks_wrong_width,
         test_equiv_wide_bus_and_flip,
         test_equiv_real_csr_tlb,
+        test_deadreg_extra,
         test_equiv_ref_regpair,
         test_equiv_ref_real_compare,
     ]

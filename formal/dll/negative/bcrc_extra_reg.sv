@@ -1,6 +1,6 @@
 // Negative fixture only: formula reference plus one extra keep-register
-// that the gold side does not have. Used to prove EQUIV_METHODS=regpair
-// fails on an unmatched flop. Not a reference. Not product RTL.
+// whose Q never reaches an output. GATE-SYN-DEADREG must FAIL. Pairing
+// also reports unmatched (set-mismatch). Not a reference. Not product RTL.
 `timescale 1ns / 1ps
 
 module ub_dll_bcrc (

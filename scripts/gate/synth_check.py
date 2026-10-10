@@ -3,13 +3,17 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
 import time
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from deadreg import find_dead_flops, leftover_pyc_reg
 
 from gatelib import (
     Finding,
@@ -253,6 +257,95 @@ def synth_module(
     return findings, text
 
 
+def deadreg_module(
+    module: str,
+    file: Path,
+    sources: list[Path],
+    incdirs: list[Path],
+    lib_extra: list[Path] | None = None,
+) -> list[Finding]:
+    """GATE-SYN-DEADREG: flatten, no opt_clean; FF Q must reach an output."""
+    inc = yosys_inc_prefix(incdirs)
+    reads: list[str] = []
+    seen: set[Path] = set()
+    lib_files = {p.resolve() for p in blackbox_lib_files()}
+    lib_files.update(p.resolve() for p in (lib_extra or []))
+    lib_files.discard(file.resolve())
+    for p in [file, *sources]:
+        if p.suffix.lower() not in {".v", ".sv"}:
+            continue
+        rp = p.resolve()
+        if rp in seen:
+            continue
+        seen.add(rp)
+        flag = "-sv" if rp.suffix.lower() == ".sv" else ""
+        lib = "-lib" if rp in lib_files else ""
+        reads.append(f"read_verilog {flag} {lib} {inc} {rp}".replace("  ", " "))
+    findings: list[Finding] = []
+    with tempfile.TemporaryDirectory(prefix="deadreg_syn_") as td:
+        js = Path(td) / "dut.json"
+        script = "\n".join(
+            [
+                *reads,
+                f"hierarchy -check -top {module}",
+                "proc",
+                "flatten",
+                f"write_json {js}",
+            ]
+        )
+        try:
+            proc = run_cmd(["yosys", "-q", "-p", script], timeout=MODULE_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            return [
+                Finding(
+                    check="synth",
+                    module=module,
+                    file=rel(file),
+                    rule="DEADREG",
+                    message=f"flatten/json timeout on {module}",
+                )
+            ]
+        if proc.returncode != 0 or not js.is_file():
+            return [
+                Finding(
+                    check="synth",
+                    module=module,
+                    file=rel(file),
+                    rule="DEADREG",
+                    message=f"flatten/json failed rc={proc.returncode}",
+                )
+            ]
+        data = json.loads(js.read_text(encoding="utf-8"))
+    mod = (data.get("modules") or {}).get(module)
+    if not mod:
+        return findings
+    pyc = leftover_pyc_reg(mod)
+    if pyc:
+        findings.append(
+            Finding(
+                check="synth",
+                module=module,
+                file=rel(file),
+                rule="DEADREG",
+                message=f"leftover pyc_reg after flatten: {pyc}",
+            )
+        )
+        return findings
+    dead = find_dead_flops(mod)
+    print(f"synth-check DEADREG {module}: flops_dead={len(dead)}")
+    for row in dead:
+        findings.append(
+            Finding(
+                check="synth",
+                module=module,
+                file=rel(file),
+                rule="DEADREG",
+                message=f"cell {row['cell']} q={row.get('q', '-')} type={row['type']} {row['reason']}",
+            )
+        )
+    return findings
+
+
 def main() -> int:
     print_tool_versions(["yosys", "python"])
     if not shutil_which("yosys"):
@@ -317,6 +410,11 @@ def main() -> int:
         t0 = time.monotonic()
         f, _ = synth_module(
             unit.module, unit.file, needed, disc["incdirs"], lib_extra=extra_lib
+        )
+        f.extend(
+            deadreg_module(
+                unit.module, unit.file, needed, disc["incdirs"], lib_extra=extra_lib
+            )
         )
         elapsed = time.monotonic() - t0
         timings.append((unit.module, elapsed))

@@ -33,3 +33,4 @@
 - 并入 `origin/main` `d8ef97e4`（D18）。§1.2 / §1.3 按 D18 写：全控制器，M1 仍是第一批 PHY+DLL。
 - §6.3 / §6.4：`ub_dll_retry` 叶子事件口（`ub_<层>_<功能>`）、脉冲/电平、同拍优先级。事件集合来自 UB-DL §4.7.3.3 / §4.7.3.4；针脚名、脉冲（重训标志位除外）、同拍仲裁为架构提案，列入 §13。`RETRY_WAIT_CYC` / `NUM_RETRY_THRESHOLD` / `NUM_PHY_REINIT_THRESHOLD` 仍在 §13，§6.3 只引参数名。
 - §3.3.4 / §6.1 / §13：`pcs2lmsm_null_blk` / `pcs2lmsm_tx_null_blk` 具体提案（宽 1、1 拍脉冲、LMSM 计数 8/16）待 Luke 批。未改 `docs/REGMAP.md` / yaml。
+- §11：每个叶子经 `scripts/emit_rtl.py` 出 PRODUCT 与 HOOKS；§10 无钩子的叶子 HOOKS 与 PRODUCT 功能相同；eqy 对每个叶子、`tb_test_mode=0`、钩子输入接低。§2.2：源在 `pycircuit/<layer>/`，`rtl/` 只放生成 `.v`（PRODUCT `rtl/<layer>/`，HOOKS `rtl/<layer>/hooks/`）。

@@ -110,13 +110,15 @@ PMA 模型在仿真里实例化，与 PCS 的边界是 M1 的 **PHY 数字/模�
 
 ### 2.2 模块职责
 
-| 模块 | 目录（生成后） | 职责 |
+**路径规则（已定）：** pyCircuit 源在 `pycircuit/<layer>/`。`rtl/` **只**放生成的 `.v`：PRODUCT 在 `rtl/<layer>/`，HOOKS 在 `rtl/<layer>/hooks/`。生成入口 `scripts/emit_rtl.py`（见 §11）。手写旧网表按 D10 迁 `legacy/`，不是源路径。
+
+| 模块 | 源 / 生成后 | 职责 |
 | --- | --- | --- |
-| `ub_controller` | `rtl/ub_controller.py` → `.v` | 顶层：例化 CSR / DLL / PCS / LMSM；PMA 模型仅 sim |
-| `ub_csr` | `rtl/csr/` | 寄存器堆、译码；粘滞位 W1C；计数 RO + `CNT_CLR`；把控制打到各块 |
-| `ub_dll` | `rtl/dll/` | DLL 状态机、组包/拆包、VL、信用、重传、BCRC（子块见 §2.6） |
-| `ub_pcs` | `rtl/pcs/` | FEC、扰码、8-bit 符号分发、AMCTL、deskew（子块见 §2.4） |
-| `ub_lmsm` | `rtl/lmsm/` | LMSM 及与 PMA 模型的训练握手 |
+| `ub_controller` | `pycircuit/` → `rtl/ub_controller.v` 与 `rtl/hooks/` | 顶层：例化 CSR / DLL / PCS / LMSM；PMA 模型仅 sim |
+| `ub_csr` | `pycircuit/csr/` → `rtl/csr/`、`rtl/csr/hooks/` | 寄存器堆、译码；粘滞位 W1C；计数 RO + `CNT_CLR`；把控制打到各块 |
+| `ub_dll` | `pycircuit/dll/` → `rtl/dll/`、`rtl/dll/hooks/` | DLL 状态机、组包/拆包、VL、信用、重传、BCRC（子块见 §2.6） |
+| `ub_pcs` | `pycircuit/pcs/` → `rtl/pcs/`、`rtl/pcs/hooks/` | FEC、扰码、8-bit 符号分发、AMCTL、deskew（子块见 §2.4） |
+| `ub_lmsm` | `pycircuit/lmsm/` → `rtl/lmsm/`、`rtl/lmsm/hooks/` | LMSM 及与 PMA 模型的训练握手 |
 | `ub_pma_model` | 不进产品 `rtl/`（路径 **待定**） | Gray（仅 PAM4）、预编码、串并、探测/电气空闲的行为 |
 
 现有 `rtl/pcs/ub_pcs_lmsm.v` 骨架不代表规范 LMSM，M1 以 §6.1 为准重写。
@@ -927,22 +929,24 @@ Retry 深度下界公式见 UB-DL §4.7.3.2（含 FEC 120/128 与 RTT）。M1 25
 
 ## 11. 两套生成网表（`TEST_HOOKS`）
 
-pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Verilog，而不是在 Verilog 里用 `ifdef` 再分叉一次。编码与门控约定见 §10、[CODING_STYLE.md](CODING_STYLE.md)。
+pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Verilog，而不是在 Verilog 里用 `ifdef` 再分叉一次。统一入口：`scripts/emit_rtl.py`。编码与门控约定见 §10、[CODING_STYLE.md](CODING_STYLE.md)。路径见 §2.2。
+
+**每个叶子都出两套网表：** `TEST_HOOKS=0` → PRODUCT（`rtl/<layer>/`）；`TEST_HOOKS=1` → HOOKS（`rtl/<layer>/hooks/`）。§10 **没有**列出钩子的叶子仍须发出 HOOKS 网表，功能与 PRODUCT **相同**（无 `tb_*` mux，或 mux 被生成期消掉）。eqy **对每个叶子**跑：HOOKS 侧 `tb_test_mode=0`，全部钩子输入（若该叶有）接低 / 复位不介入值。无钩子叶子的两套网表应对等价。
 
 | 网表 | 生成参数 | 用途 |
 | --- | --- | --- |
 | **PRODUCT** | `TEST_HOOKS=0` | **没有** `tb_*` 端口。用于 lint、CDC、综合、实现、FPGA。这是交付网表 |
-| **HOOKS** | `TEST_HOOKS=1` | 含钩子端口与 mux。必须过 lint 与 CDC，**不得**进入实现/FPGA |
+| **HOOKS** | `TEST_HOOKS=1` | 含钩子端口与 mux（无钩子叶子则与 PRODUCT 功能相同）。必须过 lint 与 CDC，**不得**进入实现/FPGA |
 
 规则：
 
 **(a) 实现只用 PRODUCT。** lint / CDC / 综合 / P&R / FPGA 的签字网表是 `TEST_HOOKS=0`。`TEST_HOOKS=1` 也必须过 lint 与 CDC，但永不进入实现。
 
-**(b) 回归与覆盖率跑 HOOKS。** 在 `TEST_HOOKS=1` 网上跑，且 **两种** `tb_test_mode` 都要覆盖：`tb_test_mode=0` 与 `tb_test_mode=1`。行覆盖率分母是 `TEST_HOOKS=1` 网表（含钩子 mux 代码）；钩子代码 **不另开 waiver**。
+**(b) 回归与覆盖率跑 HOOKS。** 在 `TEST_HOOKS=1` 网上跑，且 **两种** `tb_test_mode` 都要覆盖：`tb_test_mode=0` 与 `tb_test_mode=1`。行覆盖率分母是 `TEST_HOOKS=1` 网表（含钩子 mux 代码）；钩子代码 **不另开 waiver**。无钩子叶子的 HOOKS 网表仍参加门禁。
 
 **(c) PRODUCT 烟测。** `TEST_HOOKS=0` 网表跑一套与钩子无关的 smoke 子集（证明无钩子端口时功能闭环）。
 
-**(d) 形式等价门禁。** 用 Yosys eqy 或同等开源工具：`TEST_HOOKS=0` 对比 `TEST_HOOKS=1`，且后者 `tb_test_mode=0`、全部 `tb_inj_*` 接到各自复位值（不介入）。两者必须等价；不等价则 **阻断交付**。TEST 窗在这两种条件下都是「已映射、读 0、写忽略、`csr_err=0`」，因此不破坏等价。
+**(d) 形式等价门禁。** 用 Yosys eqy 或同等开源工具，**每个叶子**各比一次：`TEST_HOOKS=0` 对比 `TEST_HOOKS=1`，且后者 `tb_test_mode=0`、全部钩子输入接低（不介入）。两者必须等价；不等价则 **阻断交付**。TEST 窗在这两种条件下都是「已映射、读 0、写忽略、`csr_err=0`」，因此不破坏等价。
 
 **(e) 覆盖率 waiver。** 钩子 mux 不另开 waiver（见 (b)）。信用下溢（`CRD_UF` 计数与 irq 分支）在正确设计中不可达，须 **具名覆盖率 waiver**（§13.1）。
 

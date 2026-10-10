@@ -1,10 +1,11 @@
 # Created by venv; see https://docs.python.org/3/library/venv.html
 venv
 *.pdf
+__pycache__/
+*.pyc
+*.py[cod]
 
 # TB / cocotb / pytest (do not commit sim or coverage dumps)
-__pycache__/
-*.py[cod]
 .pytest_cache/
 .coverage
 htmlcov/

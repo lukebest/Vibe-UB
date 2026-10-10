@@ -4,6 +4,7 @@
 
 ### Added
 
+- M1 RTL leaf batch 1 (pyCircuit): whitelist `ub_rst_sync`; generated `ub_pyc_rst_adapt`, `ub_pcs_scrambler` / `ub_pcs_descrambler`, `ub_pcs_lane_dist_x4` / `_x8` / `ub_pcs_lane_dedist_x4` / `_x8`, `ub_dll_bcrc` / `ub_dll_bcrc_check`. STEP 1 leaves are real `@module` + `compile()` + `pycc --emit=verilog --logic-depth=64` (same invocation as PR #11; LLVM 19.1.1). PRODUCT at `rtl/<block>/<leaf>[_<tag>].v` and HOOKS at `rtl/<block>/hooks/` (SPEC §2.2 / CODING_STYLE §5 / §11). SPEC §10 lists no hook ports (HOOKS ≡ PRODUCT). Local SPEC-formula pre-check under `scripts/precheck/` (non-gating; official refs are `formal/<layer>/ref/` on PR #16). Scrambler / descrambler leftover f-string emitters pending STEP 2.
 - `tb/models/ub_pcs_fec.py`：RS(128,120) FEC 编解码黄金模型（UB-PHY §3.2.2.1 / §3.2.3.5，SPEC §2.4 `ub_pcs_fec_enc` / `ub_pcs_fec_dec`；T=4 / T=2 / bypass）。
 - `scripts/impl/buffer_fanout.py`：Yosys JSON 上确定性 `buf_4`/`buf_8` 扇出树（quick-synth 默认在 abc 之后调用）。
 - 工具守门 CI：`.github/workflows/gate.yml` + `scripts/gate/` + `make gate`（emit / 端口一致性 / lint / CDC / formal / synth-check / regmap `--check` / tb-selfcheck）。名单在 `gate/`（legacy / handwritten / stubs / hooks_ports），豁免在 `waivers/`，批准规则相同。等价主工具 eqy（`TOOLCHAIN.lock` `eqy_lock`），不可用则回退 Yosys `equiv_*` 并注明工具。规则分册 `docs/rules/verif_gate.md`。CODEOWNERS 将 `waivers/`、`gate/`、gate workflow 指给 `lukebest`。不改 `rtl/`、`tb/models/`、`model/`。SPEC §11 仅补 Xia 端口裁定 (f)。
@@ -25,6 +26,11 @@
 
 ### Changed
 
+- BCRC XOR-matrix helpers live in `pycircuit/dll/lib/` (`bcrc_hw`, `bcrc_matrix`); leaves import `from dll.lib import ...` (SPEC §2.2). Not leaves — gate scans `pycircuit/<layer>/*.py` only.
+- BCRC register names align with `formal/dll/ref/` for #16 name-pairing: gen `crc` / `crc_word` / `done`; check adds `recv_q` and drops dummy `zero_q`; `crc_ok` / `crc_fail` / `error_flag_rx` are combo `done ? cmp : hold`. pyCircuit names via `Circuit.out` (`pyc.name` alias); it cannot name `pyc_reg` instance Q. `Circuit.instance(..., name="u_crc")` is the hierarchy hook but pycc emits a hashed sibling cell first (DECLFILENAME), so the check leaf stays flat.
+- BCRC implements SPEC §2.6 #39 addendum: on `valid_in && last` the CRC register reloads INIT (all-ones). A following block whose first flit has no `start` seeds from INIT; mid-block `valid_in` without `start` still folds into the current CRC. The four existing §2.6 streaming bullets are unchanged.
+- BCRC next-state encoding matches `formal/dll/ref` exactly (Xia §2.6 reload-on-last): always-assign `crc_n = (valid&&last)?INIT:valid?nxt:start?INIT:crc` (rst→INIT via `pyc_reg`); `crc_word`/`done` and checker `recv_q`/`ok_q`/`fail_q`/`eflag_q` use the same update/hold muxes as the ref. XOR-matrix datapath, ports, and 1-cycle latency unchanged.
+- BCRC checker reads reserved `crc_recv[31]` against registered `crc_word[31]` (hardwired 0) so Verilator `-Wall` sees the bit; the AND is const-0 and does not change `crc_ok`.
 - SPEC §2.6：BCRC `last` 拍给出 `crc_word` 后 CRC 寄存器回到初值全 1；块首未带 `start` 的 `valid_in` 按全 1 计入，块中间未带 `start` 的 `valid_in` 接着当前 CRC 折入。上游仍应在每块首 flit 给 `start`。
 - synth-check：按 cell 类型（`$adff`/`$adffe`/`$dffsr` 等）识别异步复位触发器，对所有模块生效，不算 LATCH（豁免只作用于 LATCH，不跳过该行的 MULTI_DRIVE / COMBO_LOOP）。SCC 只对组合单元建图。真 latch、真组合环、异步 FF+真组合环三个假网表仍报失败。
 - SPEC §2.2：pyCircuit 源码目录与导入（已定）——叶子 `pycircuit/<层>/<leaf>.py`，门禁只扫该层 `*.py`（跳过 `lib/` 与 `__init__.py`）；同层 helper 在 `pycircuit/<层>/lib/` 不出网表；导入根 `pycircuit/`（`from <层>.lib import ...`），门禁 / `emit_rtl.py` / tb 把 `pycircuit/` 置于 `PYTHONPATH` 最前；仓库根目录不进 `sys.path`；工具按脚本路径调用。门禁细则见 `docs/rules/verif_gate.md`（PR #33）。架构 Xia 与守门人验证 2026-10-10 共同定。

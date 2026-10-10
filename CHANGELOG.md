@@ -23,6 +23,7 @@
 
 ### Changed
 
+- `docs/rules/verif_gate.md` v0.5：`COMBO_DEPTH` 只数逻辑门；与实现快速综合对照时用其「逻辑级数」列（等于 `--no-buffer` 级数），slack / 面积用带缓冲器版本（PR #31）。emit 按 `TOOLCHAIN.lock` 装 pycc，装不上或无 `emit_rtl.py` 则跳过并写原因。大网表 `rtl/<层>/manifest.yml`。`rtl/pyc_lib/` 有则逐字节、无则跳过（等 #21）。`tb_<inst>_obs_*` 与 `ub_mem_tlb` §10 口。sby bind 信号必须存在。D10/迁移名册缺文件标「已删除」并扣总数，不删文件。synth-check 模块超时 180s、job 25 min，报告最慢 3 个模块。
 - `docs/rules/verif_gate.md` v0.4：后门命名 `tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`（HOOKS only，§10 登记，eqy 拉低）；`ub_cmn_mem_1r1w` 时钟口 `core_clk`；存储变体 `d<DEPTH>w<WIDTH>[m<WMASK_W>]`；大变体 PRODUCT/HOOKS 除模块名外逐字节 + 端口，不跑完整 equiv。emit 只调用 `scripts/emit_rtl.py` 重生成到临时目录后逐字节比对（脚本不在则 skip）。`TOOLCHAIN.lock` 只认仓库根，第二份报冲突。regmap `variants:`（PR #11 格式）`product_` 的 `SCR_PLACEHOLDER` 必须为 0，`=1` 非 PRODUCT 只 lint/TB，`NUM_VL`/`NUM_LANES` 与变体名一致。GATE-TB-SB-001：分段比对按段计次数。
 - `docs/rules/verif_gate.md` v0.3：§8.0.1 / §11 增补 GATE-TB-SB-001（记分板须统计实际比对次数，结束时断言次数 `> 0` 且等于预期；审查清单，不自动拦截）。
 - `docs/TEAM.md` §4、`docs/PROCESS.md` §2：豁免清单从 `docs/WAIVERS.md` 改为 `waivers/`。

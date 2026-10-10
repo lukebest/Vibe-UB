@@ -8,8 +8,9 @@ Lists live in this directory (`legacy.txt`, `handwritten.yml`, `blackbox.yml`,
 
 | Script | Job |
 | --- | --- |
+| `selftest.sh` | Deliberate-fail fixtures for the new checks |
 | `spec_leak.sh` | Private-spec leak scan (allowlist `leak_allow.yml`) |
-| `rtl_emit_consistency.sh` | Line A: `scripts/emit_rtl.py` only (temp dir, byte-compare `rtl/<layer>/` + hooks); skip if missing |
+| `rtl_emit_consistency.sh` | Line A: `scripts/emit_rtl.py` only (temp dir, byte-compare `rtl/<layer>/` + hooks); skip if missing / pycc uninstallable; large-mem manifest; `rtl/pyc_lib/` compare-or-skip |
 | `equiv.sh` | PRODUCT≡HOOKS per variant (Yosys `equiv_*` primary; eqy if present; large cmn mem = bytes except name + ports) |
 | `pycircuit_provenance.sh` | AST provenance (no homemade pycc argv; regen is emit_rtl.py) |
 | `setup_pycircuit.sh` | Design spike recipe (clone pin, apt LLVM 19, `pyc build`, venv) |
@@ -17,7 +18,7 @@ Lists live in this directory (`legacy.txt`, `handwritten.yml`, `blackbox.yml`,
 | `lint.sh` | Verilator `--lint-only -Wall` + unlisted stub/macro |
 | `synth_check.sh` | Yosys synth, latch / multi-drive / combo-loop; `-lib` for blackbox.yml; combo depth report |
 | `cdc_rdc.sh` | Structural CDC / RDC (`cdc_rules.yml`; `valid_outside` for unreset arrays) |
-| `formal.sh` | `formal/<iface>/*.sby` (includes `formal/cmn/`) |
+| `formal.sh` | bind-existence on `formal/**/*.sby` then `sby -f` (includes `formal/cmn/`) |
 | `regmap_consistency.sh` | `python3 scripts/gen_regmap.py --check` |
 | `tb_selfcheck.sh` | Auto-discover pytest + cocotb under `tb/` and `model/` |
 

@@ -38,6 +38,7 @@ from gatelib import (
     is_handwritten_path,
     is_legacy_path,
     is_placeholder_module,
+    is_tb_obs_port,
     iter_rtl_sources,
     large_cmn_mem_lib_files,
     looks_generated,
@@ -51,6 +52,8 @@ from gatelib import (
     verilog_equal_except_module_name,
 )
 from hooks_port_consistency import compare_ports
+from large_mem_manifest import check_large_mem_manifest
+from pyc_lib_check import check_pyc_lib
 
 # Call only this script. Do not add pycc flags here.
 EMIT_SCRIPT = "scripts/emit_rtl.py"
@@ -59,7 +62,7 @@ def write_hooks_wrapper(hooks_path: Path, module: str, dest: Path) -> list[str]:
     """Wrap HOOKS: tb_test_mode=0 and extra inputs tied low (SPEC §11).
 
     Tie-low: tb_test_mode, tb_inj_*, tb_<inst>_bd_*, tb_<inst>_bd_vld_*.
-    Observe (tb_obs_*) left open. Other ports exposed 1:1 with PRODUCT.
+    Observe (tb_obs_* / tb_<inst>_obs_*) left open. Other ports 1:1 with PRODUCT.
     """
     ports = parse_ports(hooks_path)
     tied: list[str] = []
@@ -67,7 +70,7 @@ def write_hooks_wrapper(hooks_path: Path, module: str, dest: Path) -> list[str]:
     for kind, name in ports:
         if is_eqy_tie_low_port(name):
             tied.append(name)
-        elif name.startswith("tb_obs_"):
+        elif is_tb_obs_port(name):
             tied.append(name)  # observe-only; leave unconnected on the wrapper
         else:
             exposed.append((kind, name))
@@ -83,7 +86,7 @@ def write_hooks_wrapper(hooks_path: Path, module: str, dest: Path) -> list[str]:
         lines.append(f"  {kind} {name};")
     conns = [f".{n}({n})" for _k, n in exposed]
     for name in tied:
-        if name.startswith("tb_obs_"):
+        if is_tb_obs_port(name):
             conns.append(f".{name}()")
         else:
             conns.append(f".{name}(1'b0)")
@@ -206,66 +209,124 @@ def compare_emitted_rtl(generated_rtl: Path, committed_rtl: Path) -> list[Findin
     return findings
 
 
-def run_emit_rtl_isolated() -> list[Finding]:
-    """Run scripts/emit_rtl.py in a detached worktree; never build pycc argv."""
-    emit_path = REPO_ROOT / EMIT_SCRIPT
-    if not emit_path.is_file():
-        print(
-            f"skip emit+byte-compare: {EMIT_SCRIPT} is not on this tree "
-            "(report-only until the script lands; then this check blocks)"
-        )
+def emit_unavailable_findings(
+    emit_path: Path | None = None,
+    pycc_ready: bool = True,
+    reason: str = "",
+) -> list[Finding]:
+    """Report-only skip when emit_rtl.py is missing or pycc cannot be installed."""
+    path = emit_path if emit_path is not None else REPO_ROOT / EMIT_SCRIPT
+    if not path.is_file():
+        msg = f"{EMIT_SCRIPT} missing; regen compare skipped"
+        print(f"skip emit+byte-compare: {msg}")
         return [
             Finding(
                 check="emit",
                 module="*",
                 file=EMIT_SCRIPT,
                 rule="EMIT_SKIP",
-                message=f"{EMIT_SCRIPT} missing; regen compare skipped",
+                message=msg,
                 bucket="report",
             )
         ]
-
-    setup = GATE_DIR / "setup_pycircuit.sh"
-    if setup.is_file():
-        print(f"=== {rel(setup)} (so emit_rtl.py can call pycc) ===")
-        proc = run_cmd(["bash", str(setup)], timeout=600)
-        print("\n".join((proc.stdout or "").strip().splitlines()[-30:] or [""]))
-        if proc.returncode != 0:
-            return [
-                Finding(
-                    check="emit",
-                    module="*",
-                    file=EMIT_SCRIPT,
-                    rule="EMIT_FAIL",
-                    message=f"{rel(setup)} exited {proc.returncode}",
-                )
-            ]
-    _prepare_pycc_path()
-
-    tmp = Path(tempfile.mkdtemp(prefix="gate-emit-"))
-    add = run_cmd(["git", "worktree", "add", "--detach", str(tmp), "HEAD"])
-    if add.returncode != 0:
-        print(add.stdout or "")
+    if not pycc_ready:
+        msg = reason or "pycc could not be installed from TOOLCHAIN.lock"
+        print(f"skip emit+byte-compare: {msg}")
         return [
             Finding(
                 check="emit",
                 module="*",
                 file=EMIT_SCRIPT,
-                rule="EMIT_FAIL",
-                message=f"git worktree add failed: {(add.stdout or '')[:200]}",
+                rule="EMIT_SKIP",
+                message=f"pycc unavailable; regen compare skipped ({msg})",
+                bucket="report",
             )
         ]
-    try:
-        script = tmp / EMIT_SCRIPT
-        py = _emit_python()
-        print(
-            f"=== {py} {EMIT_SCRIPT} (isolated worktree; "
-            "pycc argv comes only from this script) ==="
+    return []
+
+
+def _setup_reason_from_log(log: str) -> str:
+    for line in (log or "").splitlines()[::-1]:
+        text = line.strip()
+        if text.startswith("BLOCKER:"):
+            return text
+    return "setup_pycircuit.sh did not reach SETUP_OK=1"
+
+
+def prepare_pycc_from_lock() -> tuple[bool, str]:
+    """Install pycc per TOOLCHAIN.lock. Missing toolchain is skip, not fail."""
+    setup = GATE_DIR / "setup_pycircuit.sh"
+    log = ""
+    if setup.is_file():
+        print(f"=== {rel(setup)} (TOOLCHAIN.lock pin; so emit_rtl.py can call pycc) ===")
+        proc = run_cmd(["bash", str(setup)], timeout=600)
+        log = proc.stdout or ""
+        print("\n".join(log.strip().splitlines()[-30:] or [""]))
+        setup_log = GATE_DIR / "out" / "pycircuit_setup.log"
+        if setup_log.is_file():
+            log = setup_log.read_text(encoding="utf-8", errors="replace")
+        if "SETUP_OK=1" in log:
+            _prepare_pycc_path()
+            return True, ""
+        return False, _setup_reason_from_log(log)
+    _prepare_pycc_path()
+    if shutil_which("pycc"):
+        return True, ""
+    return False, "setup_pycircuit.sh missing and pycc not on PATH"
+
+
+def run_emit_rtl_isolated() -> tuple[list[Finding], Path | None, dict[str, object]]:
+    """Run scripts/emit_rtl.py in a detached worktree; never build pycc argv.
+
+    Caller must drop the worktree (meta['worktree']) when finished. Generated
+    rtl stays available for the large-mem manifest sha256 check.
+    """
+    meta: dict[str, object] = {
+        "worktree": None,
+        "script_present": False,
+        "pycc_ready": False,
+        "reason": "",
+    }
+    emit_path = REPO_ROOT / EMIT_SCRIPT
+    meta["script_present"] = emit_path.is_file()
+    if not emit_path.is_file():
+        return emit_unavailable_findings(emit_path), None, meta
+
+    ready, reason = prepare_pycc_from_lock()
+    meta["pycc_ready"] = ready
+    meta["reason"] = reason
+    if not ready:
+        return emit_unavailable_findings(emit_path, False, reason), None, meta
+
+    tmp = Path(tempfile.mkdtemp(prefix="gate-emit-"))
+    add = run_cmd(["git", "worktree", "add", "--detach", str(tmp), "HEAD"])
+    if add.returncode != 0:
+        print(add.stdout or "")
+        return (
+            [
+                Finding(
+                    check="emit",
+                    module="*",
+                    file=EMIT_SCRIPT,
+                    rule="EMIT_FAIL",
+                    message=f"git worktree add failed: {(add.stdout or '')[:200]}",
+                )
+            ],
+            None,
+            meta,
         )
-        proc = run_cmd([py, str(script)], cwd=tmp, timeout=600)
-        print(proc.stdout or "")
-        if proc.returncode != 0:
-            return [
+    meta["worktree"] = tmp
+    script = tmp / EMIT_SCRIPT
+    py = _emit_python()
+    print(
+        f"=== {py} {EMIT_SCRIPT} (isolated worktree; "
+        "pycc argv comes only from this script) ==="
+    )
+    proc = run_cmd([py, str(script)], cwd=tmp, timeout=600)
+    print(proc.stdout or "")
+    if proc.returncode != 0:
+        return (
+            [
                 Finding(
                     check="emit",
                     module="*",
@@ -273,10 +334,11 @@ def run_emit_rtl_isolated() -> list[Finding]:
                     rule="EMIT_FAIL",
                     message=f"{EMIT_SCRIPT} exited {proc.returncode}",
                 )
-            ]
-        return compare_emitted_rtl(tmp / "rtl", REPO_ROOT / "rtl")
-    finally:
-        run_cmd(["git", "worktree", "remove", "--force", str(tmp)])
+            ],
+            tmp / "rtl" if (tmp / "rtl").is_dir() else None,
+            meta,
+        )
+    return compare_emitted_rtl(tmp / "rtl", REPO_ROOT / "rtl"), tmp / "rtl", meta
 
 
 def run_equiv(
@@ -405,13 +467,56 @@ def main() -> int:
     )
 
     findings: list[Finding] = []
-    if not args.equiv_only:
-        findings.extend(collect_placeholder_policy_findings("emit"))
-        findings.extend(run_emit_rtl_isolated())
-        if any(f.rule == "EMIT_FAIL" and f.bucket == "new" for f in findings):
-            return emit_report("emit", findings)
-    else:
-        print("equiv-only: skip emit+byte-compare")
+    worktree: Path | None = None
+    generated_rtl: Path | None = None
+    emit_meta: dict[str, object] = {
+        "script_present": False,
+        "pycc_ready": False,
+        "reason": "",
+    }
+    try:
+        if not args.equiv_only:
+            findings.extend(collect_placeholder_policy_findings("emit"))
+            emit_hits, generated_rtl, emit_meta = run_emit_rtl_isolated()
+            worktree = emit_meta.get("worktree")  # type: ignore[assignment]
+            findings.extend(emit_hits)
+            findings.extend(
+                check_large_mem_manifest(
+                    REPO_ROOT / "rtl",
+                    generated_rtl=generated_rtl,
+                    emit_available=bool(emit_meta.get("script_present")),
+                    pycc_ready=bool(emit_meta.get("pycc_ready")),
+                    skip_reason=str(emit_meta.get("reason") or ""),
+                )
+            )
+            findings.extend(
+                check_pyc_lib(
+                    REPO_ROOT / "rtl",
+                    lock_src=REPO_ROOT / ".pycircuit-src",
+                )
+            )
+            if any(f.rule == "EMIT_FAIL" and f.bucket == "new" for f in findings):
+                return emit_report("emit", findings)
+        else:
+            print("equiv-only: skip emit+byte-compare")
+            findings.extend(
+                check_large_mem_manifest(
+                    REPO_ROOT / "rtl",
+                    generated_rtl=None,
+                    emit_available=False,
+                    pycc_ready=False,
+                    skip_reason="equiv-only",
+                )
+            )
+            findings.extend(
+                check_pyc_lib(
+                    REPO_ROOT / "rtl",
+                    lock_src=REPO_ROOT / ".pycircuit-src",
+                )
+            )
+    finally:
+        if worktree is not None:
+            run_cmd(["git", "worktree", "remove", "--force", str(worktree)])
 
     if not args.equiv_only:
         for path in iter_rtl_sources():

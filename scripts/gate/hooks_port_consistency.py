@@ -23,6 +23,7 @@ from gatelib import (
     is_handwritten_path,
     is_legacy_path,
     is_listed_hook_style,
+    is_tb_obs_port,
     is_tb_port,
     load_hooks_ports,
     parse_ports,
@@ -117,7 +118,7 @@ def compare_ports(
                 rule="HOOKS_PORT_BAD_NAME",
                 message=(
                     f"listed extras {bad_style} are not tb_test_mode / tb_inj_* / "
-                    f"tb_obs_* / tb_<inst>_bd_* / tb_<inst>_bd_vld_*"
+                    f"tb_obs_* / tb_<inst>_obs_* / tb_<inst>_bd_* / tb_<inst>_bd_vld_*"
                 ),
             )
         )
@@ -164,6 +165,20 @@ def compare_ports(
                     message=(
                         f"port {name} direction PRODUCT="
                         f"{prod_dir.get(name)} HOOKS={hook_dir.get(name)}"
+                    ),
+                )
+            )
+    for name in hook_names:
+        if is_tb_obs_port(name) and hook_dir.get(name) != "output":
+            findings.append(
+                Finding(
+                    check="hooks_ports",
+                    module=module,
+                    file=rel(hooks),
+                    rule="HOOKS_PORT_DIR",
+                    message=(
+                        f"{name} is tb_obs_* / tb_<inst>_obs_* and must be "
+                        f"a read-only output (HOOKS has {hook_dir.get(name)})"
                     ),
                 )
             )

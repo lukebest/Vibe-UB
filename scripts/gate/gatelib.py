@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import ast
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -99,7 +100,7 @@ class Finding:
     rule: str
     message: str
     severity: str = "error"
-    bucket: str = "new"  # new | legacy | migrate | report
+    bucket: str = "new"  # new | legacy | migrate | report | deleted
     waived_by: str = ""
 
     def key(self) -> tuple[str, str, str, str]:
@@ -170,22 +171,46 @@ def find_extra_toolchain_locks() -> list[Path]:
     return extras
 
 
-def collect_toolchain_lock_findings(check: str) -> list[Finding]:
-    extras = find_extra_toolchain_locks()
-    if not extras:
+def collect_lock_completeness_findings(
+    check: str, lock: dict[str, str] | None = None
+) -> list[Finding]:
+    """Required pyCircuit / pycc / LLVM keys must be present on the root lock."""
+    data = lock if lock is not None else parse_lock()
+    missing = [k for k in REQUIRED_PYC_LOCK_KEYS if not str(data.get(k) or "").strip()]
+    if not missing:
         return []
     return [
         Finding(
             check=check,
             module="*",
             file="TOOLCHAIN.lock",
-            rule="TOOLCHAIN_LOCK_CONFLICT",
+            rule="TOOLCHAIN_LOCK_INCOMPLETE",
             message=(
-                "tool versions must come from the repo-root TOOLCHAIN.lock only; "
-                f"extra copies: {[rel(p) for p in extras]}"
+                "repo-root TOOLCHAIN.lock is missing required pins: "
+                + ", ".join(missing)
             ),
         )
     ]
+
+
+def collect_toolchain_lock_findings(check: str) -> list[Finding]:
+    extras = find_extra_toolchain_locks()
+    findings: list[Finding] = []
+    if extras:
+        findings.append(
+            Finding(
+                check=check,
+                module="*",
+                file="TOOLCHAIN.lock",
+                rule="TOOLCHAIN_LOCK_CONFLICT",
+                message=(
+                    "tool versions must come from the repo-root TOOLCHAIN.lock only; "
+                    f"extra copies: {[rel(p) for p in extras]}"
+                ),
+            )
+        )
+    findings.extend(collect_lock_completeness_findings(check))
+    return findings
 
 
 def parse_lock(path: Path = TOOLCHAIN_LOCK) -> dict[str, str]:
@@ -247,7 +272,7 @@ def print_tool_versions(needed: Iterable[str]) -> None:
         "yosys": ("yosys_lock", ["yosys", "-V"]),
         "eqy": ("eqy_lock", ["eqy", "--version"]),
         "sby": ("sby_lock", ["sby", "--version"]),
-        "pycc": ("llvm_lock", ["pycc", "--version"]),
+        "pycc": ("pycc_lock", ["pycc", "--version"]),
         "python": ("python_lock", [sys.executable, "--version"]),
         "llvm": ("llvm_lock", ["llvm-config-19", "--version"]),
         "cmake": ("cmake_lock", ["cmake", "--version"]),
@@ -667,8 +692,19 @@ def load_hooks_ports() -> dict[str, list[str]]:
 
 # Xia: HOOKS-only backdoors. tb_<inst>_bd_* and companion tb_<inst>_bd_vld_*.
 # Gated by tb_test_mode; must be on the SPEC §10 list (hooks_ports.yml).
+# Leaf observe: tb_<inst>_obs_* (HOOKS-only output; not gated by tb_test_mode).
 _TB_BD_VLD_RE = re.compile(r"^tb_[A-Za-z_][A-Za-z0-9_]*_bd_vld_")
 _TB_BD_RE = re.compile(r"^tb_[A-Za-z_][A-Za-z0-9_]*_bd_")
+_TB_INST_OBS_RE = re.compile(r"^tb_[A-Za-z_][A-Za-z0-9_]*_obs_")
+
+REQUIRED_PYC_LOCK_KEYS = (
+    "pycircuit_repo",
+    "pycircuit_commit",
+    "pycircuit_release",
+    "pycc_lock",
+    "llvm_lock",
+    "mlir_lock",
+)
 
 
 def is_tb_port(name: str) -> bool:
@@ -683,12 +719,17 @@ def is_tb_bd_port(name: str) -> bool:
     return bool(_TB_BD_RE.match(name)) and not is_tb_bd_vld_port(name)
 
 
+def is_tb_obs_port(name: str) -> bool:
+    """Top-level tb_obs_* or leaf-local tb_<inst>_obs_* (HOOKS-only output)."""
+    return name.startswith("tb_obs_") or bool(_TB_INST_OBS_RE.match(name))
+
+
 def is_listed_hook_style(name: str) -> bool:
     """Allowed tb_* shapes on the §10 / hooks_ports.yml list."""
     return (
         name == "tb_test_mode"
         or name.startswith("tb_inj_")
-        or name.startswith("tb_obs_")
+        or is_tb_obs_port(name)
         or is_tb_bd_port(name)
         or is_tb_bd_vld_port(name)
     )
@@ -821,18 +862,79 @@ def split_findings(
     return blocking, legacy, migrate, report, waived
 
 
+def repo_file_exists(rel_path: str, root: Path | None = None) -> bool:
+    """True if the path (or its glob) exists under root. Does not create files."""
+    base = root or REPO_ROOT
+    cleaned = _file_for_class(rel_path).replace("\\", "/")
+    if not cleaned:
+        return True
+    direct = base / cleaned
+    if direct.is_file() or direct.is_dir():
+        return True
+    if any(ch in cleaned for ch in "*?["):
+        return any(base.glob(cleaned))
+    return False
+
+
+def is_on_deletion_roster(rel_path: str) -> bool:
+    """legacy.txt or pycircuit_migrate.txt — report-only '待删除' names."""
+    cleaned = _file_for_class(rel_path).replace("\\", "/")
+    if not cleaned:
+        return False
+    for pat in read_legacy_patterns() + read_migrate_patterns():
+        if cleaned == pat or fnmatch.fnmatch(cleaned, pat):
+            return True
+        p = Path(pat)
+        if len(p.parts) >= 3 and p.parts[0] == "pycircuit":
+            layer, stem = p.parts[1], p.stem
+            if cleaned in {
+                f"rtl/{layer}/{stem}.v",
+                f"rtl/{layer}/hooks/{stem}.v",
+            }:
+                return True
+    return False
+
+
+def mark_deleted_findings(
+    findings: list[Finding], root: Path | None = None
+) -> tuple[list[Finding], list[Finding]]:
+    """Split findings whose roster file is gone. Missing → 已删除, not an error."""
+    keep: list[Finding] = []
+    deleted: list[Finding] = []
+    for f in findings:
+        if f.bucket == "deleted":
+            deleted.append(f)
+            continue
+        if not repo_file_exists(f.file, root=root) and is_on_deletion_roster(f.file):
+            f.bucket = "deleted"
+            if "已删除" not in f.message:
+                f.message = f"已删除; {f.message}"
+            deleted.append(f)
+        else:
+            keep.append(f)
+    return keep, deleted
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
 def emit_report(check: str, findings: list[Finding]) -> int:
     """Print the multi-column report. Return process exit code."""
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     merged = list(findings) + collect_toolchain_lock_findings(check)
     apply_waivers(merged, check)
-    findings = merged
+    findings, deleted = mark_deleted_findings(merged)
     blocking, legacy, migrate, report, waived = split_findings(findings)
+    live_total = len(findings)
     print(f"=== {check} findings ===")
     print(
-        f"total={len(findings)} blocking={len(blocking)} "
+        f"total={live_total} blocking={len(blocking)} "
         f"legacy_report_only={len(legacy)} migrate_backlog={len(migrate)} "
-        f"report_only={len(report)} waived={len(waived)}"
+        f"report_only={len(report)} waived={len(waived)} "
+        f"deleted={len(deleted)} (已删除, excluded from total)"
     )
     print()
     print("## New leaves (blocking)")
@@ -841,23 +943,41 @@ def emit_report(check: str, findings: list[Finding]) -> int:
     else:
         _print_table(blocking)
     print()
-    print("## D10 legacy (report-only; 待 legacy 迁移 PR 处理、守门人批准)")
-    if not legacy:
-        print("(none)")
-    else:
+    print("## D10 legacy (report-only; 待删除名单由设计清理 PR 处理，本栏不删文件)")
+    legacy_roster = read_legacy_roster()
+    if legacy_roster:
+        print("| path | status |")
+        print("| --- | --- |")
+        for row in legacy_roster:
+            print(f"| {row['path']} | {row['status'] or ''} |")
+    if not legacy and not any(r.get("status") == "已删除" for r in legacy_roster):
+        if not legacy_roster:
+            print("(none)")
+    elif legacy:
         _print_table(legacy)
     print()
     print("## pyCircuit migrate (main / PR #5 / #7 / #11 / #12; 迁移待办)")
     roster = read_migrate_roster()
+    live_roster = [r for r in roster if r.get("status") != "已删除"]
     if roster:
         print("| path | group | status |")
         print("| --- | --- | --- |")
         for row in roster:
             print(f"| {row['path']} | {row['group']} | {row['status'] or ''} |")
+        n_del = len(roster) - len(live_roster)
+        if n_del:
+            print(
+                f"migrate roster live={len(live_roster)} "
+                f"已删除={n_del} (excluded from backlog total)"
+            )
     if migrate:
         _print_table(migrate)
-    elif not roster:
+    elif not live_roster:
         print("(none)")
+    if deleted:
+        print()
+        print("## 已删除 (roster file gone; excluded from totals; not an error)")
+        _print_table(deleted)
     pending = list_pending_waivers()
     placeholders = [
         leaf
@@ -904,6 +1024,7 @@ def emit_report(check: str, findings: list[Finding]) -> int:
         "migrate": [asdict(f) for f in migrate],
         "report": [asdict(f) for f in report],
         "waived": [asdict(f) for f in waived],
+        "deleted": [asdict(f) for f in deleted],
     }
     (OUT_DIR / f"{check}.json").write_text(
         json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
@@ -945,7 +1066,27 @@ def read_migrate_roster() -> list[dict[str, str]]:
         if key in seen:
             continue
         seen.add(key)
-        rows.append({"path": line, "group": group, "status": status})
+        row_status = status
+        if not repo_file_exists(line):
+            row_status = "已删除"
+        rows.append({"path": line, "group": group, "status": row_status})
+    return rows
+
+
+def read_legacy_roster() -> list[dict[str, str]]:
+    """D10 待删除名单. Missing files are 已删除; this does not delete anything."""
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for pat in read_legacy_patterns():
+        if pat in seen:
+            continue
+        seen.add(pat)
+        rows.append(
+            {
+                "path": pat,
+                "status": "" if repo_file_exists(pat) else "已删除",
+            }
+        )
     return rows
 
 

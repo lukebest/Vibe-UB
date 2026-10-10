@@ -19,6 +19,18 @@ env:
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
+  gate-selftest:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install gate Python
+        run: pip install -r scripts/gate/requirements.txt
+      - name: gate self-tests (deliberate-fail fixtures)
+        run: scripts/gate/selftest.sh
+
   spec-leak:
     runs-on: ubuntu-24.04
     steps:
@@ -114,6 +126,8 @@ jobs:
 
   synth-check:
     runs-on: ubuntu-24.04
+    # Observed 8.5–12.5 min on main; 25 min leaves headroom for the 180s/module cap.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

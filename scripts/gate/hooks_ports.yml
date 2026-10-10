@@ -77,3 +77,45 @@ entries:
     approver: lukebest
     approved_date: 2026-10-10
     review_when: SPEC §10 top-level hook list changes
+
+  # SPEC §10: ub_mem_tlb leaf observe + way-0..3 backdoors. HOOKS only.
+  # tb_<inst>_obs_* are read-only outputs (not gated by tb_test_mode).
+  - id: HOOKS-UB-MEM-TLB
+    module: ub_mem_tlb
+    extra_ports:
+      - tb_test_mode
+      - tb_mem_tlb_obs_lkup_v
+      - tb_mem_tlb_obs_hit
+      - tb_mem_tlb_obs_vld
+      - tb_mem_tlb_obs_tag_w0
+      - tb_mem_tlb_obs_tag_w1
+      - tb_mem_tlb_obs_tag_w2
+      - tb_mem_tlb_obs_tag_w3
+      - tb_mem_tlb_w0_bd_we
+      - tb_mem_tlb_w0_bd_addr
+      - tb_mem_tlb_w0_bd_wdata
+      - tb_mem_tlb_w0_bd_re
+      - tb_mem_tlb_w0_bd_rdata
+      - tb_mem_tlb_w0_bd_vld_n
+      - tb_mem_tlb_w1_bd_we
+      - tb_mem_tlb_w1_bd_addr
+      - tb_mem_tlb_w1_bd_wdata
+      - tb_mem_tlb_w1_bd_re
+      - tb_mem_tlb_w1_bd_rdata
+      - tb_mem_tlb_w1_bd_vld_n
+      - tb_mem_tlb_w2_bd_we
+      - tb_mem_tlb_w2_bd_addr
+      - tb_mem_tlb_w2_bd_wdata
+      - tb_mem_tlb_w2_bd_re
+      - tb_mem_tlb_w2_bd_rdata
+      - tb_mem_tlb_w2_bd_vld_n
+      - tb_mem_tlb_w3_bd_we
+      - tb_mem_tlb_w3_bd_addr
+      - tb_mem_tlb_w3_bd_wdata
+      - tb_mem_tlb_w3_bd_re
+      - tb_mem_tlb_w3_bd_rdata
+      - tb_mem_tlb_w3_bd_vld_n
+    reason: SPEC §10 / §10.5 — ub_mem_tlb observe + mem_tlb_w0..w3 backdoors
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 ub_mem_tlb hook list changes

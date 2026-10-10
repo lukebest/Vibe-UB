@@ -118,7 +118,7 @@ Init Block 其余字段（`DATA_ACK_GRAIN_SIZE`、`CTRL_ACK_GRAIN_SIZE`、 `DATA
 | 0x0214 | CNT_CRD_TO | COUNT | 31 | 0 | RO | 0x0 | 信用归还超时次数。`CRD_TO_DIS=1` 时不递增 | proj; UB-DL §4.8.1 |
 | 0x0218 | CNT_TRAIN_TO | COUNT | 31 | 0 | RO | 0x0 | LMSM 训练超时回到 Idle 次数 | proj; UB-PHY §3.4.3 |
 | 0x021C | CNT_BAD_VL | COUNT | 31 | 0 | RO | 0x0 | 未使能 VL 丢包次数 | proj; SPEC §7 |
-| 0x0220 | CNT_CRD_UF | COUNT | 31 | 0 | RO | 0x0 | 信用下溢次数。正确设计不可达，见 SPEC §13.4 waiver | proj; SPEC §7 |
+| 0x0220 | CNT_CRD_UF | COUNT | 31 | 0 | RO | 0x0 | 信用下溢次数。正确设计不可达，见 SPEC §13.1 waiver | proj; SPEC §7 |
 | 0x0224 | CNT_CLR | FEC_UNCORR | 0 | 0 | WO | 0x0 | 写 1 清 `CNT_FEC_UNCORR`，自清 | proj |
 | 0x0224 | CNT_CLR | CRC_FAIL | 1 | 1 | WO | 0x0 | 写 1 清 `CNT_CRC_FAIL` | proj |
 | 0x0224 | CNT_CLR | RETRY_REQ | 2 | 2 | WO | 0x0 | 写 1 清 `CNT_RETRY_REQ` | proj |
@@ -144,7 +144,7 @@ PRODUCT 与 HOOKS（`tb_test_mode=0`）对 eqy 等价（SPEC §11 (d)）。`PORT
 
 | offset_hex | reg_name | field_name | hi | lo | access | reset_hex | description | spec_ref |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0x0300 | LMSM_TMR_SCALE | SCALE | 7 | 0 | RW | 0x00 | 代替向 LMSM 定时器 deposit。0=实时。非 0 时加速超时计数，使训练沿真实路径到 Link_Active。 编码 **待定**（建议每拍加 SCALE，SCALE=0 时加 1） | proj; SPEC §10.4 |
+| 0x0300 | LMSM_TMR_SCALE | SCALE | 7 | 0 | RW | 0x00 | 代替向 LMSM 定时器 deposit。编码 **待定**（项目 TEST，规范无；建议 0 → 每拍 +1，非 0 → 每拍 +SCALE）。使训练沿真实路径到 Link_Active | proj; SPEC §10.4、§13 |
 | 0x0300 | LMSM_TMR_SCALE | RSVD | 31 | 8 | RO | 0x0 | 保留 | proj |
 | 0x0304 | CRD_TO_DIS | DIS | 0 | 0 | RW | 0x0 | 1=关闭 Crd_Ack 超时检错（不把 pending 钉 0）。0=检查使能 | proj; SPEC §10.4; UB-DL §4.8.1 |
 | 0x0304 | CRD_TO_DIS | RSVD | 31 | 1 | RO | 0x0 | 保留 | proj |
@@ -166,12 +166,12 @@ PRODUCT 与 HOOKS（`tb_test_mode=0`）对 eqy 等价（SPEC §11 (d)）。`PORT
 | 0x1000 | APPD_PORT_BASIC | WINDOW | 31 | 0 | MIX | NA | CFG0_PORT_BASIC 切片窗口（含 PORT_CAP Bitmap、Port Info、Port CNA、Port Rst）。 CNA 亦映射到 `0x0010` | App. D.5、D.5.1–D.5.6 |
 | 0x1100 | APPD_LINK_CAP | WINDOW | 31 | 0 | MIX | NA | PORT_CAP1_LINK：能力 / 配置 / 状态（含协商后的粒度与 DLL SM 状态） | App. D.6.2、D.6.2.1–D.6.2.3 |
 | 0x1200 | APPD_LINK_LOG | WINDOW | 31 | 0 | MIX | NA | PORT_CAP2_LINK_LOG：flit/LTB 错误日志与计数 | App. D.6.3 |
-| 0x1E00 | APPD_LMSM_ST | WINDOW | 31 | 0 | MIX | NA | PORT_CAP20_LMSM_ST 镜像（M1 窗内地址；原 `0x2400`） | App. D.6.21 |
+| 0x1E00 | APPD_LMSM_ST | WINDOW | 31 | 0 | MIX | NA | PORT_CAP20_LMSM_ST 切片镜像（M1 窗内地址；原 `0x2400`）。字段对照 D.6.21，不在此展开。`ub_lmsm` 只出 `lmsm_st[4:0]`（顶层编码，SPEC §10.3 / `STATUS.LMSM_ST`）；**不**把该 5-bit 塞进本窗。CSR 按 D.6.21 打切片 | App. D.6.21 |
 | 0x1F00 | APPD_PORT_ERR | WINDOW | 31 | 0 | MIX | NA | PORT_CAP21_PORT_ERR_RECORD 镜像（M1 窗内地址；原 `0x2500`） | App. D.6.22 |
 
-`MIX` = 切片内既有 RO 也有 RW/W1C，以对应节为准。`NA` 复位：对照该节，不在此抄。
+`MIX` = 切片内既有 RO 也有 RW/W1C，以对应节为准。`NA` 复位：对照该节，不在此抄。`APPD_LMSM_ST` 是 D.6.21 切片窗口，不是把 `STATUS.LMSM_ST` / `lmsm_st[4:0]` 重打包进 `0x1E00`。
 
-M1 不实现的 PORT_CAP 切片（DATA_RATE2–9、EYE_MONITOR、QDLWS 等）在 Bitmap 中报不存在。 DATA_RATE1（D.6.5）是否只读反映 Data Rate 0：**待定**（建议最小只读镜像，不实现改速控制）。
+M1 不实现的 PORT_CAP 切片（DATA_RATE2–9、EYE_MONITOR、QDLWS 等）在 Bitmap 中报不存在。DATA_RATE1（D.6.5）是否只读反映 Data Rate 0：规范未规定 M1 镜像策略，见 SPEC §13（建议最小只读、不实现改速）。
 
 ---
 

@@ -31,12 +31,22 @@ def test_aw_is_clog2_depth():
     assert m.width == 16
 
 
+def test_rdata_undefined_before_first_read():
+    m = UbCmnMem1r1w(8, 16)
+    assert m.rdata is None
+    assert m.rdata_valid is False
+    assert m.is_defined is False
+    assert m.tick(1, 3, 0xA5A5, 0, 0) is None
+    assert m.is_defined is False
+
+
 def test_write_then_read_one_cycle_latency():
     m = UbCmnMem1r1w(8, 16)
-    assert m.tick(1, 3, 0xA5A5, 0, 0) == 0
-    # re this edge captures; rdata is the new registered value after the edge
+    m.tick(1, 3, 0xA5A5, 0, 0)
     assert m.tick(0, 0, 0, 1, 3) == 0xA5A5
     assert m.rdata == 0xA5A5
+    assert m.rdata_valid is True
+    assert m.is_defined is True
 
 
 def test_rdata_holds_when_re_low():
@@ -47,14 +57,13 @@ def test_rdata_holds_when_re_low():
     m.tick(0, 0, 0, 0, 0)
     m.tick(1, 2, 0x11, 0, 0)
     assert m.rdata == 0x3C
+    assert m.is_defined is True
 
 
 def test_same_address_read_old():
     m = UbCmnMem1r1w(4, 8)
     m.tick(1, 2, 0x10, 0, 0)
-    # write 0x20 and read addr 2 in the same cycle → old 0x10
     assert m.tick(1, 2, 0x20, 1, 2) == 0x10
-    # next read sees the new value
     assert m.tick(0, 0, 0, 1, 2) == 0x20
 
 
@@ -69,6 +78,7 @@ def test_out_of_range_waddr_raises():
     with pytest.raises(UbCmnMemAddrError, match="waddr=7"):
         m.tick(1, 7, 1, 0, 0)
     assert m.flags
+    assert m.is_defined is False
 
 
 def test_out_of_range_raddr_raises():
@@ -76,12 +86,15 @@ def test_out_of_range_raddr_raises():
     m.tick(1, 0, 1, 0, 0)
     with pytest.raises(UbCmnMemAddrError, match="raddr=5"):
         m.tick(0, 0, 0, 1, 5)
+    assert m.is_defined is False
 
 
 def test_read_unwritten_raises():
     m = UbCmnMem1r1w(4, 8)
     with pytest.raises(UbCmnMemUnwrittenError, match="never-written"):
         m.tick(0, 0, 0, 1, 0)
+    assert m.rdata is None
+    assert m.is_defined is False
 
 
 def test_same_cycle_write_read_unwritten_still_flags():
@@ -91,19 +104,24 @@ def test_same_cycle_write_read_unwritten_still_flags():
         m.tick(1, 1, 0xAA, 1, 1)
     assert m._mem[1] == 0xAA
     assert m.written[1]
+    assert m.rdata is None
+    assert m.is_defined is False
 
 
-def test_reset_written_flags_without_clearing_contents():
+def test_reset_makes_array_undefined_rdata_register_holds():
     m = UbCmnMem1r1w(4, 8)
     m.tick(1, 0, 0x55, 0, 0)
     m.tick(0, 0, 0, 1, 0)
     assert m.rdata == 0x55
     m.reset_written()
-    assert m._mem[0] == 0x55
+    assert m._mem[0] is None
     assert m.rdata == 0x55
+    assert m.is_defined is True
     assert not any(m.written)
     with pytest.raises(UbCmnMemUnwrittenError):
         m.tick(0, 0, 0, 1, 0)
+    assert m.rdata is None
+    assert m.is_defined is False
 
 
 def test_nonstrict_flags_without_raise():
@@ -112,16 +130,22 @@ def test_nonstrict_flags_without_raise():
     assert len(m.flags) == 2
     assert "UbCmnMemAddrError" in m.flags[0]
     assert "UbCmnMemUnwrittenError" in m.flags[1]
+    assert m.rdata is None
+    assert m.is_defined is False
 
 
-def test_assert_no_uninit_read_off_allows_cold_read():
-    # valid_outside instances: C-line UMMU/TLB. No raise; mem holds 0.
+def test_assert_no_uninit_read_off_returns_undefined():
+    # valid_outside: owner masks with an external valid bit.
     m = UbCmnMem1r1w(4, 8, assert_no_uninit_read=False)
     assert m.assert_no_uninit_read is False
-    assert m.tick(0, 0, 0, 1, 0) == 0
+    assert m.tick(0, 0, 0, 1, 0) is None
+    assert m.rdata is None
+    assert m.rdata_valid is False
+    assert m.is_defined is False
     assert not m.flags
     m.tick(1, 0, 0x22, 0, 0)
     assert m.tick(0, 0, 0, 1, 0) == 0x22
+    assert m.is_defined is True
 
 
 def test_assert_no_uninit_read_off_still_flags_oor():
@@ -144,8 +168,13 @@ def test_random_legal_vs_simple_ref(depth, width, seed, n):
         wdata = rng.randrange(1 << width)
         if re and not written[raddr]:
             re = False
-        assert dut.tick(we, waddr, wdata, re, raddr) == ref.tick(
-            we, waddr, wdata, re, raddr
-        )
+        got = dut.tick(we, waddr, wdata, re, raddr)
+        exp = ref.tick(we, waddr, wdata, re, raddr)
+        if dut.is_defined:
+            assert got == exp
+            assert dut.rdata_valid is True
+        else:
+            assert got is None
+            assert exp is None
         if we:
             written[waddr] = True

@@ -131,6 +131,8 @@
 | `tb/cmn/` | 验证-B | 本分支不建；由验证-B 后补。 |
 | `pycircuit/cmn/` | 设计-B | 本分支不建；由设计-B 后补。 |
 
-**`ASSERT_NO_UNINIT_READ`（默认 1）：** 读「自复位以来从未写入」的项算违规。Python 构造参数 `assert_no_uninit_read=True`；形式化模块参数 `ASSERT_NO_UNINIT_READ=1`。门禁名单 `valid_outside: true` 的实例（valid 在阵列外）设 **0**；其未初始化读由验证的 valid-bit 断言负责。
+**`rdata` 何时有效：** `rdata` 寄存器和阵列都**不复位**。`rdata` **只**在完成一次「已写入地址」的读之后才有效。检查器和 scoreboard **只**在模型标 `rdata_valid` / `is_defined` 时比较 `rdata`（模型在此之前返回 `None`）。
+
+**`ASSERT_NO_UNINIT_READ`（默认 1）：** 读「自复位以来从未写入」的项算违规。Python 构造参数 `assert_no_uninit_read=True`；形式化模块参数 `ASSERT_NO_UNINIT_READ=1`。门禁名单 `valid_outside: true` 的实例（valid 在阵列外）设 **0**：这类读返回**未定义**数据，由所有者用阵列外的 valid 位屏蔽；验证的 valid-bit 断言负责安全。复位之后阵列内容同样未定义。
 
 **越界：** RTL **不截断**地址。`we`/`re` 时 `waddr`/`raddr >= DEPTH` 由断言标出（非 2 幂 `DEPTH` 时 `AW` 多出的编码会走到这里）。

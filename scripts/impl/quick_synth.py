@@ -159,13 +159,28 @@ def detect_period(spec_text: str | None) -> tuple[float, str, bool]:
     )
 
 
-def find_clock_port(verilog: str) -> str | None:
-    # Prefer core_clk, then clk, then first *clk* port.
-    ports = re.findall(
-        r"(?:input|output|inout)\s+(?:wire|reg|logic)?\s*(?:\[[^\]]+\])?\s*(\w+)",
+_PORT_RE = re.compile(
+    r"(?P<dir>input|output|inout)\s+(?:wire|reg|logic)?\s*(?:\[[^\]]+\])?\s*(?P<name>\w+)",
+)
+
+
+def list_ports(verilog: str) -> list[tuple[str, str]]:
+    # Only the module header — do not pick up function/task ports.
+    m = re.search(
+        r"module\s+\w+\s*(?:#\s*\([^;]*?\))?\s*\((.*?)\);",
         verilog,
+        re.S,
     )
-    names = [p for p in ports]
+    blob = m.group(1) if m else verilog
+    if not re.search(r"\b(input|output|inout)\b", blob) and m:
+        rest = verilog[m.end() :]
+        cut = re.search(r"\b(always|assign|function|task|generate)\b", rest)
+        blob = rest[: cut.start()] if cut else rest
+    return [(p.group("dir"), p.group("name")) for p in _PORT_RE.finditer(blob)]
+
+
+def find_clock_port(verilog: str) -> str | None:
+    names = [n for _d, n in list_ports(verilog)]
     for cand in ("core_clk", "clk"):
         if cand in names:
             return cand
@@ -247,6 +262,9 @@ def default_tops(repo: Path, tree: Path, base: str, head: str | None) -> list[st
         if "hooks" in p.parts:
             continue
         if not str(p).startswith("rtl/"):
+            continue
+        # Design leaves are ub_*; skip library cells such as pyc_reg.
+        if not p.stem.startswith("ub_"):
             continue
         tops.append(p.stem)
     # unique, stable
@@ -330,50 +348,69 @@ def parse_select_list(text: str) -> list[str]:
     return items
 
 
-def parse_sta(text: str) -> dict[str, Any]:
-    arrival = None
-    slack = None
-    m_arr = re.search(r"data arrival time\s+(-?[0-9.]+)", text)
-    if m_arr:
-        arrival = float(m_arr.group(1))
-    m_sl = re.search(r"^\s*slack\s+\((?:MET|VIOLATED|VIOL)\)\s+(-?[0-9.]+)", text, re.M)
-    if not m_sl:
-        m_sl = re.search(r"slack\s+\((?:MET|VIOLATED)\)\s+(-?[0-9.]+)", text)
-    if m_sl:
-        slack = float(m_sl.group(1))
-    # Cell levels: unique sky130 instances on the data path before "data arrival time".
-    data = text
-    if "data arrival time" in text:
-        data = text.split("data arrival time")[0]
-        # drop clock-network preamble: start at first sky130 after Startpoint
-        if "Startpoint" in data:
-            data = data.split("Startpoint", 1)[-1]
-    insts: list[str] = []
+_SEQ_CELL_RE = re.compile(
+    r"sky130_fd_sc_hd__(?:edf|sdf|df)[a-z0-9_]+", re.IGNORECASE
+)
+
+
+def _parse_sta_block(block: str) -> dict[str, Any] | None:
+    if "data arrival time" not in block:
+        return None
+    group_m = re.search(r"Path Group:\s+(\S+)", block)
+    group = group_m.group(1) if group_m else ""
+    arrivals = re.findall(r"(-?[0-9.]+)\s+data arrival time", block)
+    slacks = re.findall(r"(-?[0-9.]+)\s+slack\s+\((MET|VIOLATED)\)", block)
+    if not arrivals and not slacks:
+        return None
+    arrival = float(arrivals[0]) if arrivals else None
+    slack = float(slacks[0][0]) if slacks else None
+    data = block.split("data arrival time")[0]
+    combo: list[str] = []
     for line in data.splitlines():
-        m = re.search(r"(sky130_fd_sc_hd__[A-Za-z0-9_]+)\s*$", line.strip())
-        # format: "  0.12   1.23  u_foo/X (sky130_fd_sc_hd__nand2_1)"
-        m2 = re.search(r"\((sky130_fd_sc_hd__[A-Za-z0-9_]+)\)", line)
-        inst = None
-        pin = re.search(r"\s([A-Za-z_][A-Za-z0-9_./]*)/[A-Za-z0-9_\[\]]+\s", line)
-        if m2:
-            inst = pin.group(1) if pin else m2.group(1)
-        elif m:
-            inst = pin.group(1) if pin else m.group(1)
-        if inst and inst not in insts:
-            insts.append(inst)
-    # Simpler depth: count sky130 cell mentions in the data-path block.
-    depth = len(insts) if insts else None
-    if depth is None:
-        depth = len(re.findall(r"sky130_fd_sc_hd__", data))
-        if depth == 0:
-            depth = None
+        m = re.search(r"\((sky130_fd_sc_hd__[A-Za-z0-9_]+)\)", line)
+        if not m:
+            continue
+        cell = m.group(1)
+        if _SEQ_CELL_RE.search(cell):
+            continue
+        pin = re.search(r"\s([A-Za-z_][A-Za-z0-9_./]*)/", line)
+        key = pin.group(1) if pin else cell
+        if key not in combo:
+            combo.append(key)
     return {
+        "group": group,
         "arrival_ns": arrival,
         "slack_ns": slack,
-        "logic_depth": depth,
-        "path_cells": insts,
-        "raw": text,
+        "logic_depth": len(combo),
+        "path_cells": combo,
     }
+
+
+def parse_sta(text: str) -> dict[str, Any]:
+    if "Startpoint" in text:
+        parts = ["Startpoint" + p for p in text.split("Startpoint")[1:]]
+    else:
+        parts = [text]
+    blocks = [b for b in (_parse_sta_block(p) for p in parts) if b]
+    chosen = None
+    clk_blocks = [b for b in blocks if b["group"] == "core_clk"]
+    pool = clk_blocks or [b for b in blocks if "async" not in (b["group"] or "")]
+    if not pool:
+        pool = blocks
+    if pool:
+        chosen = min(
+            pool,
+            key=lambda b: b["slack_ns"] if b["slack_ns"] is not None else 1e9,
+        )
+    if chosen is None:
+        return {
+            "arrival_ns": None,
+            "slack_ns": None,
+            "logic_depth": None,
+            "path_cells": [],
+            "raw": text,
+        }
+    return {**chosen, "raw": text}
 
 
 def tool_versions(liberty: Path, liberty_meta: dict[str, str]) -> dict[str, str]:
@@ -432,6 +469,9 @@ def synthesize_one(
 
     text = src.read_text(encoding="utf-8", errors="replace")
     clk = find_clock_port(text)
+    ports = list_ports(text)
+    in_ports = [n for d, n in ports if d in ("input", "inout") and n != clk]
+    out_ports = [n for d, n in ports if d in ("output", "inout")]
 
     merged: dict[str, str] = {}
     notes: list[str] = []
@@ -512,6 +552,8 @@ def synthesize_one(
     env["QS_PERIOD_NS"] = f"{period_ns:.9f}"
     env["QS_CLK_PORT"] = clk or ""
     env["QS_CLK_NAME"] = "core_clk"
+    env["QS_INPUTS"] = " ".join(in_ports)
+    env["QS_OUTPUTS"] = " ".join(out_ports)
     sta_log = outdir / "sta.log"
     s = run(
         ["sta", "-no_init", "-exit", str(SCRIPT_DIR / "sta.tcl")],
@@ -562,15 +604,18 @@ def detect_anomalies(r: dict[str, Any], src_text: str, yosys_log: str) -> list[s
         a.append(f"setup_violation slack={slack} ns")
     cells = r.get("cells_mapped")
     area = r.get("area_um2")
-    if cells is not None and cells <= 2 and len(src_text.splitlines()) > 25:
+    flops = r.get("flops") or 0
+    sequential_src = bool(re.search(r"always\s+@\s*\(\s*posedge", src_text))
+    if cells == 0:
+        a.append("near_zero_cells_after_map (module optimized away)")
+    elif sequential_src and flops == 0 and cells is not None and cells <= 2:
         a.append("near_zero_cells_after_map (possible unused/undriven sweep)")
     if area is not None and area > 20000:
         a.append(f"unexpectedly_large_area {area:.1f} um^2")
     if cells is not None and cells > 8000:
         a.append(f"unexpectedly_large_cell_count {cells}")
     if re.search(r"removing unused", yosys_log, re.IGNORECASE):
-        # only flag if it emptied the module
-        if cells is not None and cells <= 2:
+        if cells == 0:
             a.append("yosys_removed_unused_logic")
     return a
 

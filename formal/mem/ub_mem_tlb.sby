@@ -32,9 +32,9 @@ mode cover
 --
 
 [engines]
-# Match formal/cmn. Yosys 0.33 yosys-smtbmc + boolector --unroll
-# dies (BrokenPipe); z3 defaults to --nounroll.
-smtbmc z3
+# Yosys 0.33 yosys-smtbmc + boolector --unroll dies (BrokenPipe).
+# --nounroll keeps $mem as arrays; run tasks sequentially on 16 GB.
+smtbmc --nounroll boolector
 
 [script]
 # Keep $mem (no FF explosion). prep would map the 4×64×109 arrays.

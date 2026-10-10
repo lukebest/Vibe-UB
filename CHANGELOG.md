@@ -27,6 +27,7 @@
 
 ### Changed
 
+- SPEC §2.6：BCRC `last` 拍给出 `crc_word` 后 CRC 寄存器回到初值全 1；块首未带 `start` 的 `valid_in` 按全 1 计入，块中间未带 `start` 的 `valid_in` 接着当前 CRC 折入。上游仍应在每块首 flit 给 `start`。
 - BCRC formula ref (`formal/dll/ref/ub_dll_bcrc.sv`): after `valid_in && last`, `crc` reloads INIT while `crc_word` still takes `nxt` (PR #39 / Xia). Mid-block no-start `valid_in` still folds. Directed TB cases cover first-block-no-start, last-then-no-start, and chained single-flit blocks vs `tb/models` (model unchanged).
 - synth-check：按 cell 类型（`$adff`/`$adffe`/`$dffsr` 等）识别异步复位触发器，对所有模块生效，不算 LATCH（豁免只作用于 LATCH，不跳过该行的 MULTI_DRIVE / COMBO_LOOP）。SCC 只对组合单元建图。真 latch、真组合环、异步 FF+真组合环三个假网表仍报失败。
 - SPEC §2.2：pyCircuit 源码目录与导入（已定）——叶子 `pycircuit/<层>/<leaf>.py`，门禁只扫该层 `*.py`（跳过 `lib/` 与 `__init__.py`）；同层 helper 在 `pycircuit/<层>/lib/` 不出网表；导入根 `pycircuit/`（`from <层>.lib import ...`），门禁 / `emit_rtl.py` / tb 把 `pycircuit/` 置于 `PYTHONPATH` 最前；仓库根目录不进 `sys.path`；工具按脚本路径调用。门禁细则见 `docs/rules/verif_gate.md`（PR #33）。架构 Xia 与守门人验证 2026-10-10 共同定。

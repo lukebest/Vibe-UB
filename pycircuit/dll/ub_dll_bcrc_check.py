@@ -25,10 +25,10 @@ def _check_regs(m: Circuit, nxt, crc_recv, eat_last, ok_q, fail_q, eflag_q, zero
     recv_rsvd = crc_recv.slice(lsb=31, width=1)
     any_diff = bits_or_reduce(m, nxt ^ recv_crc)
     match = ~any_diff
-    # Pulse with done (gold: crc_ok = done & compare). Consume rsvd for -Wall.
-    ok_q.set(eat_last & match & ~(recv_rsvd & zero_q.out()))
-    fail_q.set(eat_last & any_diff)
-    eflag_q.set(eat_last & recv_flag)
+    # Hold until the next last (PR #16 gold / SPEC §7). Consume rsvd for -Wall.
+    ok_q.set(match & ~(recv_rsvd & zero_q.out()), when=eat_last)
+    fail_q.set(any_diff, when=eat_last)
+    eflag_q.set(recv_flag, when=eat_last)
 
 
 @module(name="ub_dll_bcrc_check")

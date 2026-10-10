@@ -89,6 +89,22 @@ SPEC §10 lists no hooks on these leaves. HOOKS is port-identical to PRODUCT
 both compiles run the same cases. Lane TBs sweep `NUM_LANES=1/2/4/8`.
 Seeds print as `SEED <n>` (D8).
 
+## Formula reference (`formal/<layer>/ref/`)
+
+Independent SV references for A-line leaves. `make -C tb leaf REF=1 LEAF=...`
+compiles the reference, not `rtl/`. `tb/scripts/run_ref_selfcheck.sh` walks
+rst_adapt, lane x1/x2/x4/x8, and BCRC. Scoreboard must count compares.
+
+Xia: if the reference and `model/` / `tb/models` disagree, leave both files
+alone and read `formal/reports/ref_vs_model/`.
+
+Yosys (caller supplies the netlist; no in-tree `rtl/` required):
+
+```bash
+scripts/gate/equiv_ref.sh ub_pcs_lane_dist /path/to/netlist.v
+NUM_LANES=4 scripts/gate/equiv_ref.sh ub_pcs_lane_dist /path/to/ub_pcs_lane_dist.v
+```
+
 ## Coverage scaffold
 
 | Kind | Where | Notes |

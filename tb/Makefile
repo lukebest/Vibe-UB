@@ -15,6 +15,7 @@
 REPO_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 TB_ROOT   := $(REPO_ROOT)/tb
 RTL       := $(REPO_ROOT)/rtl
+FORMAL    := $(REPO_ROOT)/formal
 
 export PYTHONPATH := $(REPO_ROOT)$(if $(PYTHONPATH),:$(PYTHONPATH))
 
@@ -24,12 +25,14 @@ LINE_COV   ?= 0
 LEAF       ?=
 NUM_LANES  ?= 4
 PYC_RST_ACTIVE_HIGH ?= 1
+REF        ?= 0
 
 export TEST_HOOKS
 export NUM_LANES
 export PYC_RST_ACTIVE_HIGH
 export SIM
 export LEAF
+export REF
 export COCOTB_REDUCED_LOG_FMT ?= 1
 export COCOTB_HDL_TIMEUNIT ?= 1ns
 export COCOTB_HDL_TIMEPRECISION ?= 1ps
@@ -99,6 +102,33 @@ VERILOG_SOURCES := $(TB_ROOT)/harness/tb_passthru_hooks0.sv
 endif
 endif
 
+# REF=1: formula reference under formal/<layer>/ref/. No rtl/ (PR #16 before #5).
+ifeq ($(REF),1)
+ifeq ($(LEAF),ub_pyc_rst_adapt)
+DUT_RTL := $(FORMAL)/common/ref/ub_pyc_rst_adapt.sv
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_rst_adapt.sv $(DUT_RTL)
+else ifeq ($(LEAF),ub_pcs_lane_dist)
+DUT_RTL := $(FORMAL)/pcs/ref/ub_pcs_lane_dist.sv
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_lane_dist.sv $(DUT_RTL)
+else ifeq ($(LEAF),ub_pcs_lane_dedist)
+DUT_RTL := $(FORMAL)/pcs/ref/ub_pcs_lane_dedist.sv
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_lane_dedist.sv $(DUT_RTL)
+else ifeq ($(LEAF),ub_pcs_lane_collect)
+DUT_RTL := $(FORMAL)/pcs/ref/ub_pcs_lane_collect.sv
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_lane_collect_ref.sv \
+	$(FORMAL)/pcs/ref/ub_pcs_lane_dist.sv \
+	$(FORMAL)/pcs/ref/ub_pcs_lane_dedist.sv \
+	$(DUT_RTL)
+else ifeq ($(LEAF),ub_dll_bcrc)
+DUT_RTL := $(FORMAL)/dll/ref/ub_dll_bcrc.sv
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_bcrc.sv $(DUT_RTL)
+else ifeq ($(LEAF),ub_dll_bcrc_check)
+DUT_RTL := $(FORMAL)/dll/ref/ub_dll_bcrc_check.sv
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_bcrc_check.sv \
+	$(FORMAL)/dll/ref/ub_dll_bcrc.sv $(DUT_RTL)
+endif
+endif
+
 VERILOG_INCLUDE_DIRS += $(TB_ROOT)/harness
 
 # -DTB_TEST_HOOKS is only for the passthrough self-check harness, not leaf TBs.
@@ -121,7 +151,11 @@ endif
 endif
 
 ifneq ($(filter $(LEAF),ub_pcs_lane_dist ub_pcs_lane_dedist ub_pcs_lane_collect),)
+ifeq ($(REF),1)
+LANE_FIXED := 0
+else
 LANE_FIXED := $(if $(filter %_$(LANE_TAG).v,$(DUT_RTL)),1,0)
+endif
 ifeq ($(LANE_FIXED),1)
 ifeq ($(SIM),verilator)
 EXTRA_ARGS += -DUB_LANE_FIXED -DUB_DIST_MODULE=ub_pcs_lane_dist_$(LANE_TAG) \
@@ -147,7 +181,7 @@ endif
 endif
 
 ifneq ($(LEAF),)
-$(info DUT_RTL=$(DUT_RTL) TEST_HOOKS=$(TEST_HOOKS))
+$(info DUT_RTL=$(DUT_RTL) TEST_HOOKS=$(TEST_HOOKS) REF=$(REF))
 endif
 
 include $(shell cocotb-config --makefiles)/Makefile.sim
@@ -165,7 +199,7 @@ selfcheck-both:
 
 leaf:
 	rm -rf sim_build
-	$(MAKE) SIM=$(SIM) TEST_HOOKS=$(TEST_HOOKS) LEAF=$(LEAF) \
+	$(MAKE) SIM=$(SIM) TEST_HOOKS=$(TEST_HOOKS) LEAF=$(LEAF) REF=$(REF) \
 		NUM_LANES=$(NUM_LANES) PYC_RST_ACTIVE_HIGH=$(PYC_RST_ACTIVE_HIGH) sim
 
 leaf-batch1:

@@ -12,6 +12,8 @@ from uvm import UVMConfigDb, UVMTest, uvm_error, uvm_info, UVM_LOW
 
 from tb.vibe_uvm.clk_rst import CORE_CLK_PERIOD_PS
 from tb.vibe_uvm.coverage import export_functional
+from tb.vibe_uvm.ref_mismatch import record as record_ref_mismatch
+from tb.vibe_uvm.ref_mismatch import ref_mode
 from tb.vibe_uvm.scoreboard import ScoreboardBase, scoreboard_tally
 from tb.vibe_uvm.seed_log import log_seed, resolve_seed
 
@@ -108,6 +110,8 @@ def run_tag() -> str:
         parts.append(f"x{env_int('NUM_LANES', 4)}")
     if leaf == "ub_pyc_rst_adapt":
         parts.append(f"pol{env_int('PYC_RST_ACTIVE_HIGH', 1)}")
+    if ref_mode():
+        parts.append("ref")
     return "_".join(parts)
 
 
@@ -202,16 +206,29 @@ class LeafUvmTest(UVMTest):
 
     def check(self, expected, actual, ctx: str) -> None:
         if not self.sb.check(expected, actual, ctx):
+            if ref_mode():
+                record_ref_mismatch(
+                    leaf=self.TB_NAME, ctx=ctx, expected=expected, actual=actual
+                )
             raise AssertionError(f"{ctx}: expected={expected!r} actual={actual!r}")
 
     def check_word(self, got: int, exp: int, num_lanes: int, ctx: str) -> None:
-        from tb.vibe_uvm.lane_util import PMA_W, mismatch_msg
+        from tb.vibe_uvm.lane_util import PMA_W, first_mismatch, mismatch_msg
 
         width = num_lanes * PMA_W
         self.sb.expect(width)
         for pos in range(width):
             self.sb.compare((exp >> pos) & 1, (got >> pos) & 1, f"{ctx}[{pos}]")
         if got != exp:
+            if ref_mode():
+                hit = first_mismatch(got, exp, num_lanes) or {}
+                record_ref_mismatch(
+                    leaf=self.TB_NAME,
+                    ctx=ctx,
+                    expected=exp,
+                    actual=got,
+                    extra={"num_lanes": num_lanes, **hit},
+                )
             raise AssertionError(mismatch_msg(got, exp, num_lanes, ctx))
 
     async def run_phase(self, phase):

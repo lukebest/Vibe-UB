@@ -1,6 +1,7 @@
 // ub_cmn_mem_1r1w_if_props — property/bind module (CODING_STYLE §10 / PR #20).
 // Written-bit tracking lives HERE only (anyconst address). Never in product RTL.
-// Bind on the leaf ports. Yosys-compatible: clocked assert/cover.
+// Bind on the leaf ports (core_clk; no reset — business name is rst_pyc).
+// Yosys-compatible: clocked assert/cover.
 
 module ub_cmn_mem_1r1w_if_props #(
   parameter DEPTH = 5,
@@ -8,7 +9,7 @@ module ub_cmn_mem_1r1w_if_props #(
   parameter AW    = 3,
   parameter ASSERT_NO_UNINIT_READ = 1
 ) (
-  input  wire             clk,
+  input  wire             core_clk,
   input  wire             we,
   input  wire [AW-1:0]    waddr,
   input  wire [WIDTH-1:0] wdata,
@@ -40,7 +41,7 @@ module ub_cmn_mem_1r1w_if_props #(
   initial f_wr = 1'b0;
   assign f_written = f_wr;
 
-  always @(posedge clk) begin
+  always @(posedge core_clk) begin
     if (we && (waddr == f_watch) && (waddr < DEPTH)) begin
       f_wr   <= 1'b1;
       f_data <= wdata;
@@ -49,13 +50,13 @@ module ub_cmn_mem_1r1w_if_props #(
 
   reg f_past_ok;
   initial f_past_ok = 1'b0;
-  always @(posedge clk)
+  always @(posedge core_clk)
     f_past_ok <= 1'b1;
 
   wire hit_r = re && (raddr == f_watch) && (raddr < DEPTH);
   wire hit_w = we && (waddr == f_watch) && (waddr < DEPTH);
 
-  always @(posedge clk) begin
+  always @(posedge core_clk) begin
     // Default 1. valid_outside instances elaborate 0; verification
     // checks the external valid bit instead.
     if (ASSERT_NO_UNINIT_READ && hit_r && !f_wr)

@@ -4,7 +4,7 @@
 
 ### Added
 
-- M1 RTL leaf batch 1 (pyCircuit): whitelist `ub_rst_sync`; generated `ub_pyc_rst_adapt`, `ub_pcs_scrambler` / `ub_pcs_descrambler`, `ub_pcs_lane_dist` / `ub_pcs_lane_dedist`, `ub_dll_bcrc` / `ub_dll_bcrc_check`. PRODUCT at `rtl/<block>/<module>.v` and HOOKS at `rtl/<block>/hooks/<module>.v` (SPEC §2.2 / CODING_STYLE §5 / §11). SPEC §10 lists no hook ports on these leaves (HOOKS ≡ PRODUCT). Whitelist `ub_rst_sync.sv` has no hooks copy.
+- M1 RTL leaf batch 1 (pyCircuit): whitelist `ub_rst_sync`; generated `ub_pyc_rst_adapt`, `ub_pcs_scrambler` / `ub_pcs_descrambler`, `ub_pcs_lane_dist_x4` / `_x8` / `ub_pcs_lane_dedist_x4` / `_x8`, `ub_dll_bcrc` / `ub_dll_bcrc_check`. STEP 1 leaves are real `@module` + `pycc` (LLVM 19.1.1). PRODUCT at `rtl/<block>/<leaf>[_<tag>].v` and HOOKS at `rtl/<block>/hooks/` (SPEC §2.2 / CODING_STYLE §5 / §11). SPEC §10 lists no hook ports (HOOKS ≡ PRODUCT). Scrambler / descrambler leftover f-string emitters pending STEP 2.
 - `scripts/impl/quick_synth.sh`：合入前叶子快速综合（Yosys flatten + Sky130 hd tt proxy + OpenSTA 最差建立路径）。Informational；不进验证门禁。规则见 `docs/rules/impl_quick_synth.md`。
 - `TOOLCHAIN.lock` + `tb/` uvm-python 骨架、golden-model 接口、双网表自检入口（叠在 M1 SPEC 上；不改 `rtl/` / SPEC 类文档）。
 - TB 模型按 CODING_STYLE §5 命名：`ub_dll_bcrc` 已按 SPEC §2.6 写全；`ub_pcs_scrambler` 已按已定项实现，抽头与 `AMCTL.LID`→种子为必填参数（SPEC §13，无默认）；`ub_pcs_lane_dist` 已实现。无 LMB/LTB golden。

@@ -1,21 +1,23 @@
 # Pin for D5. Do not silently float.
+# Root TOOLCHAIN.lock is owned by 验证 — do not edit it from this tree.
 #
-# Preferred install (when the wheel is published):
-#   python3 -m pip install pycircuit-hisi==0.1.0
+# Install (proven by spike cursor/spike-pycircuit-toolchain @ 6c48cb7):
+#   bash scripts/setup_pycircuit.sh
+# which clones lukebest/pyCircuit @ 43cc5918, builds pycc (LLVM 19),
+# and installs the frontend into $UB_PYC_VENV (default /tmp/venv).
 #
-# Fallback used by this tree (same pin as lukebest/Vibe-UB-Switch):
-#   git clone https://github.com/lukebest/pyCircuit
-#   git -C pyCircuit checkout 43cc5918e3d09ecc0c814cabef6c1384cb9980ae
-#   python3 -m pip install -e pyCircuit
-#
-# Frontend import path remains `pycircuit`. Compiler command is `pycc`.
-# Editable install is frontend-only. `pycc` (Verilog via MLIR) needs LLVM 19.
-# This repo's PRODUCT .v is reproduced by `make emit` (Python emitter) so
-# the netlist does not depend on LLVM. `make emit` also tries `pycc` when
-# it is on PATH.
+# Frontend import path remains `pycircuit` (package pycircuit-hisi).
+# STEP 1 PRODUCT .v is emitted by pycircuit.compile + pycc
+# (`python3 scripts/emit_rtl.py`). Scrambler / descrambler remain
+# leftover f-string emitters until STEP 2.
 
 PYCIRCUIT_REPO=https://github.com/lukebest/pyCircuit
 PYCIRCUIT_COMMIT=43cc5918e3d09ecc0c814cabef6c1384cb9980ae
 PYCIRCUIT_PACKAGE=pycircuit-hisi
 PYCIRCUIT_PACKAGE_VERSION=0.1.0
 PYCIRCUIT_RELEASE=pyc4.0
+PYCC_RELEASE=pyc4.0
+PYCC_LLVM=19.1.1
+LLVM_CONFIG=19.1.1
+PYCC_VERSION_STRING=Ubuntu LLVM version 19.1.1
+SETUP_SCRIPT=scripts/setup_pycircuit.sh

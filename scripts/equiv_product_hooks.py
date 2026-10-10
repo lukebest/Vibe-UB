@@ -23,6 +23,21 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+VENV_PY = Path(__import__("os").environ.get("UB_PYC_VENV", "/tmp/venv")) / "bin" / "python"
+
+
+def _reexec_venv() -> None:
+    import os
+
+    if not VENV_PY.is_file():
+        return
+    if Path(sys.executable).resolve() == VENV_PY.resolve():
+        return
+    os.execv(str(VENV_PY), [str(VENV_PY), *sys.argv])
+
+
+_reexec_venv()
+
 PYC = REPO / "pycircuit"
 if str(PYC) not in sys.path:
     sys.path.insert(0, str(PYC))
@@ -98,6 +113,12 @@ def _write_tied_wrapper(
     return dest
 
 
+def _extra_v(name: str) -> str:
+    if name.startswith("ub_dll_bcrc"):
+        return str(REPO / "rtl/common/pyc_reg.v") + " "
+    return ""
+
+
 def _yosys_script(
     *,
     gold: Path,
@@ -106,13 +127,14 @@ def _yosys_script(
     gate_top: str,
     ch: str,
 ) -> str:
+    extra = _extra_v(gold_top)
     return f"""
-read_verilog -sv {gold}
+read_verilog -sv {extra}{gold}
 {ch}hierarchy -check -top {gold_top}
 rename -top gold
 proc; flatten; opt
 
-read_verilog -sv {gate}
+read_verilog -sv {extra}{gate}
 {ch}hierarchy -check -top {gate_top}
 rename -top gate
 proc; flatten; opt

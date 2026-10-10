@@ -1,23 +1,18 @@
 #!/usr/bin/env python3
-"""Emit PRODUCT + HOOKS Verilog from registered pycircuit leaves.
+"""Emit PRODUCT + HOOKS Verilog.
 
-CODING_STYLE §1 / SPEC §11: TEST_HOOKS expands at Python generation time.
+Migrated STEP 1 leaves go through pycircuit.compile + pycc.
+Scrambler / descrambler stay on the leftover f-string emitters (STEP 2).
+
   PRODUCT  TEST_HOOKS=0  → rtl/<block>/<module>.v
   HOOKS    TEST_HOOKS=1  → rtl/<block>/hooks/<module>.v
 
 SPEC §10 lists no hook ports on this batch, so HOOKS is port-identical
-to PRODUCT (header ``TEST_HOOKS=1`` only). Xia: do not add unused
-``tb_test_mode`` (that is only for modules §10 lists hooks for).
+to PRODUCT. Xia: do not add unused tb_test_mode.
 
-Layers register via ``lib.registry.register``. Batch-1 registers here;
-later ``pycircuit/lmsm``, extra ``pycircuit/dll``, ``pycircuit/csr``
-call ``register()`` from ``scripts/emit_rtl.py``.
-
-Whitelist SV is handwritten: rtl/common/ub_rst_sync.sv — no HOOKS copy
-(CODING_STYLE §3 does not require one).
-
-Do not put the repo root on PYTHONPATH (toolchain package is also
-named pycircuit).
+Whitelist SV is handwritten: rtl/common/ub_rst_sync.sv — no HOOKS copy.
+Do not put the repo root on PYTHONPATH (toolchain package is also named
+pycircuit).
 """
 
 from __future__ import annotations
@@ -35,25 +30,51 @@ RTL = REPO / "rtl"
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from common.ub_pyc_rst_adapt import emit_verilog as emit_rst_adapt
-from dll.ub_dll_bcrc import emit_verilog as emit_bcrc
-from dll.ub_dll_bcrc_check import emit_verilog as emit_bcrc_check
+from common import ub_pyc_rst_adapt as rst_adapt
+from dll import ub_dll_bcrc as bcrc
+from dll import ub_dll_bcrc_check as bcrc_check
+from lib.pycc_emit import emit_variant, toolchain_root
 from lib.registry import Leaf, register, registered
+from lib.variants import variant_name
+from pcs import ub_pcs_lane_dedist as lane_dedist
+from pcs import ub_pcs_lane_dist as lane_dist
 from pcs.ub_pcs_descrambler import emit_verilog as emit_descrambler
-from pcs.ub_pcs_lane_dedist import emit_verilog as emit_dedist
-from pcs.ub_pcs_lane_dist import emit_verilog as emit_dist
 from pcs.ub_pcs_scrambler import emit_verilog as emit_scrambler
+
+# (layer, module, build, VARIANTS, sequential)
+PYC_LEAVES = (
+    ("common", rst_adapt.LEAF, rst_adapt.build, rst_adapt.VARIANTS, False),
+    ("pcs", lane_dist.LEAF, lane_dist.build, lane_dist.VARIANTS, False),
+    ("pcs", lane_dedist.LEAF, lane_dedist.build, lane_dedist.VARIANTS, False),
+    ("dll", bcrc.LEAF, bcrc.build, bcrc.VARIANTS, True),
+    ("dll", bcrc_check.LEAF, bcrc_check.build, bcrc_check.VARIANTS, True),
+)
+
+
+def _emit_pyc(layer: str, leaf: str, build, tag: str, params: dict, sequential: bool):
+    def _fn(test_hooks: bool = False, _p=params, _t=tag, _s=sequential) -> str:
+        _name, text = emit_variant(
+            build,
+            leaf=leaf,
+            tag=_t,
+            params=_p,
+            test_hooks=test_hooks,
+            sequential=_s,
+        )
+        return text
+
+    return _fn
 
 
 def register_batch1() -> None:
     """M1 leaf batch 1. Idempotent."""
-    register("common", "ub_pyc_rst_adapt", emit_rst_adapt)
+    for layer, leaf, build, variants, sequential in PYC_LEAVES:
+        for tag, params in variants.items():
+            name = variant_name(leaf, tag)
+            register(layer, name, _emit_pyc(layer, leaf, build, tag, params, sequential))
+    # STEP 2 pending: leftover f-string emitters, files untouched.
     register("pcs", "ub_pcs_scrambler", emit_scrambler)
     register("pcs", "ub_pcs_descrambler", emit_descrambler)
-    register("pcs", "ub_pcs_lane_dist", emit_dist)
-    register("pcs", "ub_pcs_lane_dedist", emit_dedist)
-    register("dll", "ub_dll_bcrc", emit_bcrc)
-    register("dll", "ub_dll_bcrc_check", emit_bcrc_check)
 
 
 def write_leaf(leaf: Leaf, out_root: Path = RTL) -> list[Path]:
@@ -75,13 +96,15 @@ def emit_all(out_root: Path = RTL) -> list[Path]:
 
 
 def try_pycc() -> str:
-    """Best-effort: note whether pycc is present. Does not replace emit()."""
     pycc = shutil.which("pycc")
     if pycc is None:
-        return "pycc: not on PATH (LLVM 19 toolchain not required for make emit)"
+        cand = toolchain_root() / "bin" / "pycc"
+        pycc = str(cand) if cand.is_file() else None
+    if pycc is None:
+        return "pycc: not on PATH (run scripts/setup_pycircuit.sh)"
     try:
         ver = subprocess.check_output([pycc, "--version"], text=True, timeout=10)
-        return f"pycc: {ver.strip()} (optional; PRODUCT .v still from make emit)"
+        return f"pycc: {ver.strip()}"
     except (subprocess.SubprocessError, OSError) as exc:
         return f"pycc: found but failed ({exc})"
 

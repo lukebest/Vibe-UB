@@ -9,13 +9,35 @@ Scrambler involution uses *explicit* elaboration-only OPEN tokens
 
 from __future__ import annotations
 
+import os
+import re
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+VENV_PY = Path(os.environ.get("UB_PYC_VENV", "/tmp/venv")) / "bin" / "python"
+
+
+def _reexec_venv() -> None:
+    if not VENV_PY.is_file():
+        return
+    if Path(sys.executable).resolve() == VENV_PY.resolve():
+        return
+    os.execv(str(VENV_PY), [str(VENV_PY), *sys.argv])
+
+
+_reexec_venv()
+os.environ.setdefault(
+    "PYC_TOOLCHAIN_ROOT",
+    "/tmp/pyCircuit/.pycircuit_out/toolchain/install",
+)
+_root = Path(os.environ["PYC_TOOLCHAIN_ROOT"])
+os.environ["PATH"] = f"{_root / 'bin'}:{os.environ.get('PATH', '')}"
+
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
+from dll.bcrc_matrix import next_crc as matrix_next_crc
 from emit import emit_all
 from lib import params as P
 from lib.elab_open import ELAB_LFSR_INIT, ELAB_SCR_TAPS, elab_seed_map
@@ -143,8 +165,28 @@ def _cosim_vs_tb_model() -> None:
     assert (packed[3][0] & 0xFF) == 124
 
 
+MIGRATED_PY = (
+    HERE / "common/ub_pyc_rst_adapt.py",
+    HERE / "pcs/ub_pcs_lane_dist.py",
+    HERE / "pcs/ub_pcs_lane_dedist.py",
+    HERE / "dll/ub_dll_bcrc.py",
+    HERE / "dll/ub_dll_bcrc_check.py",
+    HERE / "dll/bcrc_hw.py",
+    HERE / "dll/bcrc_matrix.py",
+)
+
+FORBIDDEN_IN_SRC = re.compile(r"""['"][^'"]*\b(module|endmodule|always)\b[^'"]*['"]""")
+
+
 def _ports_block(text: str) -> str:
     return text.split("module", 1)[1].split(");", 1)[0]
+
+
+def _no_verilog_text_in_migrated_src() -> None:
+    for path in MIGRATED_PY:
+        src = path.read_text(encoding="utf-8")
+        hit = FORBIDDEN_IN_SRC.search(src)
+        assert hit is None, f"Verilog text in {path}: {hit.group(0)}"
 
 
 def main() -> int:
@@ -152,8 +194,16 @@ def main() -> int:
     assert paths, "emit wrote nothing"
     products = [p for p in paths if "/hooks/" not in p.as_posix()]
     hooks = [p for p in paths if "/hooks/" in p.as_posix()]
-    assert len(products) == 7, products
-    assert len(hooks) == 7, hooks
+    # 9 PRODUCT + 9 HOOKS: rst, scrambler, descrambler, lane x4/x8 ×2, BCRC ×2
+    assert len(products) == 9, products
+    assert len(hooks) == 9, hooks
+    names = {p.name for p in products}
+    assert "ub_pcs_lane_dist_x4.v" in names
+    assert "ub_pcs_lane_dist_x8.v" in names
+    assert "ub_pcs_lane_dedist_x4.v" in names
+    assert "ub_pcs_lane_dedist_x8.v" in names
+    assert "ub_pcs_lane_dist.v" not in names
+    assert "ub_pcs_lane_dedist.v" not in names
     for p in paths:
         assert "gen/" not in p.as_posix()
         text = p.read_text(encoding="utf-8")
@@ -163,7 +213,6 @@ def main() -> int:
         assert "force " not in text
         if p.name != "ub_rst_sync.sv":
             assert "negedge rst_n" not in text
-        # DECLFILENAME: file stem == module name
         mod = text.split("module ", 1)[1].split("(", 1)[0].split("#", 1)[0].strip()
         assert p.stem == mod, f"DECLFILENAME {p.name} vs {mod}"
         ports = _ports_block(text)
@@ -174,7 +223,6 @@ def main() -> int:
             assert "TEST_HOOKS=1" in text
         else:
             assert "TEST_HOOKS=0" in text
-    # Xia: no §10 hooks → HOOKS ports identical to PRODUCT (no tb_test_mode).
     for prod in products:
         hook = prod.parent / "hooks" / prod.name
         assert hook in hooks, hook
@@ -183,8 +231,12 @@ def main() -> int:
         )
     rst_hooks = HERE.parent / "rtl/common/hooks/ub_rst_sync.sv"
     assert not rst_hooks.exists(), "whitelist ub_rst_sync must not get a hooks copy"
+    _no_verilog_text_in_migrated_src()
 
     rtl = HERE.parent / "rtl"
+    assert not (rtl / "pcs/ub_pcs_lane_dist.v").exists()
+    assert not (rtl / "pcs/ub_pcs_lane_dedist.v").exists()
+
     scr = (rtl / "pcs/ub_pcs_scrambler.v").read_text(encoding="utf-8")
     ports = _ports_block(scr)
     assert "amctl_lid" in ports
@@ -208,16 +260,19 @@ def main() -> int:
 
     bcrc = (rtl / "dll/ub_dll_bcrc.v").read_text(encoding="utf-8")
     assert "error_flag" not in _ports_block(bcrc)
-    assert "1'b0, 1'b0, t" in bcrc
-    assert "bi = 7" in bcrc
-    assert "15A94AD5" in bcrc
-    assert "NBYTE - BCRC_BYTES" in bcrc
+    assert "parameter" not in bcrc
+    assert "pyc_reg" in bcrc
     assert "n_eat" not in bcrc
 
     chk = (rtl / "dll/ub_dll_bcrc_check.v").read_text(encoding="utf-8")
     chk_ports = _ports_block(chk)
     assert "error_flag_rx" in chk_ports
-    assert "input  wire                 error_flag" not in chk_ports
+    assert "crc_ok" in chk_ports
+    assert "crc_fail" in chk_ports
+    assert "crc_recv" in chk_ports
+    assert re.search(r"\berror_flag\b", chk_ports) is None or "error_flag_rx" in chk_ports
+    assert "parameter" not in chk
+    assert "pyc_reg" in chk
 
     for nlane in (1, 4, 8):
         width = nlane * P.PMA_W
@@ -258,11 +313,13 @@ def main() -> int:
     packed = c1 & ((1 << P.BCRC_W) - 1)
     assert packed == c1
     assert (packed >> 30) == 0
+    assert matrix_next_crc(c0, 0, last=False) == c1
+    assert matrix_next_crc(c0, 0x80, last=True) == last_skip
 
     print(
         "selfcheck ok: "
         f"{len(paths)} leaves @ rtl/<block>/, lane UB-PHY+TB cosim, "
-        f"CRC30 byte-MSB-first + last-flit skip, scramble involution "
+        f"CRC30 XOR-matrix + last-flit skip, scramble leftover (STEP 2) "
         f"(ELAB_SCR_TAPS={ELAB_SCR_TAPS:#x} ELAB_LFSR_INIT={ELAB_LFSR_INIT:#x})"
     )
     return 0

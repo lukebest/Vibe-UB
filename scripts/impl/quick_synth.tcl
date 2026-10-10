@@ -8,6 +8,7 @@
 #   QS_OUTDIR       per-run output directory
 #   QS_CHPARAM      optional Yosys chparam override (SPEC §2.2: not required)
 #   QS_READ_SV      1 to pass -sv to read_verilog
+#   QS_INCDIRS      space-separated -I dirs (rtl/pyc_lib or rtl/common fallback + extras)
 
 set top     $::env(QS_TOP)
 set files   $::env(QS_FILES)
@@ -19,23 +20,31 @@ if {[info exists ::env(QS_READ_SV)] && $::env(QS_READ_SV) eq "1"} {
     set sv 1
 }
 
+set incargs ""
+if {[info exists ::env(QS_INCDIRS)] && $::env(QS_INCDIRS) ne ""} {
+    foreach d $::env(QS_INCDIRS) {
+        if {$d eq ""} { continue }
+        append incargs " -I $d"
+    }
+}
+
 # Large SRAM primitives: interface only (blackbox). Body never enters the design.
 if {[info exists ::env(QS_LIB_FILES)] && $::env(QS_LIB_FILES) ne ""} {
     foreach f $::env(QS_LIB_FILES) {
         if {$f eq ""} { continue }
         if {$sv || [string match *.sv $f]} {
-            yosys "read_verilog -lib -sv $f"
+            yosys "read_verilog$incargs -lib -sv $f"
         } else {
-            yosys "read_verilog -lib $f"
+            yosys "read_verilog$incargs -lib $f"
         }
     }
 }
 
 foreach f $files {
     if {$sv || [string match *.sv $f]} {
-        yosys "read_verilog -sv $f"
+        yosys "read_verilog$incargs -sv $f"
     } else {
-        yosys "read_verilog $f"
+        yosys "read_verilog$incargs $f"
     }
 }
 
@@ -61,6 +70,10 @@ yosys "tee -o [file join $outdir scc_synth.txt] scc"
 yosys "dfflibmap -liberty $liberty"
 yosys "abc -liberty $liberty"
 yosys {opt_clean -purge}
+# Pre-buffer snapshot. The Python driver inserts buf_4/buf_8 trees
+# (or skips when --no-buffer) then re-emits mapped.v / mapped_stat.txt.
+yosys "write_json [file join $outdir mapped_prebuf.json]"
+yosys "tee -o [file join $outdir mapped_prebuf_stat.txt] stat -liberty $liberty"
 yosys "tee -o [file join $outdir mapped_stat.txt] stat -liberty $liberty"
 yosys "tee -o [file join $outdir latch_mapped.txt] select -list t:*dlatch* t:*DLATCH* t:sky130_fd_sc_hd__dl*"
 

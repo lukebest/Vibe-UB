@@ -1,92 +1,41 @@
-# M1 leaf RTL (batch 1).
-# PRODUCT = TEST_HOOKS=0 → rtl/<block>/<module>.v
-# HOOKS   = TEST_HOOKS=1 → rtl/<block>/hooks/<module>.v
-# SPEC §10 lists no hook ports here, so HOOKS == PRODUCT (header only).
-# Whitelist ub_rst_sync.sv is handwritten: no hooks/ copy (CODING_STYLE §3).
+# One-button tool gate. CI jobs call the same scripts/gate/*.sh files.
+.PHONY: gate lint synth-check cdc-rdc formal regmap-consistency tb-selfcheck rtl-emit-consistency hooks-port-consistency pycircuit-provenance equiv spec-leak versions
 
-PY ?= python3
-RTL := rtl
-WHITELIST := $(RTL)/common/ub_rst_sync.sv
-VERILATOR ?= verilator
-YOSYS ?= yosys
+gate:
+	scripts/gate/run_all.sh
 
-LEAVES := \
-	$(RTL)/common/ub_pyc_rst_adapt.v \
-	$(RTL)/pcs/ub_pcs_scrambler.v \
-	$(RTL)/pcs/ub_pcs_descrambler.v \
-	$(RTL)/pcs/ub_pcs_lane_dist.v \
-	$(RTL)/pcs/ub_pcs_lane_dedist.v \
-	$(RTL)/dll/ub_dll_bcrc.v \
-	$(RTL)/dll/ub_dll_bcrc_check.v
+spec-leak:
+	scripts/gate/spec_leak.sh
 
-HOOKS := \
-	$(RTL)/common/hooks/ub_pyc_rst_adapt.v \
-	$(RTL)/pcs/hooks/ub_pcs_scrambler.v \
-	$(RTL)/pcs/hooks/ub_pcs_descrambler.v \
-	$(RTL)/pcs/hooks/ub_pcs_lane_dist.v \
-	$(RTL)/pcs/hooks/ub_pcs_lane_dedist.v \
-	$(RTL)/dll/hooks/ub_dll_bcrc.v \
-	$(RTL)/dll/hooks/ub_dll_bcrc_check.v
+rtl-emit-consistency:
+	scripts/gate/rtl_emit_consistency.sh
 
-# OPEN SPEC §13 scrambler items have no product default (syntax stubs are 0).
-# Lint / Yosys must pass explicit elaboration tokens. Source of truth:
-# pycircuit/lib/elab_open.py — not old PR #5 / Switch (tap 17, seed 2'b01).
-SCR_OPEN_G = $(shell $(PY) -c "import sys; sys.path.insert(0,'pycircuit'); from lib.elab_open import verilator_gflags; print(verilator_gflags())")
-SCR_OPEN_CH = $(shell $(PY) -c "import sys; sys.path.insert(0,'pycircuit'); from lib.elab_open import yosys_chparam_cmd; print(yosys_chparam_cmd())")
+hooks-port-consistency:
+	scripts/gate/hooks_port_consistency.sh
 
-.PHONY: all emit selfcheck lint synth equiv clean
+pycircuit-provenance:
+	scripts/gate/pycircuit_provenance.sh
 
-all: emit selfcheck lint equiv
+equiv:
+	scripts/gate/equiv.sh
 
-emit:
-	$(PY) scripts/emit_rtl.py
+lint:
+	scripts/gate/lint.sh
 
-selfcheck:
-	$(PY) pycircuit/selfcheck.py
+synth-check:
+	scripts/gate/synth_check.sh
 
-lint: emit
-	@err=0; \
-	for f in $(WHITELIST) $(LEAVES) $(HOOKS); do \
-	  gflags=""; \
-	  case $$f in \
-	    *ub_pcs_scrambler.v|*ub_pcs_descrambler.v) gflags="$(SCR_OPEN_G)" ;; \
-	  esac; \
-	  echo "==== verilator --lint-only -Wall $$gflags $$f ===="; \
-	  if $(VERILATOR) --lint-only -Wall $$gflags $$f; then \
-	    echo OK; \
-	  else \
-	    echo FAIL; err=1; \
-	  fi; \
-	done; \
-	echo "==== verilator --lint-only -Wall -GNUM_LANES=8 $(RTL)/pcs/ub_pcs_lane_dist.v ===="; \
-	if $(VERILATOR) --lint-only -Wall -GNUM_LANES=8 $(RTL)/pcs/ub_pcs_lane_dist.v; then echo OK; else echo FAIL; err=1; fi; \
-	echo "==== verilator --lint-only -Wall -GNUM_LANES=8 $(RTL)/pcs/ub_pcs_lane_dedist.v ===="; \
-	if $(VERILATOR) --lint-only -Wall -GNUM_LANES=8 $(RTL)/pcs/ub_pcs_lane_dedist.v; then echo OK; else echo FAIL; err=1; fi; \
-	echo "==== verilator --lint-only -Wall -GNUM_LANES=8 $(RTL)/pcs/hooks/ub_pcs_lane_dist.v ===="; \
-	if $(VERILATOR) --lint-only -Wall -GNUM_LANES=8 $(RTL)/pcs/hooks/ub_pcs_lane_dist.v; then echo OK; else echo FAIL; err=1; fi; \
-	echo "==== verilator --lint-only -Wall -GNUM_LANES=8 $(RTL)/pcs/hooks/ub_pcs_lane_dedist.v ===="; \
-	if $(VERILATOR) --lint-only -Wall -GNUM_LANES=8 $(RTL)/pcs/hooks/ub_pcs_lane_dedist.v; then echo OK; else echo FAIL; err=1; fi; \
-	exit $$err
+cdc-rdc:
+	scripts/gate/cdc_rdc.sh
 
-synth: emit
-	@err=0; \
-	for f in $(WHITELIST) $(LEAVES) $(HOOKS); do \
-	  top=$$(basename $$f | sed 's/\.[sv]*$$//'); \
-	  ch=""; \
-	  case $$f in \
-	    *ub_pcs_scrambler.v|*ub_pcs_descrambler.v) ch="$(SCR_OPEN_CH); " ;; \
-	  esac; \
-	  echo "==== yosys read/synth $$f (top $$top) ===="; \
-	  if $(YOSYS) -q -p "read_verilog -sv $$f; $${ch}hierarchy -check -top $$top; proc; opt; stat"; then \
-	    echo OK; \
-	  else \
-	    echo FAIL; err=1; \
-	  fi; \
-	done; \
-	exit $$err
+formal:
+	scripts/gate/formal.sh
 
-equiv: emit
-	$(PY) scripts/equiv_product_hooks.py --no-emit
+regmap-consistency:
+	scripts/gate/regmap_consistency.sh
 
-clean:
-	@echo "PRODUCT/HOOKS leaves are the committed rtl/<block>/*.v; not removed."
+tb-selfcheck:
+	scripts/gate/tb_selfcheck.sh
+
+versions:
+	scripts/gate/print_versions.sh

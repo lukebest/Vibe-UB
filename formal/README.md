@@ -1,4 +1,6 @@
-# Formula reference (verification)
+# Formal
+
+## Formula reference (verification)
 
 Independent synthesizable SV references for A-line leaves. Ports match the
 PRODUCT leaf contract used by the TB harnesses. Written from SPEC only —
@@ -58,3 +60,19 @@ Cocotb self-check (no product netlist):
 make -C tb leaf REF=1 LEAF=ub_pcs_lane_dist NUM_LANES=4 SIM=icarus
 tb/scripts/run_ref_selfcheck.sh icarus
 ```
+
+## Formal interface assertions
+
+Architecture (Xia) owns the assertions. Path convention:
+
+```
+formal/<iface>/*.sv
+formal/<iface>/*.sby
+```
+
+Each `<iface>` directory is self-contained: SystemVerilog assertions plus a
+small stub so SymbiYosys can run the job **without product RTL**.
+
+The gate (`scripts/gate/formal.sh`) walks `formal/*/*.sby` and runs
+`sby -f` on each file. Any failure fails the job. When no `.sby` files
+exist the job succeeds and prints `no assertions yet`.

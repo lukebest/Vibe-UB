@@ -6,6 +6,7 @@
 
 - `pycircuit/cmn/ub_cmn_mem_1r1w.py` → `rtl/cmn/` 与 `rtl/cmn/hooks/` 的 `ub_cmn_mem_1r1w_{d5w8,d8w16,d64w64m16}.v`：pycc 固定网表（SPEC §2.2，`d<DEPTH>w<WIDTH>`，N>1 加 `m<WMASK_W>`）。PRODUCT=`TEST_HOOKS=0`，HOOKS=`TEST_HOOKS=1`；§10 无 `tb_*`，两套端口与模块名相同。时钟 `core_clk`；无复位口（业务叶标准名 `rst_pyc`，本原语不引出）。生成参数 `WMASK_W`（默认 = `WIDTH`，整字写；`WIDTH` 须整除）；N=`WIDTH/WMASK_W`>1 时多 `wmask[N-1:0]`，bit i 写段 i，其余段保持；同址同拍 per-segment read-old。1R1W、读 1 拍；阵列与 `rdata` 无复位 / 无零初始化；越界不截断。`scripts/emit_rtl.py` / `make emit` 再现。较大 C 线变体（如 `d512w512m64`）不在本登记表，可经清单流后补。
 - `model/ub_cmn_mem_1r1w.py` + `formal/cmn/`：1R1W 存储原语参考模型与接口断言（CODING_STYLE §10 / PR #20 时序提案；`ASSERT_NO_UNINIT_READ` 默认 1；formal 用 anyconst 单地址抽象）。
+- `docs/VERIF_PLAN.md` §8.8：轨道 C 内存管理（UMMU + 译码器）测试点（docs-only；公共 §8.7 / §13 / §14 / §15 另 PR 并入）。
 - `scripts/impl/quick_synth.sh`：合入前叶子快速综合（Yosys flatten + Sky130 hd tt proxy + OpenSTA 最差建立路径）。Informational；不进验证门禁。规则见 `docs/rules/impl_quick_synth.md`。
 - `TOOLCHAIN.lock` + `tb/` uvm-python 骨架、golden-model 接口、双网表自检入口（叠在 M1 SPEC 上；不改 `rtl/` / SPEC 类文档）。
 - TB 模型按 CODING_STYLE §5 命名：`ub_dll_bcrc` 已按 SPEC §2.6 写全；`ub_pcs_scrambler` 已按已定项实现，抽头与 `AMCTL.LID`→种子为必填参数（SPEC §13，无默认）；`ub_pcs_lane_dist` 已实现。无 LMB/LTB golden。
@@ -23,6 +24,7 @@
 
 ### Changed
 
+- `docs/VERIF_PLAN.md`：公共 §8.7 / §13 / §14 / §15 并入轨道 C 内存管理计数与追溯（§8.8 正文不动）。
 - `scripts/impl/quick_synth.*` + `docs/rules/impl_quick_synth.md` v0.2：按 SPEC §2.2 每文件一个 top（无必经 `chparam`）；`_placeholder` 单独表且不计入 PRODUCT 面积；`--baseline-map` / `--baseline-report` 对照旧模块+参数；QoR（cells / area / depth / slack）相对 baseline 超 10% 标旗；`ub_cmn_mem_1r1w`（及 `scripts/gate/blackbox.yml`）超过可配 4096-bit 阈值作黑盒并报 SRAM 估算列，小实例仍综合为 flop；STA 按 1 拍 registered read。
 - `docs/SPEC.md` §2.2：pycc 按参数集展开固定网表（`<leaf>_<tag>` 命名；占位变体 `_placeholder`）。
 - 架构关闭若干待定项：M1 单时钟 80.57 MHz、`rst_n` 封装、CSR 整字/1 拍/未映射 `csr_err`、非法 VL 丢包、信用下溢计数+irq（TB assert）、`irq` 高有效默认全屏蔽、预编码默认关、信用钩子仅 VL0、`tb_obs_lmsm_st` 仅顶层编码。
@@ -35,3 +37,7 @@
 - `LMSM_CTRL.START` 更名为 `CTRL.LMSM_START`（REGMAP `0x0000` bit1）。关闭 `STATUS.RETRY_REQ_ST` / `RETRY_ACK_ST` 与 `PARAM_PHY.NUM_LANES_{TX,RX}` 编码（二进制 1/2/4/8）；保留值 RTL 不产出、TB assert。
 - `docs/TEAM.md`、`docs/PROCESS.md`：按 D18 写全层级范围；PROCESS §6 为「全层级推进」。
 - `docs/TEAM.md`、`docs/PROCESS.md`：按 D19 写入三条轨道、轨道所有权，以及「设计-B」/「验证-B」、「设计-C」/「验证-C」新角色。
+- `docs/CODING_STYLE.md` §10：统一存储原语 `ub_cmn_mem_1r1w`（`DEPTH`/`WIDTH`；时钟口 `core_clk`；阵列无复位；1R1W `we/waddr/wdata` + `re/raddr/rdata`；读 1 拍寄存、同址 read-old — Xia 提案，规范未裁定）。pyCircuit 行为模型、pycc 生成、门禁 stub 名单；换宏不改口。线 B RTP 重传/重排、TA 未决与线 C `mem_tlb_w0`…`w3` / `mem_dec_b0`…`b7` / `mem_dec_tlb` 必须例化。页表与 MAPT 在系统内存；PLB 为 FF。
+- SPEC §10.5 + CODING_STYLE §4：§10 点名存储允许 HOOKS-only `tb_<inst>_bd_*`（阵列 we/addr/wdata/re/rdata + 原语外 valid flop 伴随口 `tb_<inst>_bd_vld_*`），`tb_test_mode` 门控；等价检查接低。其它叶子内部缓冲不得加钩子。不改 TEAM/PROCESS/DECISIONS；不改 `regmap.yaml`。
+- SPEC §11 (d) / §10.5 / CODING_STYLE：PRODUCT vs HOOKS 形式等价的规范工具改为 Yosys **`equiv`**（版本见 `TOOLCHAIN.lock`）；eqy 可安装后作可选补充。规则不变：`tb_test_mode=0`，全部 `tb_*` 钩子**输入**（含 `tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`）接低；只比 PRODUCT 已有端口。
+- SPEC §10 / §10.5 / §11 + CODING_STYLE §4：增加叶子只读观察口 `tb_<inst>_obs_*`（与 `tb_<inst>_bd_*` 并列）。仅 HOOKS、只出、不受 `tb_test_mode`、不回灌；未登记 `tb_*` 门禁拒绝；不用 keep 钉内部名。首个叶子 `ub_mem_tlb`：`tb_mem_tlb_obs_lkup_v`、`obs_hit[3:0]`、`obs_vld[3:0]`、`obs_tag_w0`…`w3`（各 60）；四口对齐查找请求下一拍（原语寄存 `rdata` 比较拍）。断言仅 `lkup_v=1`。`formal/mem/` 经 HOOKS bind。PRODUCT / quick-synth 不受影响。

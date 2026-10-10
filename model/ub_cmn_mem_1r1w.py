@@ -97,13 +97,14 @@ class UbCmnMem1r1w:
         we_b = bool(we)
         re_b = bool(re)
         wdata_m = int(wdata) & self._mask
+        pending: list[Exception] = []
 
         if we_b and not (0 <= int(waddr) < self.depth):
-            self._flag(
+            pending.append(
                 UbCmnMemAddrError(f"waddr={waddr} out of range DEPTH={self.depth}")
             )
         if re_b and not (0 <= int(raddr) < self.depth):
-            self._flag(
+            pending.append(
                 UbCmnMemAddrError(f"raddr={raddr} out of range DEPTH={self.depth}")
             )
         elif (
@@ -111,7 +112,7 @@ class UbCmnMem1r1w:
             and self.assert_no_uninit_read
             and not self._written[int(raddr)]
         ):
-            self._flag(
+            pending.append(
                 UbCmnMemUnwrittenError(f"read of never-written entry {int(raddr)}")
             )
 
@@ -122,6 +123,9 @@ class UbCmnMem1r1w:
         if we_b and 0 <= int(waddr) < self.depth:
             self._mem[int(waddr)] = wdata_m
             self._written[int(waddr)] = True
+
+        for exc in pending:
+            self._flag(exc)
 
         return self._rdata
 

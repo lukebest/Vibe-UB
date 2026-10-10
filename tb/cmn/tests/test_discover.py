@@ -9,9 +9,18 @@ from tb.cmn.discover import (
     discover_by_netlist,
     discover_variants,
     parse_variant_file,
+    require_variant_ports,
     rtl_sim_skip_reason,
 )
 from tb.cmn.harness.emit_wrapper import TOPLEVEL, emit_wrapper
+from tb.cmn.ports import (
+    CLK_MISMATCH_ZH,
+    CLK_PORT,
+    LeafPortError,
+    RST_FORBIDDEN_ZH,
+    check_leaf_ports,
+    parse_module_ports,
+)
 
 
 def _write_leaf(path: Path, module: str, aw: int, width: int, header: str = "") -> Path:
@@ -42,6 +51,7 @@ def test_parse_d5w8_tag(tmp_path: Path):
     assert var.tag == "d5w8"
     assert var.source == "tag"
     assert var.aw == 3
+    assert var.ports == ("clk", "we", "waddr", "wdata", "re", "raddr", "rdata")
 
 
 def test_parse_d8_w16_tag(tmp_path: Path):
@@ -125,3 +135,123 @@ def test_emit_wrapper_bakes_constants_no_dut_parameter(tmp_path: Path):
     assert "localparam integer WIDTH = 8" in text
     assert "ub_cmn_mem_1r1w_if_props" in text
     assert ".ASSERT_NO_UNINIT_READ(ASSERT_NO_UNINIT_READ)" in text
+    assert f"input  wire             {CLK_PORT}" in text
+    assert f".{CLK_PORT} ({CLK_PORT})" in text
+    assert "rst_n" not in text
+    assert "rst_pyc" not in text
+    assert f"input  wire             clk\n" not in text
+    assert ".clk   (clk)" not in text
+
+
+def test_parse_parameterized_formal_if_props():
+    text = """
+module ub_cmn_mem_1r1w_if_props #(
+  parameter DEPTH = 5,
+  parameter WIDTH = 8
+) (
+  input  wire             core_clk,
+  input  wire             we,
+  input  wire [AW-1:0]    waddr,
+  input  wire [WIDTH-1:0] wdata,
+  input  wire             re,
+  input  wire [AW-1:0]    raddr,
+  input  wire [WIDTH-1:0] rdata,
+  output wire [AW-1:0]    f_addr,
+  output wire             f_written
+);
+endmodule
+"""
+    ports = parse_module_ports(text, "ub_cmn_mem_1r1w_if_props")
+    assert "core_clk" in ports
+    assert "we" in ports and "rdata" in ports
+    assert "rst_n" not in ports and "rst_pyc" not in ports
+    check_leaf_ports(ports, module="ub_cmn_mem_1r1w_if_props")
+
+
+def test_parse_module_ports_core_clk_no_reset():
+    text = """
+module ub_cmn_mem_1r1w_d5w8 (
+  input core_clk,
+  input we,
+  input [2:0] waddr,
+  input [7:0] wdata,
+  input re,
+  input [2:0] raddr,
+  output [7:0] rdata
+);
+endmodule
+"""
+    ports = parse_module_ports(text, "ub_cmn_mem_1r1w_d5w8")
+    assert ports == (
+        "core_clk",
+        "we",
+        "waddr",
+        "wdata",
+        "re",
+        "raddr",
+        "rdata",
+    )
+    check_leaf_ports(ports, module="ub_cmn_mem_1r1w_d5w8")
+
+
+def test_check_leaf_ports_rejects_legacy_clk():
+    ports = ("clk", "we", "waddr", "wdata", "re", "raddr", "rdata")
+    try:
+        check_leaf_ports(ports, module="ub_cmn_mem_1r1w_d5w8")
+    except LeafPortError as exc:
+        msg = str(exc)
+        assert CLK_MISMATCH_ZH in msg
+        assert "clk" in msg
+        assert "silently" in msg
+    else:
+        raise AssertionError("expected LeafPortError for legacy clk")
+
+
+def test_check_leaf_ports_rejects_any_reset():
+    ports = (
+        "core_clk",
+        "rst_pyc",
+        "we",
+        "waddr",
+        "wdata",
+        "re",
+        "raddr",
+        "rdata",
+    )
+    try:
+        check_leaf_ports(ports, module="ub_cmn_mem_1r1w_d5w8")
+    except LeafPortError as exc:
+        assert RST_FORBIDDEN_ZH in str(exc)
+        assert "rst_pyc" in str(exc)
+    else:
+        raise AssertionError("expected LeafPortError for unexpected reset port")
+
+
+def test_current_product_clk_is_reported_not_remapped():
+    """Design-B leaf still emits clk. TB must fail with the Xia clock name."""
+    found = discover_by_netlist("product")
+    for var in found:
+        if "clk" in var.ports and CLK_PORT not in var.ports:
+            try:
+                require_variant_ports(var)
+            except LeafPortError as exc:
+                assert CLK_MISMATCH_ZH in str(exc)
+            else:
+                raise AssertionError(
+                    f"{var.module} has clk but port check stayed silent"
+                )
+
+
+def test_repo_product_netlist_ports_are_parsed():
+    """Live PRODUCT files: parse ports. Sim raises LeafPortError on mismatch."""
+    found = discover_by_netlist("product")
+    if not found:
+        return
+    for var in found:
+        print(f"PRODUCT {var.module} ports={var.ports}", flush=True)
+        assert var.ports, f"{var.module} ANSI port list was empty"
+        try:
+            require_variant_ports(var)
+            print(f"  port check OK ({CLK_PORT}, no reset)", flush=True)
+        except LeafPortError as exc:
+            print(f"  port check FAIL (sim will error, no silent remap): {exc}", flush=True)

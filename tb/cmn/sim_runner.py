@@ -8,14 +8,17 @@ not this TB.
 from __future__ import annotations
 
 import os
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from tb.cmn.discover import (
     REPO_ROOT,
     MemVariant,
+    require_variant_ports,
     rtl_sim_skip_reason,
 )
 from tb.cmn.harness.emit_wrapper import TOPLEVEL, emit_wrapper
+from tb.cmn.ports import LeafPortError, check_leaf_ports, parse_module_ports_file
 from tb.cmn.sequences import expected_violation
 
 TB_CMN = Path(__file__).resolve().parent
@@ -32,6 +35,10 @@ def _build_and_test(
     tb_check: bool,
 ) -> None:
     from cocotb.runner import get_runner
+
+    require_variant_ports(variant)
+    if tb_check:
+        _require_formal_bind_ports()
 
     build_dir = (
         TB_CMN
@@ -80,7 +87,7 @@ def _build_and_test(
     # Do not pass `parameters=` — that becomes Verilator -G (forbidden).
     build_kw = dict(
         hdl_toplevel=TOPLEVEL,
-        always=True,
+        always=False,
         build_dir=str(build_dir),
         includes=includes,
         build_args=build_args,
@@ -101,6 +108,32 @@ def _build_and_test(
         runner.test(**test_kw)
     except TypeError:
         runner.test(hdl_toplevel=TOPLEVEL, test_module=SIM_MODULE, extra_env=extra_env)
+    _assert_cocotb_passed(build_dir)
+
+
+def _require_formal_bind_ports() -> None:
+    """TB wrapper binds if_props with core_clk and no reset."""
+    if not FORMAL_PROPS.is_file():
+        raise LeafPortError(
+            f"formal bind requested but {FORMAL_PROPS} is missing"
+        )
+    ports = parse_module_ports_file(FORMAL_PROPS, "ub_cmn_mem_1r1w_if_props")
+    check_leaf_ports(ports, module="ub_cmn_mem_1r1w_if_props")
+
+
+def _assert_cocotb_passed(build_dir: Path) -> None:
+    xml = build_dir / "results.xml"
+    if not xml.is_file():
+        raise AssertionError(f"cocotb results.xml missing under {build_dir}")
+    root = ET.parse(xml).getroot()
+    fails = list(root.iter("failure")) + list(root.iter("error"))
+    if fails:
+        texts = []
+        for node in fails:
+            texts.append((node.get("message") or node.text or "failure").strip())
+        raise AssertionError(
+            f"cocotb reported {len(fails)} failure(s) in {xml}: " + " | ".join(texts)
+        )
 
 
 def run_sim_variant(

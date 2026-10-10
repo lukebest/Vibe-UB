@@ -6,10 +6,11 @@ import os
 
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import ReadOnly, RisingEdge
+from cocotb.triggers import NextTimeStep, ReadOnly, RisingEdge
 
 from tb.cmn.coverage import Mem1r1wCoverage
 from tb.cmn.driver import Mem1r1wDriver
+from tb.cmn.ports import CLK_PORT
 from tb.cmn.scoreboard import Mem1r1wScoreboard
 from tb.cmn.sequences import expected_violation, make_sequence
 
@@ -31,12 +32,13 @@ def _sample_int(sig):
 
 
 def _require_ports(dut) -> None:
-    needed = ("clk", "we", "waddr", "wdata", "re", "raddr", "rdata")
+    needed = (CLK_PORT, "we", "waddr", "wdata", "re", "raddr", "rdata")
     missing = [n for n in needed if not hasattr(dut, n)]
     if missing:
+        have = [p for p in dir(dut) if not p.startswith("_")]
         raise AssertionError(
             "DUT/wrapper missing contract ports "
-            f"{missing}; have={[p for p in dir(dut) if not p.startswith('_')]}"
+            f"{missing}; expected clock '{CLK_PORT}' and no reset; have={have}"
         )
 
 
@@ -60,11 +62,13 @@ async def test_ub_cmn_mem_1r1w(dut):
     driver = Mem1r1wDriver()
     scoreboard = Mem1r1wScoreboard(depth, width, assert_no_uninit_read=anur)
     coverage = Mem1r1wCoverage()
+    clk = getattr(dut, CLK_PORT)
     driver.idle(dut)
+    scoreboard.ref.reset_written()
 
-    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    cocotb.start_soon(Clock(clk, 10, units="ns").start())
     for _ in range(2):
-        await RisingEdge(dut.clk)
+        await RisingEdge(clk)
 
     cycles = make_sequence(case, depth, width, seed, assert_no_uninit_read=anur)
     want = expected_violation(case, anur)
@@ -74,7 +78,7 @@ async def test_ub_cmn_mem_1r1w(dut):
     for i, cycle in enumerate(cycles):
         driver.drive(dut, cycle)
         _expected, flags = scoreboard.predict(*cycle.as_tuple())
-        await RisingEdge(dut.clk)
+        await RisingEdge(clk)
         await ReadOnly()
         actual = _sample_int(dut.rdata)
         coverage.sample(
@@ -99,9 +103,21 @@ async def test_ub_cmn_mem_1r1w(dut):
             raise AssertionError(
                 "model bitwise rdata mismatch: " + "; ".join(scoreboard.mismatches)
             )
+        await NextTimeStep()
 
     if want and not saw:
         raise AssertionError(f"checker did not report {want}: {scoreboard.all_flags}")
     if not want:
         scoreboard.assert_clean()
-    print(f"PASS ub_cmn_mem_1r1w case={case} cover={sorted(coverage.hits)}", flush=True)
+        if any(c.re for c in cycles) and (anur or case != "random"):
+            if scoreboard.n_compare == 0:
+                raise AssertionError(
+                    "scoreboard skipped every beat; defined-flag reverse check failed "
+                    f"(n_compare=0 n_skip={scoreboard.n_skip})"
+                )
+    print(
+        f"PASS ub_cmn_mem_1r1w case={case} "
+        f"n_compare={scoreboard.n_compare} n_skip={scoreboard.n_skip} "
+        f"cover={sorted(coverage.hits)}",
+        flush=True,
+    )

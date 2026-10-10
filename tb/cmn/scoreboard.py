@@ -1,9 +1,9 @@
 """Scoreboard: architecture model is the only data oracle (CODING_STYLE §10).
 
-Every compared cycle is a bit-by-bit check of DUT ``rdata`` against
-``model.ub_cmn_mem_1r1w.UbCmnMem1r1w.rdata`` after the same ``tick()``.
-A local ``wrote[addr] == read`` loop is not a pass criterion — that pattern
-can hide swapped address bits and cancel bugs on both sides of a TB/DUT pair.
+Compare DUT ``rdata`` to ``UbCmnMem1r1w.rdata`` bit-by-bit **only** when
+the model marks it defined (``rdata_valid`` / ``is_defined``). When the
+model returns ``None``, skip the compare and count the skip. Do not keep a
+TB-side ``written[]`` / ``rdata_known`` shadow of that rule.
 """
 
 from __future__ import annotations
@@ -12,14 +12,7 @@ from model.ub_cmn_mem_1r1w import UbCmnMem1r1w, UbCmnMemAddrError, UbCmnMemUnwri
 
 
 class Mem1r1wScoreboard:
-    """Lock-step ``UbCmnMem1r1w``; bitwise ``rdata`` compare; violation flags.
-
-    ``strict=False`` so a cycle can update the array and still record a
-    violation (same-cycle uninit read-old still writes). Callers decide
-    whether flags are expected. Legal traffic is never relaxed: after an
-    in-range read of a previously written entry, every ``rdata`` bit must
-    match the model, including hold cycles.
-    """
+    """Lock-step ``UbCmnMem1r1w``; bitwise compare iff the model is defined."""
 
     def __init__(
         self,
@@ -39,13 +32,21 @@ class Mem1r1wScoreboard:
             strict=False,
         )
         self.n_compare = 0
+        self.n_skip = 0
         self.n_mismatch = 0
         self.mismatches: list[str] = []
         self.cycle_flags: list[str] = []
         self.all_flags: list[str] = []
-        self.rdata_known = False
         self._n_flags_seen = 0
-        self.last_expected = 0
+        self.last_expected: int | None = None
+
+    @property
+    def rdata_valid(self) -> bool:
+        return self.ref.rdata_valid
+
+    @property
+    def is_defined(self) -> bool:
+        return self.ref.is_defined
 
     def predict(
         self,
@@ -54,39 +55,36 @@ class Mem1r1wScoreboard:
         wdata: int,
         re: int | bool,
         raddr: int,
-    ) -> tuple[int, list[str]]:
-        written_before = self.ref.written
-        expected = self.ref.tick(we, waddr, wdata, re, raddr) & self.mask
+    ) -> tuple[int | None, list[str]]:
+        expected = self.ref.tick(we, waddr, wdata, re, raddr)
         new_flags = self.ref.flags[self._n_flags_seen :]
         self._n_flags_seen = len(self.ref.flags)
         self.cycle_flags = list(new_flags)
         self.all_flags.extend(new_flags)
-        self.last_expected = int(expected)
-
-        in_range = bool(re) and 0 <= int(raddr) < self.depth
-        if in_range and written_before[int(raddr)]:
-            self.rdata_known = True
-        elif in_range and not written_before[int(raddr)]:
-            # RTL array is not reset: unwritten read is X; model returns 0.
-            self.rdata_known = False
-        return int(expected), list(new_flags)
+        self.last_expected = expected
+        return expected, list(new_flags)
 
     def compare_rdata(self, actual, ctx: str = "rdata") -> bool:
-        """Bit-by-bit vs ``self.ref.rdata``. ``actual is None`` means X/Z."""
-        expected = int(self.ref.rdata) & self.mask
-        return self.compare(actual, expected, ctx)
-
-    def compare(
-        self,
-        actual,
-        expected: int,
-        ctx: str = "rdata",
-        *,
-        require_known: bool = True,
-    ) -> bool:
-        self.n_compare += 1
-        if require_known and not self.rdata_known:
+        """Skip when the model is undefined; otherwise bitwise vs ``ref.rdata``."""
+        if self.ref.rdata_valid != self.ref.is_defined:
+            raise AssertionError(
+                "model rdata_valid and is_defined diverged: "
+                f"valid={self.ref.rdata_valid} defined={self.ref.is_defined}"
+            )
+        if not self.ref.rdata_valid or self.ref.rdata is None:
+            self.n_skip += 1
             return True
+        return self._compare_bits(actual, int(self.ref.rdata), ctx)
+
+    def compare(self, actual, expected: int, ctx: str = "rdata") -> bool:
+        """Bitwise compare. Callers must only use this when the model is defined."""
+        if not self.ref.rdata_valid or self.ref.rdata is None:
+            self.n_skip += 1
+            return True
+        return self._compare_bits(actual, int(expected), ctx)
+
+    def _compare_bits(self, actual, expected: int, ctx: str) -> bool:
+        self.n_compare += 1
         if actual is None:
             self.n_mismatch += 1
             self.mismatches.append(f"{ctx}: expected={expected:#x} actual=X/Z")

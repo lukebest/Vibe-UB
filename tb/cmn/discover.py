@@ -19,6 +19,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from model.ub_cmn_mem_1r1w import clog2
+from tb.cmn.ports import (
+    CLK_PORT,
+    check_leaf_ports,
+    parse_module_ports,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RTL_CMN = REPO_ROOT / "rtl" / "cmn"
@@ -55,10 +60,19 @@ class MemVariant:
     placeholder: bool = False
     source: str = "tag"
     extras: dict = field(default_factory=dict)
+    ports: tuple[str, ...] = ()
 
     @property
     def aw(self) -> int:
         return max(1, clog2(self.depth))
+
+    @property
+    def clk_port(self) -> str | None:
+        if CLK_PORT in self.ports:
+            return CLK_PORT
+        if "clk" in self.ports:
+            return "clk"
+        return None
 
     @property
     def id(self) -> str:
@@ -246,6 +260,8 @@ def parse_variant_file(
     if _aw is not None:
         extras["port_aw"] = _aw
     extras["repo"] = str(repo) if repo is not None else ""
+    ports = parse_module_ports(text, module)
+    extras["ports"] = list(ports)
     return MemVariant(
         path=path.resolve(),
         module=module,
@@ -258,6 +274,7 @@ def parse_variant_file(
         ),
         source=source,
         extras=extras,
+        ports=ports,
     )
 
 
@@ -330,6 +347,12 @@ def rtl_sim_skip_reason(
         else discover_variants(repo)
     )
     if not variants:
+        if netlist == "hooks" and discover_by_netlist("product", repo):
+            return (
+                "No TEST_HOOKS variants under rtl/cmn/hooks/. "
+                "PRODUCT leaf is present; design-B documents SPEC §10 has no "
+                "tb_* hooks for this primitive (PRODUCT-only netlist)."
+            )
         where = (
             "rtl/cmn/hooks/"
             if netlist == "hooks"
@@ -352,3 +375,8 @@ def rtl_sim_skip_reason(
             "suite. Install tb/requirements.txt."
         )
     return None
+
+
+def require_variant_ports(variant: MemVariant) -> None:
+    """Error if the netlist is not ``core_clk`` + data ports and no reset."""
+    check_leaf_ports(variant.ports, module=variant.module)

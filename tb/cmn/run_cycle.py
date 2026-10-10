@@ -18,7 +18,7 @@ def step_fake(
     *,
     expect_violation: str | None = None,
     compare: bool = True,
-) -> tuple[int, list[str]]:
+) -> tuple[int | None, list[str]]:
     """Drive, tick fake DUT + scoreboard, compare, and sample coverage."""
     driver.drive(handle, cycle)
     driven = handle.sample_inputs()
@@ -68,6 +68,9 @@ def run_cycles(
     )
     driver = Mem1r1wDriver()
     cov = coverage if coverage is not None else Mem1r1wCoverage()
+    # No DUT reset port. Array starts undefined (model reset_written).
+    handle.undefine_array()
+    scoreboard.ref.reset_written()
     saw = False
     last = len(cycles) - 1
     for i, cycle in enumerate(cycles):

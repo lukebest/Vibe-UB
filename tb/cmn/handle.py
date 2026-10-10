@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from model.ub_cmn_mem_1r1w import UbCmnMem1r1w, clog2
+from tb.cmn.ports import CLK_PORT
 
 
 class _Val:
@@ -13,7 +14,8 @@ class _Val:
 class FakeMemHandle:
     """Records driven cycles and ticks an inner ``UbCmnMem1r1w`` (strict=False).
 
-    Used to prove the TB driver / scoreboard against the model without RTL.
+    Clock is ``core_clk``. The leaf has no reset port. ``undefine_array()``
+    calls the model ``reset_written()`` (array undefined; rdata holds).
     """
 
     def __init__(
@@ -26,13 +28,16 @@ class FakeMemHandle:
         self.depth = int(depth)
         self.width = int(width)
         self.aw = max(1, clog2(self.depth))
-        self.clk = _Val(0)
+        self.core_clk = _Val(0)
+        if CLK_PORT != "core_clk":
+            raise RuntimeError(f"FakeMemHandle clock must be {CLK_PORT}")
         self.we = _Val(0)
         self.waddr = _Val(0)
         self.wdata = _Val(0)
         self.re = _Val(0)
         self.raddr = _Val(0)
         self.rdata = _Val(0)
+        self.rdata_defined = False
         self.inner = UbCmnMem1r1w(
             self.depth,
             self.width,
@@ -50,11 +55,18 @@ class FakeMemHandle:
             int(self.raddr.value),
         )
 
-    def posedge(self) -> int:
-        """Rising ``clk``: apply the currently driven ports to the inner model."""
+    def undefine_array(self) -> None:
+        """Mark the array undefined. Does not clear the rdata register."""
+        self.inner.reset_written()
+
+    def posedge(self) -> int | None:
+        """Rising ``core_clk``: apply the currently driven ports to the inner model."""
         cyc = self.sample_inputs()
         self.trace.append(cyc)
         rdata = self.inner.tick(*cyc)
+        self.rdata_defined = rdata is not None
+        if rdata is None:
+            return None
         self.rdata.value = int(rdata)
         return int(rdata)
 
@@ -62,8 +74,10 @@ class FakeMemHandle:
 class BitSwapFakeHandle(FakeMemHandle):
     """Swaps ``rdata`` bits 0 and 1. Scoreboard must fail against the model."""
 
-    def posedge(self) -> int:
+    def posedge(self) -> int | None:
         rdata = super().posedge()
+        if rdata is None:
+            return None
         if self.width >= 2:
             b0, b1 = rdata & 1, (rdata >> 1) & 1
             rdata = (rdata & ~3) | (b0 << 1) | b1
@@ -74,9 +88,12 @@ class BitSwapFakeHandle(FakeMemHandle):
 class AddrAliasFakeHandle(FakeMemHandle):
     """Drops address bit 0 on the inner model. Scoreboard must fail."""
 
-    def posedge(self) -> int:
+    def posedge(self) -> int | None:
         we, waddr, wdata, re, raddr = self.sample_inputs()
         self.trace.append((we, waddr, wdata, re, raddr))
         rdata = self.inner.tick(we, waddr & ~1, wdata, re, raddr & ~1)
+        self.rdata_defined = rdata is not None
+        if rdata is None:
+            return None
         self.rdata.value = int(rdata)
         return int(rdata)

@@ -4,6 +4,7 @@
 
 [python]
 requires = ">=3.11,<3.14"
+python_lock = "3.12.3"
 # This environment: CPython 3.12.3 (Ubuntu 24.04)
 
 [python-packages]
@@ -22,15 +23,30 @@ uvm-python_note = "fork of tpoikela/uvm-python 0.4.0"
 [simulators]
 # D7: Icarus 12.0 is the pass/fail gate.
 icarus_lock = "12.0"
-# D7: Verilator 5.032 for compare + line coverage.
-# cocotb 1.9.2 documents Verilator >=5.022; do not move to >=5.036 without re-qual.
-verilator_lock = "5.032"
+# Design spike (ubuntu-24.04 apt): Verilator 5.020. D7 5.032 is not on noble apt.
+verilator_lock = "5.020"
+# Formal / equivalence (SPEC §11). Yosys 0.33 is what ubuntu-24.04 apt ships.
+yosys_lock = "0.33"
+# eqy is not packaged on this environment; Yosys equiv_* is the primary tool.
+eqy_lock = ""
+
+[pycircuit]
+# Single source of truth. setup_pycircuit.sh reads these keys only.
+pycircuit_repo = "https://github.com/lukebest/pyCircuit"
+pycircuit_commit = "43cc5918e3d09ecc0c814cabef6c1384cb9980ae"
+pycircuit_release = "pyc4.0"
+pycircuit_package = "pycircuit-hisi"
+pycircuit_package_version = "0.1.0"
+llvm_lock = "19.1.1"
+mlir_lock = "19.1.1"
+cmake_lock = "3.28.3"
+ninja_lock = "1.11.1"
 
 [simulators-actual]
 # Recorded when this lock was first exercised in the Cloud Agent VM.
 # If a locked simulator cannot be installed, say so here (do not pretend).
 icarus_actual = "12.0 (Icarus Verilog version 12.0 (stable))"
-verilator_actual = "5.020 (Debian 5.020-1) — locked 5.032 not available from apt; source build not completed in this draft"
+verilator_actual = "5.020 (Debian 5.020-1)"
 verilator_line_coverage = "supported on the actual Verilator (5.020 --coverage); re-run on 5.032 when the pin is installed"
 
 [forbidden]

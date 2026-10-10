@@ -1,0 +1,7 @@
+# Only these logins may approve a waiver. Role must be the tool gatekeeper
+# (verification lead, TEAM.md §4). Scripts ignore any other approver.
+gatekeepers:
+  - login: lukebest
+    name: Luke Liu
+    role: verification
+    gatekeeper: true

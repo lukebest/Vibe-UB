@@ -9,9 +9,9 @@ Lists live in this directory (`legacy.txt`, `handwritten.yml`, `blackbox.yml`,
 | Script | Job |
 | --- | --- |
 | `spec_leak.sh` | Private-spec leak scan (allowlist `leak_allow.yml`) |
-| `rtl_emit_consistency.sh` | Line A: emit + `git diff rtl/` + hooks + PRODUCT≡HOOKS |
-| `equiv.sh` | PRODUCT≡HOOKS per variant (Yosys `equiv_*` primary; eqy if present) |
-| `pycircuit_provenance.sh` | AST provenance + pycc emit (blocking once toolchain is installed) |
+| `rtl_emit_consistency.sh` | Line A: `scripts/emit_rtl.py` only (temp dir, byte-compare `rtl/<layer>/` + hooks); skip if missing |
+| `equiv.sh` | PRODUCT≡HOOKS per variant (Yosys `equiv_*` primary; eqy if present; large cmn mem = bytes except name + ports) |
+| `pycircuit_provenance.sh` | AST provenance (no homemade pycc argv; regen is emit_rtl.py) |
 | `setup_pycircuit.sh` | Design spike recipe (clone pin, apt LLVM 19, `pyc build`, venv) |
 | `hooks_port_consistency.sh` | Independent HOOKS vs PRODUCT ports |
 | `lint.sh` | Verilator `--lint-only -Wall` + unlisted stub/macro |

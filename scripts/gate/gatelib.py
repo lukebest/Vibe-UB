@@ -132,8 +132,70 @@ def load_yaml(path: Path) -> Any:
     return data if data is not None else {}
 
 
+LOCK_SCAN_SKIP_DIRS = {
+    ".git",
+    ".venv",
+    "venv",
+    ".pycircuit-venv",
+    ".pycircuit-src",
+    ".pycircuit_out",
+    "node_modules",
+    "__pycache__",
+    "out",
+}
+
+
+def find_extra_toolchain_locks() -> list[Path]:
+    """Any TOOLCHAIN.lock other than the repo-root copy is a conflict."""
+    extras: list[Path] = []
+    root = TOOLCHAIN_LOCK.resolve() if TOOLCHAIN_LOCK.is_file() else TOOLCHAIN_LOCK
+    stack = [REPO_ROOT]
+    while stack:
+        d = stack.pop()
+        try:
+            kids = list(d.iterdir())
+        except OSError:
+            continue
+        for child in kids:
+            if child.is_dir():
+                if child.name in LOCK_SCAN_SKIP_DIRS:
+                    continue
+                stack.append(child)
+            elif child.name == "TOOLCHAIN.lock":
+                try:
+                    if child.resolve() != root:
+                        extras.append(child)
+                except OSError:
+                    extras.append(child)
+    return extras
+
+
+def collect_toolchain_lock_findings(check: str) -> list[Finding]:
+    extras = find_extra_toolchain_locks()
+    if not extras:
+        return []
+    return [
+        Finding(
+            check=check,
+            module="*",
+            file="TOOLCHAIN.lock",
+            rule="TOOLCHAIN_LOCK_CONFLICT",
+            message=(
+                "tool versions must come from the repo-root TOOLCHAIN.lock only; "
+                f"extra copies: {[rel(p) for p in extras]}"
+            ),
+        )
+    ]
+
+
 def parse_lock(path: Path = TOOLCHAIN_LOCK) -> dict[str, str]:
-    """Read TOOLCHAIN.lock key = \"value\" pairs (comment-tolerant, not full TOML)."""
+    """Read the repo-root TOOLCHAIN.lock only. A second copy is a conflict."""
+    if path.resolve() != TOOLCHAIN_LOCK.resolve():
+        print(
+            f"NOTE: ignoring non-root lock {rel(path)}; "
+            f"versions from {rel(TOOLCHAIN_LOCK)} only"
+        )
+        path = TOOLCHAIN_LOCK
     out: dict[str, str] = {}
     if not path.is_file():
         return out
@@ -191,7 +253,13 @@ def print_tool_versions(needed: Iterable[str]) -> None:
         "cmake": ("cmake_lock", ["cmake", "--version"]),
         "ninja": ("ninja_lock", ["ninja", "--version"]),
     }
-    print("=== tool versions (TOOLCHAIN.lock vs actual) ===")
+    extras = find_extra_toolchain_locks()
+    print("=== tool versions (repo-root TOOLCHAIN.lock vs actual) ===")
+    if extras:
+        print(
+            "TOOLCHAIN.lock CONFLICT: extra copies "
+            f"{[rel(p) for p in extras]} (root is the only allowed source)"
+        )
     for name in needed:
         lock_key, argv = mapping[name]
         locked = lock.get(lock_key, "")
@@ -756,7 +824,9 @@ def split_findings(
 def emit_report(check: str, findings: list[Finding]) -> int:
     """Print the multi-column report. Return process exit code."""
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    apply_waivers(findings, check)
+    merged = list(findings) + collect_toolchain_lock_findings(check)
+    apply_waivers(merged, check)
+    findings = merged
     blocking, legacy, migrate, report, waived = split_findings(findings)
     print(f"=== {check} findings ===")
     print(
@@ -1612,6 +1682,50 @@ PORT_CHUNK_RE = re.compile(
     re.I,
 )
 PORT_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+_MODULE_DECL_RE = re.compile(r"^\s*module\s+([A-Za-z_][A-Za-z0-9_]*)\b", re.M)
+
+
+def declared_module_name(text: str) -> str | None:
+    m = _MODULE_DECL_RE.search(text)
+    return m.group(1) if m else None
+
+
+def verilog_equal_except_module_name(left: Path, right: Path) -> bool:
+    """True if the two netlists match after substituting the declared module name."""
+    ta = left.read_text(encoding="utf-8", errors="replace")
+    tb = right.read_text(encoding="utf-8", errors="replace")
+    na, nb = declared_module_name(ta), declared_module_name(tb)
+    if not na or not nb:
+        return ta == tb
+    token = "__GATE_MOD__"
+
+    def norm(text: str, name: str) -> str:
+        return re.sub(rf"\b{re.escape(name)}\b", token, text)
+
+    return norm(ta, na) == norm(tb, nb)
+
+
+def collect_layer_netlists(rtl_root: Path) -> dict[str, Path]:
+    """rtl/<layer>/*.v and rtl/<layer>/hooks/*.v, keyed by layer-relative path."""
+    out: dict[str, Path] = {}
+    if not rtl_root.is_dir():
+        return out
+    for layer_dir in sorted(rtl_root.iterdir()):
+        if not layer_dir.is_dir():
+            continue
+        if layer_dir.name in LAYER_SKIP or layer_dir.name == "gen":
+            continue
+        for path in sorted(layer_dir.iterdir()):
+            if path.is_file() and path.suffix.lower() in RTL_SOURCE_SUFFIXES:
+                out[f"{layer_dir.name}/{path.name}"] = path
+        hooks = layer_dir / "hooks"
+        if hooks.is_dir():
+            for path in sorted(hooks.iterdir()):
+                if path.is_file() and path.suffix.lower() in RTL_SOURCE_SUFFIXES:
+                    out[f"{layer_dir.name}/hooks/{path.name}"] = path
+    return out
 
 
 def parse_ports(path: Path) -> list[tuple[str, str]]:

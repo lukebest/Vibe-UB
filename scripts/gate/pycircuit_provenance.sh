@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Line A: pyCircuit provenance (AST static check + report-only pycc emit).
+# Line A: pyCircuit provenance (AST static check). Regen is emit_rtl.py.
 set -euo pipefail
 # shellcheck disable=SC1091
 source "$(cd "$(dirname "$0")" && pwd)/lib.sh"

@@ -24,7 +24,7 @@ make gate
 
 与 CI 同一套脚本。快速综合的 QoR 趋势归实现（`scripts/impl/quick_synth.sh`），**不**拦合入；本门禁的 `synth-check` 只判过 / 不过（latch / 多驱动 / 组合环）。
 
-工具版本从仓库根 `TOOLCHAIN.lock` 读。装不到锁定版本时，job 日志打印 `locked=` 与 `actual=`，并写明 MISMATCH，不静默当成已锁定。
+工具版本**只**从仓库根 `TOOLCHAIN.lock` 读。出现第二份 `TOOLCHAIN.lock` 记 `TOOLCHAIN_LOCK_CONFLICT`（拦截）。装不到锁定版本时，job 日志打印 `locked=` 与 `actual=`，并写明 MISMATCH，不静默当成已锁定。
 
 机器可读名单在 `scripts/gate/`（与 `waivers/` 同一套批准约束：`approver` 必须是 `waivers/approvers.yml` 里的守门人）。`waivers/pending/` 草稿只展示、不生效。
 
@@ -38,13 +38,13 @@ SPEC §2.2 变体：同一叶子多组参数 → `rtl/<layer>/<叶子>_<标签>.
 
 | 线 | 检查 | 路径 |
 | --- | --- | --- |
-| **A** | emit + `git diff rtl/` + hooks 存在 + 端口一致性 + PRODUCT≡HOOKS + 来源 | `pycircuit/<layer>/` → `scripts/emit_rtl.py` → `rtl/<layer>/` 与 `rtl/<layer>/hooks/` |
+| **A** | emit_rtl.py 重生成到临时目录后与提交的 `rtl/<层>/`、`rtl/<层>/hooks/` 逐字节比对 + hooks 存在 + 端口一致性 + PRODUCT≡HOOKS + 来源 | `pycircuit/<layer>/` → `scripts/emit_rtl.py` → `rtl/<layer>/` 与 `rtl/<layer>/hooks/` |
 | **B** | lint / synth-check / cdc-rdc | `rtl/<layer>/`（含 `hooks/`）；白名单手写与已登记 stub/macro 照常跑 |
 | **C** | `formal/<iface>/*.sby` | 每接口自带小桩，无产品 RTL 也能跑。`formal/cmn/` 自动发现。未选型 SRAM 宏用 `blackbox.yml` 的 `stub`/`macro`，见 §1.2 |
 
 `ub_cmn_mem_1r1w` 走 pycc 生成：源码 `pycircuit/cmn/`，输出 `rtl/cmn/`，按普通叶子处理（来源检查、pycc 重生成、eqy）。
 
-`emit_rtl.py` 不存在时 skip emit+diff，并打印原因；手写扫描、hooks、等价仍跑。
+门禁不自己拼 pycc 命令，只调用 `scripts/emit_rtl.py`（`compile()` + `pycc --emit=verilog --logic-depth=64`，参数以该脚本为唯一来源）。重生成到临时目录后与提交的 `rtl/<层>/`、`rtl/<层>/hooks/` 逐字节比对。`emit_rtl.py` 不存在时该项 **skip（不拦）**；有了就拦。手写扫描、hooks、等价仍跑。
 
 ---
 
@@ -57,7 +57,7 @@ SPEC §2.2 变体：同一叶子多组参数 → `rtl/<layer>/<叶子>_<标签>.
 | 新叶子 | 不在 `scripts/gate/legacy.txt`，或文件头表明由 pyCircuit 生成 | **拦截**（未豁免即 FAIL） |
 | D10 legacy | 路径匹配 `scripts/gate/legacy.txt`，且不是 pyCircuit 重写 | **只报告不拦截** |
 | 迁移待办 | `scripts/gate/pycircuit_migrate.txt`：main、PR #5 / #7 / #12，以及 PR #11 的 `pycircuit/csr/ub_csr_regs.py`（状态「已迁」） | **只报告不拦截** |
-| report-only | 桩时序 vs MODULE_INVENTORY、组合逻辑级数、pycc emit | **只报告不拦截** |
+| report-only | 桩时序 vs MODULE_INVENTORY、组合逻辑级数、`emit_rtl.py` 缺失时的 emit skip | **只报告不拦截** |
 
 D10 判定见 [DECISIONS.md](../DECISIONS.md) D10。`scripts/gate/legacy.txt` 是可配置名单（精确路径或 glob）。从名单删路径 = 该文件改为拦截，须守门人书面批准（CODEOWNERS 覆盖 `/scripts/gate/*.txt`）。
 
@@ -161,7 +161,7 @@ PRODUCT 与 HOOKS 两套网表（SPEC §11）只要落在上述目录，都会�
 
 HOOKS 网表不做本检查（CODING_STYLE §1：实现只认 PRODUCT）。已登记 stub/macro 当黑盒。
 
-`ub_cmn_mem_1r1w`：变体名 `ub_cmn_mem_1r1w_d<DEPTH>w<WIDTH>[m<WMASK_W>]`，按 §2.2 自动发现。黑盒看 **DEPTH×WIDTH** 与 `docs/rules/impl_quick_synth.md` 阈值（文件不存在时 **4096**）。超过则上层 `read_verilog -lib`（两边同一份）。原语完整综合 / 等价只跑 **≤4096 bit** 的变体（含 `d64w64m16`，覆盖 wmask 路径）；更大的跳过并报告 `CMN_MEM_LARGE`。
+`ub_cmn_mem_1r1w`：变体名 `ub_cmn_mem_1r1w_d<DEPTH>w<WIDTH>[m<WMASK_W>]`，按 §2.2 自动发现。黑盒看 **DEPTH×WIDTH** 与 `docs/rules/impl_quick_synth.md` 阈值（文件不存在时 **4096**）。超过则上层 `read_verilog -lib`（两边同一份）。原语完整综合 / 等价只跑 **≤4096 bit** 的变体（含 `d64w64m16`，覆盖 wmask 路径）；更大的 PRODUCT 与 HOOKS **不跑完整 equiv**，改为除模块名外逐字节一致 + 端口检查。
 
 **失败判据：** 新叶子上出现 LATCH / MULTI_DRIVE / COMBO_LOOP / Yosys 结构错误。legacy 只报告。
 
@@ -202,12 +202,12 @@ M1 单时钟 `core_clk`（SPEC §4.1）。`rst_n` 异步置位、同步释放，
 
 | ID | 规则 | 来源 | 日期 |
 | --- | --- | --- | --- |
-| GATE-EMIT-001 | 若存在 `scripts/emit_rtl.py`，先 emit 再 `git diff rtl/`；漂移失败 | CODING_STYLE §1 | 2026-10-10 |
+| GATE-EMIT-001 | 只调用 `scripts/emit_rtl.py` 重生成到临时目录，与提交的 `rtl/<层>/`、`rtl/<层>/hooks/` 逐字节比对；脚本不存在则 skip（不拦），有了就拦。门禁不拼 pycc 命令 | CODING_STYLE §1 | 2026-10-10 |
 | GATE-EMIT-002 | 非 legacy、非白名单手写叶子必须有 `rtl/<layer>/hooks/<module>.v` | SPEC §11 | 2026-10-10 |
 | GATE-EMIT-003 | 未上 `scripts/gate/handwritten.yml` 的手写 `.v` / `.sv` 记 `HANDWRITTEN_UNLISTED` | D6；§1.1 | 2026-10-10 |
 | GATE-EQY-001 | PRODUCT≡HOOKS。本环境 **eqy 装不上**，主工具是 Yosys `equiv_make` / `equiv_simple` / `equiv_induct` / `equiv_status -assert`。eqy 若在 PATH 再用。报告写明 `tool=yosys-equiv` 或 `tool=eqy`。按 SPEC §2.2 变体逐个跑；`_placeholder` 不做等价 | SPEC §11 (d)；设计 spike | 2026-10-10 |
 | GATE-EQY-002 | 无钩子叶子：端口一一对应后直接比对。有钩子模块：`tb_test_mode=0`，并把 `tb_inj_*`、`tb_<inst>_bd_*`、`tb_<inst>_bd_vld_*` 拉低后再比对 | SPEC §11 (d)(f) | 2026-10-10 |
-| GATE-EQY-003 | 上层等价把 DEPTH×WIDTH 超阈值的 `ub_cmn_mem_1r1w` 变体当黑盒，**两边同一份**；原语只对 ≤4096 bit（含 `d64w64m16`）做完整 PRODUCT≡HOOKS | 实现对齐 | 2026-10-10 |
+| GATE-EQY-003 | 上层等价把 DEPTH×WIDTH 超阈值的 `ub_cmn_mem_1r1w` 变体当黑盒，**两边同一份**。原语 ≤4096 bit（含 `d64w64m16`）跑完整 PRODUCT≡HOOKS；更大的不跑完整 equiv，改为除模块名外逐字节一致 + 端口检查 | 实现对齐 | 2026-10-10 |
 | GATE-EQY-004 | 公式参考等价（`formal/<层>/ref/` + `scripts/gate/equiv_ref.sh`）满足以下**其一**即通过：(1) Yosys `equiv_make` / `equiv_simple` / `equiv_induct` 全部证明，没有未证的 `$equiv`；(2) `miter -equiv -flatten` 加 `sat -tempinduct -prove` 证明通过。报告必须写明用的是哪一种。每个参考都要配故意做错的假网表（例如 lane 用正向映射 `CA<i*N+j>`，BCRC 改错一位 CRC）；假网表必须报失败，否则这一项不算通过 | PM | 2026-10-10 |
 
 公式参考等价与 PRODUCT≡HOOKS 分开：入口是 `scripts/gate/equiv_ref.sh`，参考在 `formal/<层>/ref/`。上表 (1)(2) 二选一；日志写 `tool=yosys-equiv` 或 `tool=yosys-miter-sat`。假网表不过则本项失败。本条先入规则册，脚本尚未落地。
@@ -320,7 +320,7 @@ PR 审查清单见 §11。本条不写自动 finding，避免误杀尚未补齐�
 | --- | --- | --- | --- |
 | GATE-PROV-001 | `pycircuit/<layer>/*.py` 叶子必须 `import pycircuit`（`ast.Import` / `ast.ImportFrom`） | PM | 2026-10-10 |
 | GATE-PROV-002 | 只扫代码里的字符串常量与 f-string（`JoinedStr`）；跳过注释和模块 / 类 / 函数 docstring。命中 `module ` / `endmodule` / `always @` 即失败 | PM | 2026-10-10 |
-| GATE-PROV-003 | `scripts/gate/setup_pycircuit.sh` 按设计已跑通的步骤安装（clone pin、apt LLVM/MLIR 19、`flows/scripts/pyc build`、venv + `pip install -e`）。版本只在 `TOOLCHAIN.lock` 一处。CI 缓存 pyc 产物。装好后 pycc 重生成与提交 `.v` 逐字节比对 **拦截**；装不上静态检查仍拦、emit 比对只报告 | 设计 spike | 2026-10-10 |
+| GATE-PROV-003 | `scripts/gate/setup_pycircuit.sh` 按设计已跑通的步骤安装。版本只在仓库根 `TOOLCHAIN.lock` 一处（第二份报冲突）。重生成比对归 rtl-emit-consistency，只调用 `scripts/emit_rtl.py`，本 job 不拼 pycc 命令 | 设计 spike | 2026-10-10 |
 | GATE-PROV-004 | 白名单手写 SV 不受此项约束。`ub_cmn_mem_1r1w` 按普通叶子检查 | Xia | 2026-10-10 |
 | GATE-PROV-005 | 参数变体按 SPEC §2.2 逐个发现与比对。`_placeholder` 变体只跑 lint 与 TB，报告标出，不算 PRODUCT | SPEC §2.2 | 2026-10-10 |
 | GATE-PROV-006 | PRODUCT 网表不得例化 `_placeholder`；placeholder 源码必须有 `PLACEHOLDER_SOURCE` | SPEC §2.2 | 2026-10-10 |
@@ -353,11 +353,10 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 | VER-GATE-001 | 每次提交跑 A/B/C 三线门禁 | D17；PROCESS §2 | 2026-10-10 |
 | VER-GATE-002 | 豁免与 `scripts/gate/` 名单须守门人书面批准 | TEAM §4 | 2026-10-10 |
 | VER-GATE-003 | legacy 只报告；新叶子拦截 | D10 | 2026-10-10 |
-| VER-GATE-004 | 工具版本对照 `TOOLCHAIN.lock`，对不上要明文打印 | D7 / D16 | 2026-10-10 |
+| VER-GATE-004 | 工具版本只对照仓库根 `TOOLCHAIN.lock`；对不上明文打印；第二份报冲突 | D7 / D16 | 2026-10-10 |
 | VER-GATE-005 | 手写 SV / stub\|macro / 钩子端口三份 `scripts/gate/` 清单 | D6；SPEC §11 | 2026-10-10 |
 | VER-GATE-006 | 等价主工具 Yosys equiv_*；eqy 可用再用 | SPEC §11 (d) | 2026-10-10 |
-| VER-GATE-015 | 公式参考等价（`formal/<层>/ref/`）：Yosys `equiv_*` 全证或 `miter`+`sat -tempinduct` 其一通过，报告写明路径；每个参考须有假网表且必须失败 | PM | 2026-10-10 |
-| VER-GATE-007 | `ub_cmn_mem_1r1w` 是 `cmn` 普通叶子；变体 `d<DEPTH>w<WIDTH>[m<WMASK_W>]`；DEPTH×WIDTH 超阈值上层当黑盒；原语完整综合/等价 ≤4096 bit（含 `d64w64m16`）；`blackbox.yml` 无 `primitive` | Xia | 2026-10-10 |
+| VER-GATE-007 | `ub_cmn_mem_1r1w` 是 `cmn` 普通叶子；变体 `d<DEPTH>w<WIDTH>[m<WMASK_W>]`；DEPTH×WIDTH 超阈值上层当黑盒；原语完整综合/等价 ≤4096 bit（含 `d64w64m16`）；更大的 PRODUCT/HOOKS 除模块名外逐字节 + 端口；`blackbox.yml` 无 `primitive` | Xia | 2026-10-10 |
 | VER-GATE-008 | 成对模块 TB 两侧独立 vs `model/` + 定向用例；审查项，不自动拦截 | A 线 lane dist | 2026-10-10 |
 | VER-GATE-009 | SPEC §2.2 变体逐个跑；`_placeholder` 只 lint/TB；PRODUCT 不得例化；源码须有 `PLACEHOLDER_SOURCE` | SPEC §2.2 | 2026-10-10 |
 | VER-GATE-010 | spec-leak：私有规范标记 / `fmt.py` / PDF / 违规 PNG/JPG 不得进公开仓库 | 隔离 | 2026-10-10 |
@@ -365,6 +364,7 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 | VER-GATE-012 | 后门 `tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*` 只在 HOOKS、§10 登记、eqy 拉低；未登记 `tb_*` 拦截 | Xia | 2026-10-10 |
 | VER-GATE-013 | `product_` 变体 `SCR_PLACEHOLDER` 必须为 0；`=1` 非 PRODUCT 只 lint/TB；`NUM_VL`/`NUM_LANES` 与变体名一致 | PR #11 | 2026-10-10 |
 | VER-GATE-014 | `ub_cmn_mem_1r1w` 时钟口为 `core_clk` | Xia | 2026-10-10 |
+| VER-GATE-015 | 公式参考等价（`formal/<层>/ref/`）：Yosys `equiv_*` 全证或 `miter`+`sat -tempinduct` 其一通过，报告写明路径；每个参考须有假网表且必须失败 | PM | 2026-10-10 |
 
 ---
 

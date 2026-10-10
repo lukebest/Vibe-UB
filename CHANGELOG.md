@@ -6,6 +6,7 @@
 
 - `pycircuit/cmn/ub_cmn_mem_1r1w.py` → `rtl/cmn/ub_cmn_mem_1r1w_{d5w8,d8w16}.v`：pycc 固定网表（SPEC §2.2）。1R1W、读 1 拍、同址 read-old；阵列与 `rdata` 无复位 / 无零初始化；越界不截断。SPEC §10 无本叶钩子，只交 PRODUCT。`scripts/emit_rtl.py` / `make emit` 再现。
 - `model/ub_cmn_mem_1r1w.py` + `formal/cmn/`：1R1W 存储原语参考模型与接口断言（CODING_STYLE §10 / PR #20 时序提案；`ASSERT_NO_UNINIT_READ` 默认 1；formal 用 anyconst 单地址抽象）。
+- `scripts/impl/quick_synth.sh`：合入前叶子快速综合（Yosys flatten + Sky130 hd tt proxy + OpenSTA 最差建立路径）。Informational；不进验证门禁。规则见 `docs/rules/impl_quick_synth.md`。
 - `TOOLCHAIN.lock` + `tb/` uvm-python 骨架、golden-model 接口、双网表自检入口（叠在 M1 SPEC 上；不改 `rtl/` / SPEC 类文档）。
 - TB 模型按 CODING_STYLE §5 命名：`ub_dll_bcrc` 已按 SPEC §2.6 写全；`ub_pcs_scrambler` 已按已定项实现，抽头与 `AMCTL.LID`→种子为必填参数（SPEC §13，无默认）；`ub_pcs_lane_dist` 已实现。无 LMB/LTB golden。
 - `tb/vibe_uvm/ub_csr_map.py` + harness：`CNT_CLR` `0x0224` bit0–8（含 `CNT_CRD_UF`）；`APPD_LMSM_ST` `0x1E00`；`APPD_PORT_ERR` `0x1F00`；TEST 窗按 SPEC §3.2.3 / §10 / §11、REGMAP §2.4。`CTRL.LMSM_START`、`RETRY_*_ST` 与 `NUM_LANES_*` 合法编码及保留值 TB assert。
@@ -21,6 +22,7 @@
 
 ### Changed
 
+- `scripts/impl/quick_synth.*` + `docs/rules/impl_quick_synth.md` v0.2：按 SPEC §2.2 每文件一个 top（无必经 `chparam`）；`_placeholder` 单独表且不计入 PRODUCT 面积；`--baseline-map` / `--baseline-report` 对照旧模块+参数；QoR（cells / area / depth / slack）相对 baseline 超 10% 标旗；`ub_cmn_mem_1r1w`（及 `scripts/gate/blackbox.yml`）超过可配 4096-bit 阈值作黑盒并报 SRAM 估算列，小实例仍综合为 flop；STA 按 1 拍 registered read。
 - `docs/SPEC.md` §2.2：pycc 按参数集展开固定网表（`<leaf>_<tag>` 命名；占位变体 `_placeholder`）。
 - 架构关闭若干待定项：M1 单时钟 80.57 MHz、`rst_n` 封装、CSR 整字/1 拍/未映射 `csr_err`、非法 VL 丢包、信用下溢计数+irq（TB assert）、`irq` 高有效默认全屏蔽、预编码默认关、信用钩子仅 VL0、`tb_obs_lmsm_st` 仅顶层编码。
 - LTB/CLTB 字段口（SPEC §3.3.4）；去掉 `pma_rx_ready` / `pcs2dll_ready`（RX valid-only）；计数 RO + `CNT_CLR`；`PORT_RST` 16 拍脉冲及复位范围；`tb_inj_crd_cells` 每拍 mux；TEST 窗 `tb_test_mode=0` 时已映射且 `csr_err=0`；`ub_rst_sync` 2 级；`CRD_UF` 具名 waiver。

@@ -8,7 +8,7 @@ module ub_cmn_mem_1r1w_harness #(
   parameter AW    = 3,
   parameter ASSERT_NO_UNINIT_READ = 1
 ) (
-  input wire             clk,
+  input wire             core_clk,
   input wire             we,
   input wire [AW-1:0]    waddr,
   input wire [WIDTH-1:0] wdata,
@@ -26,7 +26,7 @@ module ub_cmn_mem_1r1w_harness #(
       assume (raddr < DEPTH);
   end
 
-  always @(posedge clk) begin
+  always @(posedge core_clk) begin
     if (ASSERT_NO_UNINIT_READ && re && (raddr == f_addr) && (raddr < DEPTH))
       assume (f_written);
   end
@@ -34,7 +34,7 @@ module ub_cmn_mem_1r1w_harness #(
   ub_cmn_mem_1r1w_formal_ref #(
     .DEPTH(DEPTH), .WIDTH(WIDTH), .AW(AW)
   ) u_dut (
-    .clk(clk),
+    .core_clk(core_clk),
     .we(we),
     .waddr(waddr),
     .wdata(wdata),
@@ -47,7 +47,7 @@ module ub_cmn_mem_1r1w_harness #(
     .DEPTH(DEPTH), .WIDTH(WIDTH), .AW(AW),
     .ASSERT_NO_UNINIT_READ(ASSERT_NO_UNINIT_READ)
   ) u_props (
-    .clk(clk),
+    .core_clk(core_clk),
     .we(we),
     .waddr(waddr),
     .wdata(wdata),

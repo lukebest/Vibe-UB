@@ -114,12 +114,12 @@ def _write_tied_wrapper(
 
 
 def _incdir() -> str:
-    return f"-I {REPO / 'rtl' / 'common'} "
+    return f"-I{REPO / 'rtl' / 'common'} "
 
 
 def _extra_v(name: str) -> str:
     if name.startswith("ub_dll_bcrc"):
-        return _incdir()
+        return _incdir() + " "
     return ""
 
 
@@ -135,14 +135,19 @@ def _yosys_script(
     return f"""
 read_verilog -sv {extra}{gold}
 {ch}hierarchy -check -top {gold_top}
-rename -top gold
 proc; flatten; opt
+rename {gold_top} gold
+design -stash gold
 
 read_verilog -sv {extra}{gate}
 {ch}hierarchy -check -top {gate_top}
-rename -top gate
 proc; flatten; opt
+rename {gate_top} gate
+design -stash gate
 
+design -reset
+design -copy-from gold -as gold gold
+design -copy-from gate -as gate gate
 equiv_make gold gate equiv
 equiv_simple equiv
 equiv_induct equiv

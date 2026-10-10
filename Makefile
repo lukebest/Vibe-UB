@@ -55,7 +55,7 @@ lint: emit
 	  gflags=""; extra=""; \
 	  case $$f in \
 	    *ub_pcs_scrambler.v|*ub_pcs_descrambler.v) gflags="$(SCR_OPEN_G)" ;; \
-	    *ub_dll_bcrc*.v) extra="-I $(RTL)/common" ;; \
+	    *ub_dll_bcrc*.v) extra="-I$(RTL)/common" ;; \
 	  esac; \
 	  echo "==== verilator --lint-only -Wall $$gflags $$f $$extra ===="; \
 	  if $(VERILATOR) --lint-only -Wall $$gflags $$f $$extra; then \
@@ -73,7 +73,7 @@ synth: emit
 	  ch=""; extra=""; \
 	  case $$f in \
 	    *ub_pcs_scrambler.v|*ub_pcs_descrambler.v) ch="$(SCR_OPEN_CH); " ;; \
-	    *ub_dll_bcrc*.v) extra="-I $(RTL)/common" ;; \
+	    *ub_dll_bcrc*.v) extra="-I$(RTL)/common" ;; \
 	  esac; \
 	  echo "==== yosys read/synth $$f (top $$top) ===="; \
 	  if $(YOSYS) -q -p "read_verilog $$extra -sv $$f; $${ch}hierarchy -check -top $$top; proc; opt; stat"; then \

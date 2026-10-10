@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from pycircuit import Circuit, module, u
 
-from mem.bits import (
+from mem.lib.bits import (
     W,
     and_or_sel,
     any4,
@@ -45,7 +45,7 @@ from mem.bits import (
     unpack_xlat,
     way_oh,
 )
-from mem.params import (
+from mem.lib.params import (
     AP_W,
     ATTR_W,
     DATA_W,

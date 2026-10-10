@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pycircuit import Circuit, module, u
 
-from mem.params import SET_W, WORD_W
+from mem.lib.params import SET_W, WORD_W
 
 
 @module(name="ub_cmn_mem_1r1w_d64w109")

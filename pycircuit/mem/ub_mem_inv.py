@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from pycircuit import Circuit, module, u
 
-from mem.bits import ex, mux
-from mem.params import (
+from mem.lib.bits import ex, mux
+from mem.lib.params import (
     CMD_INV_ALL,
     CMD_INV_COND,
     CMD_OP_W,

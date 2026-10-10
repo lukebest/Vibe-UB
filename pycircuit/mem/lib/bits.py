@@ -9,7 +9,7 @@ from __future__ import annotations
 from pycircuit import Circuit, u
 from pycircuit.hw import Wire
 
-from mem.params import (
+from mem.lib.params import (
     AP_W,
     ATTR_W,
     DATA_W,
@@ -21,7 +21,7 @@ from mem.params import (
     TOKEN_W,
     WORD_W,
 )
-from mem.prim_bb import prim_bb
+from mem.lib.prim_bb import prim_bb
 
 
 def W(m: Circuit, v):

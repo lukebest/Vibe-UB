@@ -22,6 +22,10 @@
 - `docs/DECISIONS.md` D19：三线并行与新增角色（Luke Liu via Firstmate，2026-10-10 17:22 Asia/Shanghai）。
 - `docs/arch/mem/UARCH.md`：线 C 第 9 章内存管理微架构草案（UMMU + 译码器结构；解码叶子与结构叶子分开；不冻结端口）。
 
+### Removed
+
+- D10 遗留 CRC-32 与旧顶层：`rtl/dll/ub_dll_crc32.v`、`rtl/dll/ub_dll_crc_check.v`、`rtl/ub_controller_tx.v`、`rtl/ub_controller_rx.v`，以及仅以它们为 DUT 的 leftover TB（`tb/dll/ub_dll_crc32_tb.v`、`tb/dll/ub_dll_crc32_parallel_tb.v`、`tb/dll/ub_dll_crc_check_tb.v`、`tb/ub_controller_tx_tb.v`、`tb/ub_controller_rx_tb.v`）。无 SPEC 节（Ethernet CRC-32 poly `0x04C11DB7`，不是 BCRC / NW ICRC）；DLL 用 BCRC（SPEC §2.6，PR #5）。从 `scripts/gate/legacy.txt` 与 quick-synth `TO_BE_DELETED` 名单去掉。不改 FEC 叶子；`tb/`  diff 须验证评审。
+
 ### Changed
 
 - SPEC §2.2：pyCircuit 源码目录与导入（已定）——叶子 `pycircuit/<层>/<leaf>.py`，门禁只扫该层 `*.py`（跳过 `lib/` 与 `__init__.py`）；同层 helper 在 `pycircuit/<层>/lib/` 不出网表；导入根 `pycircuit/`（`from <层>.lib import ...`），门禁 / `emit_rtl.py` / tb 把 `pycircuit/` 置于 `PYTHONPATH` 最前；仓库根目录不进 `sys.path`；工具按脚本路径调用。门禁细则见 `docs/rules/verif_gate.md`（PR #33）。架构 Xia 与守门人验证 2026-10-10 共同定。

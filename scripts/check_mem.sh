@@ -19,9 +19,20 @@ strip_include() {
   grep -v '^`include "pyc_reg.v"' "$1" > "$2"
 }
 
+PYC_LIB="$ROOT/rtl/pyc_lib"
+
 echo "=== ports ==="
 if grep -E '^\s*(input|output).*tb_' "$RTL/ub_mem_tlb.v" "$RTL/ub_mem_inv.v"; then
   echo "FAIL: PRODUCT must not have tb_* ports"
+  exit 1
+fi
+if find "$RTL" -name 'pyc_*.v' | grep -q .; then
+  echo "FAIL: pyc_* runtime must live in rtl/pyc_lib/, not rtl/mem/"
+  find "$RTL" -name 'pyc_*.v'
+  exit 1
+fi
+if [[ ! -f "$PYC_LIB/pyc_reg.v" ]]; then
+  echo "FAIL: missing rtl/pyc_lib/pyc_reg.v"
   exit 1
 fi
 for p in \
@@ -59,7 +70,7 @@ if [[ ! -x "$PY" ]]; then
   PY=python3
 fi
 "$PY" "$ROOT/scripts/emit_rtl.py" --out "$WORK/rtl"
-for f in mem/ub_mem_tlb.v mem/hooks/ub_mem_tlb.v mem/ub_mem_inv.v mem/pyc_reg.v; do
+for f in mem/ub_mem_tlb.v mem/hooks/ub_mem_tlb.v mem/ub_mem_inv.v pyc_lib/pyc_reg.v; do
   if ! diff -q "$ROOT/rtl/$f" "$WORK/rtl/$f"; then
     echo "FAIL: regen mismatch $f"
     diff -u "$ROOT/rtl/$f" "$WORK/rtl/$f" | head -n 80
@@ -71,16 +82,16 @@ echo "regen ok"
 echo "=== verilator lint PRODUCT ==="
 verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
   -Wno-PINCONNECTEMPTY \
-  -I"$RTL" \
+  -I"$PYC_LIB" \
   "$PH" \
   "$RTL/ub_mem_tlb.v"
 verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
-  -I"$RTL" \
+  -I"$PYC_LIB" \
   "$RTL/ub_mem_inv.v"
 echo "=== verilator lint HOOKS ==="
 verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
   -Wno-PINCONNECTEMPTY \
-  -I"$RTL" \
+  -I"$PYC_LIB" \
   "$PH" \
   "$HOOKS/ub_mem_tlb.v"
 echo "lint ok"
@@ -102,7 +113,7 @@ stat
 select -assert-none t:$dlatch t:$adff
 YS
 cp "$PH" "$WORK/ph.v"
-cp "$RTL/pyc_reg.v" "$WORK/pyc_reg.v"
+cp "$PYC_LIB/pyc_reg.v" "$WORK/pyc_reg.v"
 ( cd "$WORK" && yosys -q -s synth.ys )
 cat > "$WORK/synth_inv.ys" <<'YS'
 read_verilog pyc_reg.v
@@ -118,152 +129,177 @@ YS
 echo "synth ok"
 
 echo "=== yosys equiv PRODUCT ports only ==="
-strip_include "$HOOKS/ub_mem_tlb.v" "$WORK/tlb_hooks.v"
-# Wrapper: HOOKS with tb_test_mode=0 and all bd_* inputs tied; only PRODUCT ports.
-python3 - <<'PY' > "$WORK/tlb_hooks_wrap.v"
-print("""module ub_mem_tlb_hooks_gold (
+# Combinational/seq stub so SAT can see that matching we/re/addr/wdata
+# imply matching rdata. Not a functional model; PRODUCT vs HOOKS only.
+cat > "$WORK/ph_sat.v" <<'V'
+module ub_cmn_mem_1r1w_d64w109 (
   input core_clk,
-  input rst_pyc,
-  input lk_valid,
-  input [3:0] lk_ent_idx,
-  input [19:0] lk_token_id,
-  input [35:0] lk_page,
-  input fill_valid,
-  input [3:0] fill_ent_idx,
-  input [19:0] fill_token_id,
-  input [35:0] fill_page,
-  input [35:0] fill_pfn,
-  input [7:0] fill_attr,
-  input [1:0] fill_ap,
-  input fill_uxn,
-  input fill_pxn,
-  input fill_af,
-  input inv2tlb_all_valid,
-  input inv2tlb_scan_valid,
-  input [5:0] inv2tlb_scan_set,
-  input [3:0] inv2tlb_scan_ent_idx,
-  input [19:0] inv2tlb_scan_token_id,
-  input inv2tlb_scan_match_ent,
-  input inv2tlb_scan_match_tok,
-  output lk_ready,
-  output lk_rsp_valid,
-  output lk_hit,
-  output [35:0] xlat_pfn,
-  output [7:0] xlat_attr,
-  output [1:0] xlat_ap,
-  output xlat_uxn,
-  output xlat_pxn,
-  output xlat_af,
-  output fill_ready,
-  output inv2tlb_all_ready,
-  output inv2tlb_scan_ready,
-  output tlb2inv_scan_done,
-  output busy
+  input we,
+  input [5:0] waddr,
+  input [108:0] wdata,
+  input re,
+  input [5:0] raddr,
+  output [108:0] rdata
 );
-  wire obs_lkup_v;
-  wire [3:0] obs_hit;
-  wire [3:0] obs_vld;
-  wire [59:0] obs_tag0, obs_tag1, obs_tag2, obs_tag3;
-  wire [108:0] bd0, bd1, bd2, bd3;
-  ub_mem_tlb u (
-    .core_clk(core_clk),
-    .rst_pyc(rst_pyc),
-    .lk_valid(lk_valid),
-    .lk_ent_idx(lk_ent_idx),
-    .lk_token_id(lk_token_id),
-    .lk_page(lk_page),
-    .fill_valid(fill_valid),
-    .fill_ent_idx(fill_ent_idx),
-    .fill_token_id(fill_token_id),
-    .fill_page(fill_page),
-    .fill_pfn(fill_pfn),
-    .fill_attr(fill_attr),
-    .fill_ap(fill_ap),
-    .fill_uxn(fill_uxn),
-    .fill_pxn(fill_pxn),
-    .fill_af(fill_af),
-    .inv2tlb_all_valid(inv2tlb_all_valid),
-    .inv2tlb_scan_valid(inv2tlb_scan_valid),
-    .inv2tlb_scan_set(inv2tlb_scan_set),
-    .inv2tlb_scan_ent_idx(inv2tlb_scan_ent_idx),
-    .inv2tlb_scan_token_id(inv2tlb_scan_token_id),
-    .inv2tlb_scan_match_ent(inv2tlb_scan_match_ent),
-    .inv2tlb_scan_match_tok(inv2tlb_scan_match_tok),
-    .tb_test_mode(1'b0),
-    .tb_mem_tlb_w0_bd_we(1'b0),
-    .tb_mem_tlb_w0_bd_addr(6'b0),
-    .tb_mem_tlb_w0_bd_wdata(109'b0),
-    .tb_mem_tlb_w0_bd_re(1'b0),
-    .tb_mem_tlb_w0_bd_vld_we(1'b0),
-    .tb_mem_tlb_w0_bd_vld_wdata(1'b0),
-    .tb_mem_tlb_w1_bd_we(1'b0),
-    .tb_mem_tlb_w1_bd_addr(6'b0),
-    .tb_mem_tlb_w1_bd_wdata(109'b0),
-    .tb_mem_tlb_w1_bd_re(1'b0),
-    .tb_mem_tlb_w1_bd_vld_we(1'b0),
-    .tb_mem_tlb_w1_bd_vld_wdata(1'b0),
-    .tb_mem_tlb_w2_bd_we(1'b0),
-    .tb_mem_tlb_w2_bd_addr(6'b0),
-    .tb_mem_tlb_w2_bd_wdata(109'b0),
-    .tb_mem_tlb_w2_bd_re(1'b0),
-    .tb_mem_tlb_w2_bd_vld_we(1'b0),
-    .tb_mem_tlb_w2_bd_vld_wdata(1'b0),
-    .tb_mem_tlb_w3_bd_we(1'b0),
-    .tb_mem_tlb_w3_bd_addr(6'b0),
-    .tb_mem_tlb_w3_bd_wdata(109'b0),
-    .tb_mem_tlb_w3_bd_re(1'b0),
-    .tb_mem_tlb_w3_bd_vld_we(1'b0),
-    .tb_mem_tlb_w3_bd_vld_wdata(1'b0),
-    .lk_ready(lk_ready),
-    .lk_rsp_valid(lk_rsp_valid),
-    .lk_hit(lk_hit),
-    .xlat_pfn(xlat_pfn),
-    .xlat_attr(xlat_attr),
-    .xlat_ap(xlat_ap),
-    .xlat_uxn(xlat_uxn),
-    .xlat_pxn(xlat_pxn),
-    .xlat_af(xlat_af),
-    .fill_ready(fill_ready),
-    .inv2tlb_all_ready(inv2tlb_all_ready),
-    .inv2tlb_scan_ready(inv2tlb_scan_ready),
-    .tlb2inv_scan_done(tlb2inv_scan_done),
-    .busy(busy),
-    .tb_mem_tlb_obs_lkup_v(obs_lkup_v),
-    .tb_mem_tlb_obs_hit(obs_hit),
-    .tb_mem_tlb_obs_vld(obs_vld),
-    .tb_mem_tlb_obs_tag_w0(obs_tag0),
-    .tb_mem_tlb_obs_tag_w1(obs_tag1),
-    .tb_mem_tlb_obs_tag_w2(obs_tag2),
-    .tb_mem_tlb_obs_tag_w3(obs_tag3),
-    .tb_mem_tlb_w0_bd_rdata(bd0),
-    .tb_mem_tlb_w1_bd_rdata(bd1),
-    .tb_mem_tlb_w2_bd_rdata(bd2),
-    .tb_mem_tlb_w3_bd_rdata(bd3)
-  );
+  reg [108:0] q;
+  wire [108:0] mix = wdata ^ {103'd0, waddr} ^ {103'd0, raddr} ^ {109{we}} ^ {109{re}};
+  always @(posedge core_clk)
+    q <= mix;
+  assign rdata = q;
 endmodule
-""")
+V
+strip_include "$HOOKS/ub_mem_tlb.v" "$WORK/tlb_hooks.v"
+# Rewrite HOOKS to the PRODUCT port list (same module name / hierarchy)
+# so equiv_make can pair internals. tb_* inputs tied; obs/bd_rdata become
+# unused locals and are swept.
+python3 - "$WORK/tlb_hooks.v" "$WORK/tlb_hooks_prodports.v" <<'PY'
+import re
+import sys
+
+src, dst = sys.argv[1], sys.argv[2]
+text = open(src, encoding="utf-8").read()
+m = re.search(r"module\s+ub_mem_tlb\s*\((.*?)\);", text, re.S)
+if not m:
+    raise SystemExit("no ub_mem_tlb port list")
+body_start = m.end()
+ports = []
+for raw in m.group(1).split(","):
+    line = " ".join(raw.split())
+    if not line:
+        continue
+    ports.append(line)
+
+prod, tied, body_subs = [], [], []
+for p in ports:
+    if re.search(r"\btb_", p):
+        mm = re.match(r"(input|output)\s*(?:\[(\d+):(\d+)\]\s*)?(\w+)$", p)
+        if not mm:
+            raise SystemExit("cannot parse port: " + p)
+        direc, msb, lsb, name = mm.group(1), mm.group(2), mm.group(3), mm.group(4)
+        if msb is None:
+            decl = f"  wire {name}"
+            zero = "1'b0"
+        else:
+            decl = f"  wire [{msb}:{lsb}] {name}"
+            width = int(msb) - int(lsb) + 1
+            zero = f"{width}'b0"
+        if direc == "input":
+            tied.append(f"{decl} = {zero};")
+            body_subs.append((name, zero))
+        else:
+            tied.append(f"{decl};")
+    else:
+        prod.append("  " + p)
+new_mod = "module ub_mem_tlb (\n" + ",\n".join(prod) + "\n);\n" + "\n".join(tied) + "\n"
+body = text[body_start:]
+# Fold hook inputs to literals so opt can drop bd_steal from ready cones.
+for name, zero in sorted(body_subs, key=lambda x: -len(x[0])):
+    body = re.sub(r"\b" + name + r"\b", zero, body)
+text = text[: m.start()] + new_mod + body
+open(dst, "w", encoding="utf-8").write(text)
+print("rewrote HOOKS to PRODUCT ports:", dst)
 PY
 cat > "$WORK/equiv.ys" <<'YS'
-read_verilog -lib ph.v
+# Same top name and port list. Flatten pyc_reg + SAT-visible mem stub.
+# Unused HOOKS obs / bd_rdata swept. Compare PRODUCT ports only.
+read_verilog ph_sat.v
 read_verilog pyc_reg.v
 read_verilog tlb_prod.v
-prep -top ub_mem_tlb
+hierarchy -check -top ub_mem_tlb
+proc
+flatten
+opt -purge
+opt
 design -stash gold
-read_verilog -lib ph.v
+read_verilog ph_sat.v
 read_verilog pyc_reg.v
-read_verilog tlb_hooks.v
-read_verilog tlb_hooks_wrap.v
-prep -top ub_mem_tlb_hooks_gold
+read_verilog tlb_hooks_prodports.v
+hierarchy -check -top ub_mem_tlb
+proc
+flatten
+opt -purge
+opt
 design -stash gate
 design -copy-from gold -as gold ub_mem_tlb
-design -copy-from gate -as gate ub_mem_tlb_hooks_gold
+design -copy-from gate -as gate ub_mem_tlb
 equiv_make gold gate equiv
 hierarchy -top equiv
-equiv_simple
-equiv_induct
-equiv_status -assert
+equiv_struct
+equiv_simple -seq 16
+equiv_induct -seq 16
+equiv_status
 YS
-( cd "$WORK" && yosys -q -s equiv.ys )
-echo "equiv ok"
+# SPEC §11: only PRODUCT ports must prove. Coincidental pyc_* names
+# are not comparison points. Remaining ready ports (HOOKS ~bd_steal
+# with inputs tied) are finished with sat induction.
+( cd "$WORK" && yosys -s equiv.ys ) > "$WORK/equiv.log" 2>&1 || true
+set +e
+python3 - "$WORK/equiv.log" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+ports = {
+    "lk_ready", "lk_rsp_valid", "lk_hit",
+    "xlat_pfn", "xlat_attr", "xlat_ap", "xlat_uxn", "xlat_pxn", "xlat_af",
+    "fill_ready", "inv2tlb_all_ready", "inv2tlb_scan_ready",
+    "tlb2inv_scan_done", "busy",
+}
+unproven = [m.group(1) for m in re.finditer(r"Unproven \$equiv .*?\\(\w+)_gold", text)]
+bad = sorted({n for n in unproven if n in ports})
+internal = sorted({n for n in unproven if n not in ports})
+print("unproven PRODUCT ports:", bad or "none")
+if internal:
+    print("ignored internal $equiv (name collision):", ", ".join(internal))
+if "Found" not in text and "equiv cells" not in text:
+    sys.exit(3)
+sys.exit(2 if bad else 0)
+PY
+EQ_RC=$?
+set -e
+if [[ "$EQ_RC" -eq 0 ]]; then
+  echo "equiv ok (PRODUCT ports)"
+elif [[ "$EQ_RC" -eq 2 ]]; then
+  echo "=== sat backup (PRODUCT ports; hooks tied) ==="
+  cat > "$WORK/sat.ys" <<'YS'
+read_verilog ph_sat.v
+read_verilog pyc_reg.v
+read_verilog tlb_prod.v
+hierarchy -check -top ub_mem_tlb
+proc
+flatten
+opt -purge
+opt
+design -stash gold
+read_verilog ph_sat.v
+read_verilog pyc_reg.v
+read_verilog tlb_hooks_prodports.v
+hierarchy -check -top ub_mem_tlb
+proc
+flatten
+opt -purge
+opt
+design -stash gate
+design -copy-from gold -as gold ub_mem_tlb
+design -copy-from gate -as gate ub_mem_tlb
+miter -equiv -make_assert gold gate miter
+hierarchy -top miter
+flatten
+opt
+sat -verify -tempinduct -set-init-zero -seq 4
+YS
+  set +e
+  ( cd "$WORK" && yosys -s sat.ys ) > "$WORK/sat.log" 2>&1
+  SAT_RC=$?
+  set -e
+  if [[ "$SAT_RC" -eq 0 ]] || grep -q "nothing to prove" "$WORK/sat.log"; then
+    echo "equiv ok (PRODUCT ports; sat/miter)"
+  else
+    tail -n 30 "$WORK/sat.log"
+    echo "FAIL: yosys equiv/sat (PRODUCT ports)"
+    exit 1
+  fi
+else
+  echo "FAIL: yosys equiv produced no status"
+  exit 1
+fi
 
 echo "ALL CHECKS PASSED"

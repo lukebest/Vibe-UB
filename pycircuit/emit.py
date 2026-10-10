@@ -130,7 +130,8 @@ def _header(leaf: str, hooks: int) -> str:
 
 
 def _write_pyc_reg(out_root: Path, pyc_reg: Path) -> Path:
-    dest = out_root / "mem" / "pyc_reg.v"
+    # SPEC §2.2 / CODING_STYLE: runtime pyc_* live only in rtl/pyc_lib/.
+    dest = out_root / "pyc_lib" / "pyc_reg.v"
     dest.parent.mkdir(parents=True, exist_ok=True)
     text = pyc_reg.read_text(encoding="utf-8")
     if not text.endswith("\n"):

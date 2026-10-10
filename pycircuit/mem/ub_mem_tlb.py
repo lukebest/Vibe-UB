@@ -19,6 +19,7 @@ from __future__ import annotations
 from pycircuit import Circuit, module, u
 
 from mem.bits import (
+    W,
     and_or_sel,
     any4,
     bit_at,
@@ -109,9 +110,8 @@ def _tlb_body(m: Circuit, *, test_hooks: int) -> None:
             bd_vld_we.append(m.input(f"tb_mem_tlb_w{i}_bd_vld_we", width=1))
             bd_vld_wd.append(m.input(f"tb_mem_tlb_w{i}_bd_vld_wdata", width=1))
     else:
-        # PRODUCT: no hook ports. Tie to typed zeros via a live wire
-        # (LiteralValue | LiteralValue is not legal in the JIT).
-        _z1 = lk_valid & u(1, 0)
+        # PRODUCT: no hook ports. Typed zeros (not Literal|Literal).
+        _z1 = W(m, u(1, 0))
         tb_test_mode = _z1
         for i in range(4):
             bd_we.append(_z1)
@@ -179,9 +179,19 @@ def _tlb_body(m: Circuit, *, test_hooks: int) -> None:
     fill_busy = fill_cmp | fill_wb
     scan_busy = scan_pend.out() | scan_clr.out()
 
-    bd_steal = tb_test_mode & (
-        bd_we[0] | bd_we[1] | bd_we[2] | bd_we[3] | bd_re[0] | bd_re[1] | bd_re[2] | bd_re[3]
-    )
+    if test_hooks != 0:
+        bd_steal = tb_test_mode & (
+            bd_we[0]
+            | bd_we[1]
+            | bd_we[2]
+            | bd_we[3]
+            | bd_re[0]
+            | bd_re[1]
+            | bd_re[2]
+            | bd_re[3]
+        )
+    else:
+        bd_steal = W(m, u(1, 0))
     inv_all_ready = idle & ~lk_pend.out() & ~fill_busy & ~scan_busy & ~bd_steal
     scan_ready = idle & ~inv_all_valid & ~lk_pend.out() & ~fill_busy & ~bd_steal
     fill_ready = (
@@ -252,13 +262,20 @@ def _tlb_body(m: Circuit, *, test_hooks: int) -> None:
     re_i = []
     raddr_i = []
     for i in range(4):
-        use_bd_w = tb_test_mode & bd_we[i]
-        use_bd_r = tb_test_mode & bd_re[i]
-        we_i.append(func_we[i] | use_bd_w)
-        waddr_i.append(mux(m, use_bd_w, bd_addr[i], func_waddr))
-        wdata_i.append(mux(m, use_bd_w, bd_wdata[i], func_wdata))
-        re_i.append(re | use_bd_r)
-        raddr_i.append(mux(m, use_bd_r, bd_addr[i], raddr))
+        if test_hooks != 0:
+            use_bd_w = tb_test_mode & bd_we[i]
+            use_bd_r = tb_test_mode & bd_re[i]
+            we_i.append(func_we[i] | use_bd_w)
+            waddr_i.append(mux(m, use_bd_w, bd_addr[i], func_waddr))
+            wdata_i.append(mux(m, use_bd_w, bd_wdata[i], func_wdata))
+            re_i.append(re | use_bd_r)
+            raddr_i.append(mux(m, use_bd_r, bd_addr[i], raddr))
+        else:
+            we_i.append(func_we[i])
+            waddr_i.append(func_waddr)
+            wdata_i.append(func_wdata)
+            re_i.append(re)
+            raddr_i.append(raddr)
 
     rdatas = inst_ways(m, clk, we_i, waddr_i, wdata_i, re_i, raddr_i)
 
@@ -382,15 +399,20 @@ def _tlb_body(m: Circuit, *, test_hooks: int) -> None:
     for i in range(4):
         set_bit = fill_wb & wr_oh[i]
         clr_bit = scan_clr.out() & clr_oh[i]
-        bd_v = tb_test_mode & bd_vld_we[i]
-        v_idx = mux(
-            m,
-            bd_v,
-            bd_addr[i],
-            mux(m, fill_wb, fill_set_q.out(), scan_set_qq.out()),
-        )
-        v_we = set_bit | clr_bit | bd_v
-        v_bit = mux(m, bd_v, bd_vld_wd[i], set_bit)
+        if test_hooks != 0:
+            bd_v = tb_test_mode & bd_vld_we[i]
+            v_idx = mux(
+                m,
+                bd_v,
+                bd_addr[i],
+                mux(m, fill_wb, fill_set_q.out(), scan_set_qq.out()),
+            )
+            v_we = set_bit | clr_bit | bd_v
+            v_bit = mux(m, bd_v, bd_vld_wd[i], set_bit)
+        else:
+            v_idx = mux(m, fill_wb, fill_set_q.out(), scan_set_qq.out())
+            v_we = set_bit | clr_bit
+            v_bit = set_bit
         nxt = bit_write(m, wr_v[i].out(), v_idx, v_we, v_bit, SET_W)
         wr_v[i].set(mux(m, do_inv_all, u(TLB_SETS, 0), nxt))
 

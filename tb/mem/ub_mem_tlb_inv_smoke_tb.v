@@ -2,8 +2,6 @@
 // inv-all / inv-cond. Uses the lint placeholder for ub_cmn_mem_1r1w_d64w109.
 // Formal one-hot / no-duplicate assertions are owned by 验证-C (no formal/mem/).
 
-`timescale 1ns/1ps
-
 module ub_mem_tlb_inv_smoke_tb;
   localparam integer TAG_W = 60;
   localparam integer DATA_W = 49;
@@ -185,7 +183,7 @@ module ub_mem_tlb_inv_smoke_tb;
         if (guard > 64) begin
           $display("FAIL: fill_ready timeout");
           errors = errors + 1;
-          disable wait_fill_ready;
+          $finish;
         end
       end
     end
@@ -237,9 +235,7 @@ module ub_mem_tlb_inv_smoke_tb;
         if (guard > 64) begin
           $display("FAIL: lk_ready timeout");
           errors = errors + 1;
-          hit = 1'b0;
-          pfn = 36'h0;
-          disable do_lookup;
+          $finish;
         end
       end
       lk_valid = 1'b1;
@@ -322,7 +318,7 @@ module ub_mem_tlb_inv_smoke_tb;
         if (guard > 64) begin
           $display("FAIL: cmd_ready timeout");
           errors = errors + 1;
-          disable do_cmd;
+          $finish;
         end
       end
       cmd_valid = 1'b1;
@@ -340,7 +336,7 @@ module ub_mem_tlb_inv_smoke_tb;
         if (guard > 256) begin
           $display("FAIL: inv done timeout op=%0d", op);
           errors = errors + 1;
-          disable do_cmd;
+          $finish;
         end
       end
       tick;
@@ -372,7 +368,9 @@ module ub_mem_tlb_inv_smoke_tb;
     do_fill(4'h2, 20'h00020, 36'h0001_2000, 36'h1000_0002, 8'h02, 2'b00, 1'b0, 1'b0, 1'b1);
     do_fill(4'h2, 20'h00020, 36'h0002_2000, 36'h1000_0003, 8'h03, 2'b00, 1'b0, 1'b0, 1'b1);
     do_fill(4'h2, 20'h00020, 36'h0003_2000, 36'h1000_0004, 8'h04, 2'b00, 1'b0, 1'b0, 1'b1);
-    expect_hit(4'h2, 20'h00020, 36'h0000_2000, 36'h1000_0001, 8'h01, 2'b00, 1'b0, 1'b0, 1'b1, "way0_before_replace");
+    // Do not lookup before the fifth fill: a hit would update PLRU one
+    // cycle later and change the victim. Cold PLRU after four invalid-first
+    // fills is (0,0,0) → victim way 0 (page 0x2000).
     do_fill(4'h2, 20'h00020, 36'h0004_2000, 36'h1000_0005, 8'h05, 2'b00, 1'b0, 1'b0, 1'b1);
     expect_hit(4'h2, 20'h00020, 36'h0004_2000, 36'h1000_0005, 8'h05, 2'b00, 1'b0, 1'b0, 1'b1, "fifth_fill_hits");
     expect_miss(4'h2, 20'h00020, 36'h0000_2000, "replaced_way_miss");

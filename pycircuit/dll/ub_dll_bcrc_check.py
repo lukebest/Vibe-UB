@@ -8,7 +8,8 @@ Same XOR-matrix CRC30 as ub_dll_bcrc (shared _ports). On last:
 Result appears 1 cycle after last (SPEC §7) and holds until the next
 last. crc_ok / crc_fail / error_flag_rx are combo `done ? cmp : hold`
 like formal/dll/ref/ub_dll_bcrc_check.sv; hold regs are ok_q / fail_q /
-eflag_q. recv_q captures crc_recv on valid_in && last. No dummy zero_q.
+eflag_q with the same when=1 update/hold mux as the ref.
+recv_q captures crc_recv on valid_in && last. No dummy zero_q.
 
 Circuit.instance(ub_dll_bcrc, name="u_crc") is the API that would
 mirror the gold hierarchy, but pycc emits a hashed sibling cell
@@ -52,7 +53,8 @@ def build(m: Circuit, test_hooks: int = 0) -> None:
     seed = mux(start, u(CRC_W, INIT), crc.out())
     nxt = next_crc_hw(m, seed, data_in, last)
     eat_last = drive_gen(crc, crc_word, done, start, valid_in, last, nxt, m)
-    recv_q.set(crc_recv, when=eat_last)
+    # Ref: recv_q <= rst?0:(valid&&last ? crc_recv : recv_q)
+    recv_q.set(mux(eat_last, crc_recv, recv_q.out()))
 
     word = crc_word.out()
     recv = recv_q.out()
@@ -68,9 +70,10 @@ def build(m: Circuit, test_hooks: int = 0) -> None:
     cmp_fail = any_diff
     cmp_ef = recv.slice(lsb=30, width=1)
 
-    ok_q.set(cmp_ok, when=done_q)
-    fail_q.set(cmp_fail, when=done_q)
-    eflag_q.set(cmp_ef, when=done_q)
+    # Ref: hold regs update on registered done, else hold (rst→0 via pyc_reg).
+    ok_q.set(mux(done_q, cmp_ok, ok_q.out()))
+    fail_q.set(mux(done_q, cmp_fail, fail_q.out()))
+    eflag_q.set(mux(done_q, cmp_ef, eflag_q.out()))
 
     m.output("crc_word", word)
     m.output("done", done_q)

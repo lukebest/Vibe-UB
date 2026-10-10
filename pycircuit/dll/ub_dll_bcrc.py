@@ -6,7 +6,8 @@ SPEC §10 lists no hooks: HOOKS ports match PRODUCT.
 
 On valid_in && last the CRC register reloads INIT (all-ones) so the
 next block without start seeds from INIT. Mid-block valid_in without
-start still folds into the current CRC.
+start still folds into the current CRC. Next-state muxes match
+formal/dll/ref crc_n / word_n / done_n (when=1 assign, not enable-gated).
 
 Register names match formal/dll/ref/ub_dll_bcrc.sv so #16's 4th
 equiv method can pair FFs by name after Yosys flatten:

@@ -92,13 +92,17 @@ def bits_or_reduce(m: Circuit, word):
 
 
 def drive_gen(crc_q, word_q, done_q, start, valid_in, last, nxt, m: Circuit):
-    # Xia SPEC §2.6 + #39 addendum:
-    # start&valid absorbs (nxt already seeded from INIT);
-    # start&~valid writes INIT only; start before previous last restarts;
-    # valid&last writes INIT so the next block without start seeds from INIT.
+    # Exact next-state of formal/dll/ref (rst→init is pyc_reg sync reset):
+    #   crc_n  = (valid&&last) ? INIT : valid ? nxt : start ? INIT : crc
+    #   word_n = (valid&&last) ? {2'b00, nxt} : crc_word
+    #   done_n = valid&&last
+    # Always-assign (when=1) so leftover $dff D is this mux, not an
+    # enable-gated {nxt, INIT} plus implicit hold.
     init = u(CRC_W, INIT)
-    crc_q.set(mux(valid_in & ~last, nxt, init), when=(start | valid_in))
     eat_last = valid_in & last
-    word_q.set(pack_tx_word(m, nxt), when=eat_last)
+    crc_q.set(
+        mux(eat_last, init, mux(valid_in, nxt, mux(start, init, crc_q.out())))
+    )
+    word_q.set(mux(eat_last, pack_tx_word(m, nxt), word_q.out()))
     done_q.set(eat_last)
     return eat_last

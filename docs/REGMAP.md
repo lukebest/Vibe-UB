@@ -115,7 +115,7 @@ Init Block 其余字段（`DATA_ACK_GRAIN_SIZE`、`CTRL_ACK_GRAIN_SIZE`、`DATA_
 | 0x0214 | CNT_CRD_TO | COUNT | 31 | 0 | RO | 0x0 | 信用归还超时次数。`CRD_TO_DIS=1` 时不递增 | proj; UB-DL §4.8.1 |
 | 0x0218 | CNT_TRAIN_TO | COUNT | 31 | 0 | RO | 0x0 | LMSM 训练超时回到 Idle 次数 | proj; UB-PHY §3.4.3 |
 | 0x021C | CNT_BAD_VL | COUNT | 31 | 0 | RO | 0x0 | 未使能 VL 丢包次数 | proj; SPEC §7 |
-| 0x0220 | CNT_CRD_UF | COUNT | 31 | 0 | RO | 0x0 | 信用下溢次数。正确设计不可达，见 SPEC §13.4 waiver | proj; SPEC §7 |
+| 0x0220 | CNT_CRD_UF | COUNT | 31 | 0 | RO | 0x0 | 信用下溢次数。正确设计不可达，见 SPEC §13.1 waiver | proj; SPEC §7 |
 | 0x0224 | CNT_CLR | FEC_UNCORR | 0 | 0 | WO | 0x0 | 写 1 清 `CNT_FEC_UNCORR`，自清 | proj |
 | 0x0224 | CNT_CLR | CRC_FAIL | 1 | 1 | WO | 0x0 | 写 1 清 `CNT_CRC_FAIL` | proj |
 | 0x0224 | CNT_CLR | RETRY_REQ | 2 | 2 | WO | 0x0 | 写 1 清 `CNT_RETRY_REQ` | proj |
@@ -166,7 +166,7 @@ App. D PORT_CAP2 的 flit/LTB 错误计数切片（D.6.3）为规范镜像，不
 
 `MIX` = 切片内既有 RO 也有 RW/W1C，以对应节为准。`NA` 复位：对照该节，不在此抄。
 
-M1 不实现的 PORT_CAP 切片（DATA_RATE2–9、EYE_MONITOR、QDLWS 等）在 Bitmap 中报不存在。DATA_RATE1（D.6.5）是否只读反映 Data Rate 0：**待定**（建议最小只读镜像，不实现改速控制）。
+M1 不实现的 PORT_CAP 切片（DATA_RATE2–9、EYE_MONITOR、QDLWS 等）在 Bitmap 中报不存在。DATA_RATE1（D.6.5）是否只读反映 Data Rate 0：规范未规定 M1 镜像策略，见 SPEC §13（建议最小只读、不实现改速）。
 
 ---
 

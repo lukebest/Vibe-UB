@@ -198,7 +198,7 @@ flowchart TB
 | 子块 | 行为（短述） | 节号 |
 | --- | --- | --- |
 | `ub_dll` SM | Disabled → Param_Init → Credit_Init → Normal；`link_up==0` 回到 Disabled | UB-DL §4.2 |
-| `ub_dll_segmenter` / `ub_dll_reassembler` | DLLDP 分段为 DLLDB（最大 32 flit/段），DLLCB 收发 | §4.3 |
+| `ub_dll_segmenter` / `ub_dll_reassembler` | DLLDP 1–512 flit，分段为 DLLDB（每段最大 32 flit），DLLCB 收发 | §4.3.2.1、§4.3 |
 | `ub_dll_vl` | 每链路最多 16 VL；M1 启用 VL0+VL1；VL0 必须开 | §4.5、§4.5.1、§4.5.2 |
 | `ub_dll_credit` | 独占模式；cell=1 flit；归还/ACK 粒度 32 | §4.6、§4.6.1.2 |
 | `ub_dll_retry` | 重传缓冲、RETRY_REQ_SM、RETRY_ACK_SM | §4.7、§4.7.3 |
@@ -305,15 +305,15 @@ Flit 宽度 160 bit 来自项目既有设计说明与 Xia 重传公式（160b）
 | `pma_rx_valid` | in | 1 | `core_clk` | RX 字有效。单时钟下 PMA **每拍一字**；无 `pma_rx_ready`，PCS 不得反压 PMA |
 | `pma_rx_data_valid_lane` | in | `NUM_LANES_RX` | `core_clk` | **待定**。是否需要 per-lane valid（deskew 前） |
 
-PMA 字内位序见 §3.3。AMCTL 与数据字是否共用 `pma_tx_data`：**待定**（建议共用，由 PCS 在数据流里插 AMCTL，见 UB-PHY §3.2.4）。
+PMA 字内位序见 §3.3。AMCTL **插入同一套** `pma_tx_data` / `pma_rx_data` 每 lane 符号流（UB-PHY §3.2.4、§3.2.5），不另开 PMA 口。`pma_rx_data_valid_lane` 是否需要：规范未定义 PMA 并行口，**待定**（§13）。
 
 #### 3.2.5 LMSM–PMA 训练侧带
 
 | 端口 | 方向 | 宽度 | 时钟域 | 含义 |
 | --- | --- | --- | --- | --- |
 | `pma_data_rate_sel` | out | 4 | `core_clk` | 目标/当前 Data Rate 编号。M1 只用 0 |
-| `pma_tx_width` | out | 4 | `core_clk` | 激活的 TX lane 数编码。编码表 **待定** |
-| `pma_rx_width` | out | 4 | `core_clk` | 激活的 RX lane 数编码 |
+| `pma_tx_width` | out | 4 | `core_clk` | 激活的 TX lane 数。4-bit 针脚编码规范未给，见 §13（建议与 `PARAM_PHY.NUM_LANES_TX` 同为二进制 1/2/4/8） |
+| `pma_rx_width` | out | 4 | `core_clk` | 激活的 RX lane 数；编码同左，见 §13 |
 | `pma_lane_reverse_tx` | out | 1 | `core_clk` | TX lane 反转（见 UB-PHY §3.4.2.7） |
 | `pma_lane_reverse_rx` | out | 1 | `core_clk` | RX lane 反转 |
 | `pma_polarity_inv` | out | `NUM_LANES_RX` | `core_clk` | 极性翻转（§3.4.2.6）。每 bit 对应一 lane |
@@ -348,7 +348,7 @@ PMA 字内位序见 §3.3。AMCTL 与数据字是否共用 `pma_tx_data`：**待
 | `dll2pcs_valid` | out | 1 | valid |
 | `dll2pcs_ready` | in | 1 | PCS 可收（FEC 组帧会反压） |
 | `dll2pcs_is_cb` | out | 1 | 1=DLLCB，0=DLLDP。PCS 不解析内容，只当数据 |
-| `dll2pcs_sop` / `dll2pcs_eop` | out | 1 | 块/包边界。PCS 是否需要：**待定**（FEC 组帧可能只按字节流） |
+| `dll2pcs_sop` / `dll2pcs_eop` | out | 1 | DLL 块/包边界。PCS **不**用它们组 FEC（按符号流，§3.2.2.1）。端口保留，PCS 忽略 |
 
 #### 3.3.2 PCS ↔ DLL（RX，valid-only）
 
@@ -360,9 +360,9 @@ PMA 字内位序见 §3.3。AMCTL 与数据字是否共用 `pma_tx_data`：**待
 | `pcs2dll_valid` | out | 1 | 本拍 flit 有效（valid-only） |
 | `pcs2dll_fec_ok` | out | 1 | 本 flit 所属 FEC 码字可纠正或无错 |
 | `pcs2dll_fec_uncorr` | out | 1 | 本码字不可纠正。与 `fec_ok` 互斥 |
-| `pcs2dll_bypass` | out | 1 | 当前为 FEC bypass。此时 `fec_ok` 含义 **待定** |
+| `pcs2dll_bypass` | out | 1 | 当前为 FEC bypass（§3.2；CLTB `fec_mode_ctrl` 旁路码） |
 
-`fec_ok` / `fec_uncorr` 必须与对应 flit 对齐（同一拍）。跨 FEC 码字的延迟由 PCS 内部对齐，不把「后到的成败」单独用脉冲送给 DLL。
+`fec_ok` / `fec_uncorr` 必须与对应 flit 对齐（同一拍）。跨 FEC 码字的延迟由 PCS 内部对齐，不把「后到的成败」单独用脉冲送给 DLL。`pcs2dll_bypass==1` 时：`fec_uncorr` 恒 0、`fec_ok` 恒 1（无 FEC 译码失败）。CRC 模式下 DLL 仍只凭 BCRC 决定重传（UB-DL §4.7.1）。
 
 #### 3.3.3 LMSM ↔ DLL
 
@@ -562,7 +562,7 @@ M1 bring-up 裁剪（默认参数已确认）：
 | --- | --- |
 | 互联 | 电气；`bypass_Probe=0`，除非 CSR 置位 |
 | 速率 | 固定 Data Rate 0；`Change_Speed` 实现状态但不改变速率，或直接视为非法请求 |
-| 均衡 | Data Rate 0 下 `Equalization` / `RXEQ_Optimize` 是否空转超时退出：**待定** |
+| 均衡 | §3.4.2.9：链路均衡机制用于 Data Rate 1 及以上。M1 固定 DR0、不改速，不要求做 DR1+ TX/RX FFE。`RXEQ_Optimize` 仍按 §3.4.3.3 实现（DR0 ≤ DR4，超时 48 ms；完成或超时 → Discovery.Active），不是可删空转。若仍进入 `Equalization`，按该节超时退出（≤DR4：EQ.Passive 32 ms、EQ.Active 24 ms），不另发明空转策略 |
 | 非对称 | 默认 Tx_M==Rx_N |
 | 光学旁路 Probe/EQ | 非目标 |
 
@@ -596,22 +596,36 @@ stateDiagram-v2
 
 状态：`NORMAL`，`REQ`，`WAIT`，`RETRAIN`，`ERROR`。CSR `STATUS.RETRY_REQ_ST[12:10]`（已定）：0=`NORMAL`，1=`REQ`，2=`WAIT`，3=`RETRAIN`，4=`ERROR`，5–7 保留。RTL 永不产出保留编码；TB assert。
 
-| 从 → 到 | 条件（短述） |
+| 从 → 到 | 条件（短述，UB-DL §4.7.3.3） |
 | --- | --- |
-| NORMAL → REQ | CRC 失败，或 FEC 不可纠正，或需重传的物理层事件 |
-| REQ → WAIT | 重传请求集已发出 |
-| WAIT → REQ | 等 ACK 超时 |
-| WAIT → NORMAL | 收到重传应答集 |
-| NORMAL 或 REQ → RETRAIN | 物理层重训，或 `NUM_RETRY` 达到阈值 |
-| RETRAIN → REQ | 重训成功 |
-| RETRAIN → ERROR | `NUM_PHY_REINIT` 达到阈值 |
-| ERROR → NORMAL | 需 UBFM/软件复位（M1：CSR 端口复位） |
+| （复位）→ NORMAL | 链路/端口复位。此态清 `NUM_RETRY` 与 `NUM_PHY_REINIT` |
+| NORMAL → REQ | 收到块 CRC 失败，或物理层 FEC 译码失败（非 CRC 模式看 FEC） |
+| NORMAL → RETRAIN | 物理层开始重训 |
+| REQ → WAIT | `Retry_Req_Set` 已连续发完（1 Retry_Idle + 32 Retry_Req） |
+| REQ → RETRAIN | 进入 REQ 时 `NUM_RETRY` 增 1 后等于 `NUM_RETRY_THRESHOLD`，或物理层开始重训；此时清 `NUM_RETRY` |
+| WAIT → NORMAL | 收到对端 `Retry_Ack_Set` |
+| WAIT → REQ | 等应答超时（阈值实现相关，§4.7.3.3 给推荐范围，M1 取值见 §13） |
+| WAIT → RETRAIN | 物理层开始重训 |
+| RETRAIN → REQ | 物理层重训成功 |
+| RETRAIN → ERROR | 进入 RETRAIN 时 `NUM_PHY_REINIT` 增 1 后等于 `NUM_PHY_REINIT_THRESHOLD`；此时清 `NUM_PHY_REINIT` |
+| ERROR → NORMAL | UBFM / 软件复位（M1：CSR `PORT_RST`） |
 
-阈值默认：采用 §4.7.3.3 的推荐量级 15 与 4（**草案**，非 Xia 已确认集），并在 REGMAP 读回。实现时对照该节，不在此抄正文。
+REQ / WAIT：只允许 Retry_Idle / Retry_Req / Retry_Ack；其它 DLLCB/DLLDP 丢弃。RETRAIN / ERROR：不收不发。RETRAIN 中若 PHY 长期不响应并报 `link_up==0`，DLL 回 `DLL_Disabled`（§4.7.3.3、§4.2）。过程对照 §4.7.3.5。
+
+阈值默认：§4.7.3.3 **推荐** `NUM_RETRY_THRESHOLD=15`、`NUM_PHY_REINIT_THRESHOLD=4`（**草案**，见 §13），REGMAP 读回。
 
 ### 6.4 RETRY_ACK_SM（UB-DL §4.7.3.4）
 
-两个状态：`NORMAL`、`ACK`（标识符见该节）。CSR `STATUS.RETRY_ACK_ST[14:13]`（已定）：0=`NORMAL`，1=`ACK`，2–3 保留。RTL 永不产出保留编码；TB assert。职责：对端请求时发应答集，并从 retry buffer 重放。转移条件等未实现细节：**待定**（按该节，不在此发明子条件）。
+两个状态：`NORMAL`、`ACK`（UB-DL §4.7.3.4）。CSR `STATUS.RETRY_ACK_ST[14:13]`（已定）：0=`NORMAL`，1=`ACK`，2–3 保留。RTL 永不产出保留编码；TB assert。
+
+| 从 → 到 | 条件（短述，§4.7.3.4、§4.7.3.5） |
+| --- | --- |
+| （复位）→ NORMAL | 链路/端口复位 |
+| NORMAL → ACK | 收到对端 `Retry_Req_Set` |
+| ACK → NORMAL | 已连续发完 `Retry_Ack_Set`（1 Retry_Idle + 32 Retry_Ack）**并且** 已发完本轮标记重放的块 |
+| ACK 保持 ACK | 正在发送对应重放块时又收到对端 `Retry_Req_Set`（重新按请求处理） |
+
+ACK 态：只发应答集与标记重放块；收方向仍正常收。过程对照 §4.7.3.5。
 
 ---
 
@@ -691,7 +705,7 @@ M1 列中 Xia 提出的默认值已由船长确认。仍标「草案」的是规
 | 每 VL 初始信用 | `INIT_CRD` | 640 cell | 按公式 | §4.6.1；已确认 |
 | flit 宽度 | `FLIT_W` | 160 | 160 | 项目接口 |
 | 每 DLLDB 最大 flit | `MAX_DB_FLITS` | 32 | 32 | §4.3 |
-| DLLDP 最大 flit | `MAX_DP_FLITS` | **待定**（规范上限对照 §4.3.2） | 同 | 不抄具体表 |
+| DLLDP 最大 flit | `MAX_DP_FLITS` | 512 | 512 | UB-DL §4.3.2.1（1–512 flit；>32 则最多 16 个 DLLDB） |
 | `NUM_RETRY_THRESHOLD` | 同名 | 15（规范推荐，草案） | 同 | §4.7.3.3 |
 | `NUM_PHY_REINIT_THRESHOLD` | 同名 | 4（规范推荐，草案） | 同 | §4.7.3.3 |
 | 预编码 | `PRECODE_EN` | 0（关） | **待定** | UB-PHY §3.3.2；M1 默认关，已定 |
@@ -832,7 +846,7 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 
 **(d) 形式等价门禁。** 用 Yosys eqy 或同等开源工具：`TEST_HOOKS=0` 对比 `TEST_HOOKS=1`，且后者 `tb_test_mode=0`、全部 `tb_inj_*` 接到各自复位值（不介入）。两者必须等价；不等价则 **阻断交付**。TEST 窗在这两种条件下都是「已映射、读 0、写忽略、`csr_err=0`」，因此不破坏等价。
 
-**(e) 覆盖率 waiver。** 钩子 mux 不另开 waiver（见 (b)）。信用下溢（`CRD_UF` 计数与 irq 分支）在正确设计中不可达，须 **具名覆盖率 waiver**（§13.4）。
+**(e) 覆盖率 waiver。** 钩子 mux 不另开 waiver（见 (b)）。信用下溢（`CRD_UF` 计数与 irq 分支）在正确设计中不可达，须 **具名覆盖率 waiver**（§13.1）。
 
 ---
 
@@ -853,41 +867,40 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 
 ## 13. 开放问题汇总
 
-实现与船长确认前不得假装已关闭。
+规范已给出答案的项已写入对应节并移出本表（本轮关闭清单见 CHANGELOG）。下表只保留 **规范未裁定** 或 **仅推荐/实现相关** 的项。检索过 UB-PHY / UB-DL / UB-spec（git `57b12e6b`）中的 PRBS23、scrambl、seed、CodecNum、timer/timeout、buffer、PMA 等关键词后仍无单一取值。
 
-### 13.1 草案（非已确认的 Xia 默认集）
+**列：** 项；规范为何未裁定（已查节号）；建议选项与理由；影响（RTL / TB / REGMAP）；可否改列 M1 非目标。
 
-- `NUM_RETRY_THRESHOLD=15`、`NUM_PHY_REINIT_THRESHOLD=4`（规范推荐）。
-- `CRD_BP_THRESHOLD=1024`。
-- `tb_obs_dll_sm_st` 项目编码（§10.3；LMSM 顶层编码已定）。
+| 项 | 规范为何未裁定 | 建议（人裁定，非本仓库臆造） | 影响 | 可改非目标？ |
+| --- | --- | --- | --- | --- |
+| PRBS23 抽头 g(x) | §3.2.2.4 / §3.2.3.2 只写加法扰码与规则；§3.2.6 只写低功耗 PRBS23 与加扰同一多项式，全文无 `x^23+…` | 等规范勘误或船长指定抽头后再锁 `ub_pcs_scrambler`。勿沿用他项默认 | RTL 叶子 POLY；TB 黄金模型 | 否（PCS 必做） |
+| `AMCTL.LID`→23-bit 种子；`NULL` 种子；上电 LFSR | §3.2.2.4「可由 AMCTL lane ID 得到种子」；§3.2.4.2 只有 LID 身份，无种子表 | 等种子表。上电在首次 `seed_load` 前可先保持全 0 并 `en=0`（建议，非规范） | RTL LFSR 装载；TB 向量 | 否 |
+| FEC `CodecNum` | §3.2.2.3 定义 1=不交织、2=交织，未规定 M1 必选 | M1 用 1（与 Xia 建议一致），参数保留到 2 | `ub_pcs` 交织；`PARAM_FEC.CODEC_NUM` | 交织（CodecNum=2）可列非目标 |
+| FEC 编解码拍数 / 并行度 | 规范给 RS(128,120) 结构，不规定时钟拍数 | 实现后回填 §5 | RTL 流水；§5 | 否 |
+| RX / DLL 内部缓冲深度 | 规范无 PMA/PCS 并行口与 valid-only 深度 | 按齿轮箱与 FEC 码字反推后回填；须能吞每拍 `pcs2dll_valid` | `ub_dll` RX；TB 满载 | 否（valid-only 已定） |
+| 齿轮箱拍数（160b flit vs 32b/lane） | 规范给 flit=20 B、符号=8 b，不规定 `core_clk` 齿轮 | 实现时按 PMA 字与 FEC 码字计算，回填 §5 | DLL↔PCS TX ready；RX 缓冲 | 否 |
+| 各通路端到端延迟、DLL 分段/重传/信用拍数 | §5 目标，非规范约束 | 实现后回填 | §5 / 性能 | 否 |
+| `pma_rx_data_valid_lane` | 规范无 PMA 并行口 | M1 单时钟每拍一字：可不用 per-lane valid（deskew 用 AMCTL 位置，§3.2.3.1） | PMA 模型口；PCS deskew | 端口可删则列非目标 |
+| `pma_tx_width` / `pma_rx_width` 编码 | 规范有 x1/x2/x4/x8，无 4-bit 针脚表 | 与 `PARAM_PHY.NUM_LANES_*` 相同：二进制 1/2/4/8，其余保留、TB assert | LMSM–PMA 口 | 否 |
+| PMA 均衡针脚 | §3.3 / §3.4.2.9 均衡在 PMA/SerDes；M1 DR0 不做 DR1+ FFE | M1 不加 EQ 系数针脚；需要时再加电平 | PMA 口 | **是**（M1 DR0） |
+| Probe 等待/部分计数超时 | §3.4.3.2 Probe.Wait / Confirm 写「implementation」 | 船长给 ms/拍，或 TB 用 `LMSM_TMR_SCALE` 缩短真实路径 | `ub_lmsm` 定时器 | 否（有 Probe） |
+| RETRY WAIT 超时具体值 | §4.7.3.3 推荐大于 2×链路延迟、范围 1 µs–10 s，非单点 | 按 M1 RTT 假设（§9 2 µs）取 ≥4 µs 量级，CSR 可调更好 | `ub_dll_retry`；REGMAP 可选 | 否 |
+| `LMSM_TMR_SCALE` / `AM_IVL_SCALE` 编码 | 项目 TEST 窗，规范无 | 建议：0=实时；非 0 每拍加 SCALE | REGMAP TEST；TB | 否（验证需要） |
+| `NUM_RETRY_THRESHOLD=15`、`NUM_PHY_REINIT_THRESHOLD=4` | §4.7.3.3 **推荐**，允许按场景改 | 维持 15 / 4，标「规范推荐已采用」等船长点头 | `PARAM_RETRY`；RETRY_REQ_SM | 否 |
+| `CRD_BP_THRESHOLD=1024` | 项目观察阈，规范无 | 维持 1024 或改成与 `INIT_CRD` 相关 | `tb_obs_crd_bp`；`PARAM_CRD` | 钩子策略可后期改 |
+| `tb_inj_am_lock` / `tb_inj_lid_bad` 是否删除 | 项目钩子；规范要求真实 AM 锁定（§3.2.4.4） | M1 先保留；PMA 模型能出真实 AM 后再删 | HOOKS 网表；eqy | 删除属后续 |
+| PCS RX unpack `n==0 && have` | 现网 RTL 分支，规范无此实现细节 | 验证端口可达则留；否则删分支或 waiver | 叶子 RTL / waiver | 否 |
+| `ub_pma_model` 路径与保真度 | D3 只要行为模型；§3.3 / §3.4.3.2 探测波形交给实现 | 不进 `rtl/`；sim 目录另定。RC 探测可不仿真，用 `pma_term_detect` 针脚 | 仿真树；LMSM Probe | 高保真模拟 **是**（D3） |
+| 复位后首拍 `valid`/`ready` | 规范无项目握手 | 建议 `valid=0`；`ready` 在下游能收时为 1 | 全部 valid/ready 口 | 否 |
+| App. D `DATA_RATE1`（D.6.5）镜像 | M1 不做改速；附录有该切片 | 最小只读反映 DR0，不实现改速控制 | REGMAP App. D | **是**（改速已非目标） |
+| 工艺节点 | 规范不规定实现工艺 | 待船长定 | 时序库 / `F_CORE` 余量 | 否（实现需要） |
+| Probe 端接检测电路算法 | §3.4.3.2 交给实现 | PMA 模型用 `pma_probe_pulse_en` / `pma_term_detect`，不在数字里做模拟算法 | PMA 模型 | 算法细节 **是**（数字只看针脚） |
+| 真实 SerDes 模拟参数 | M1 不含真实 SerDes（D3） | 不实现 | — | **是**（已在 §1.2） |
+| 完整附录 D 复位表 | D15 不抄规范复位表 | 镜像窗写「对照对应节」；实现时对着官方规范填 | REGMAP App. D | 正文不抄 **是** |
 
-### 13.2 待定
+`tb_obs_dll_sm_st` 项目编码已在 §10.3 / `STATUS.DLL_SM_ST` 关闭，不再列。
 
-- RX 缓冲深度（含 DLL 为吞下 PCS valid-only 所需的内部缓冲）。
-- per-lane RX valid；AMCTL 是否与数据口共用。
-- `pma_tx_width` 编码；均衡针脚。
-- DLL↔PCS TX 是否需要 sop/eop；FEC bypass 时 `fec_ok` 含义。
-- FEC 交织 CodecNum；并行度与编解码拍数。
-- RETRY_ACK_SM 实现细节。
-- PRBS23 生成多项式抽头（规范只写与加扰同一 PRBS23，未给 g(x)，UB-PHY §3.2.6）。
-- `AMCTL.LID` → 23-bit 种子的位映射；`NULL` LID 的种子；上电后首次装载前的 LFSR 初值（§3.2.2.4、§3.2.4.2）。
-- 规范写「实现相关」的超时（Probe 等待、部分计数）。
-- PMA 模型存放路径与模型保真度（是否模拟 RC 探测波形）。
-- Data Rate 0 下 EQ/RXEQ 空转策略。
-- `MAX_DP_FLITS` 取值。
-- 齿轮箱拍数关系（flit 160b 与 PMA 字宽不对齐时的拍数，不是跨时钟）。
-- `LMSM_TMR_SCALE` / `AM_IVL_SCALE` 的具体缩放编码。
-- `tb_inj_am_lock` / `tb_inj_lid_bad`：M1 保留；**待定**是否在 PMA 模型证明能出真实 AM 之后删除。
-- PCS RX unpack `n==0 && have` drain 分支：验证确认端口可达性，否则删除分支或 waiver。
-
-### 13.3 未知
-
-- 工艺节点（**未知，待船长定**）。
-- Probe 端接检测的电路级算法（规范交给实现）。
-- 真实 SerDes 的模拟参数（M1 不包含）。
-- 完整附录 D 字段复位值（本仓库不抄规范复位表；镜像窗口复位标「见对应节 / 待实现对照」）。
-
-### 13.4 具名覆盖率 waiver（已定需要，实现时落文件）
+### 13.1 具名覆盖率 waiver（已定需要，实现时落文件）
 
 | 标识 | 对象 | 理由 |
 | --- | --- | --- |

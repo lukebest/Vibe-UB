@@ -45,6 +45,15 @@ QOR_FIELD_SHORT = {
 
 MEM_PRIMITIVE_PREFIX = "ub_cmn_mem_1r1w"
 DEFAULT_SRAM_BIT_THRESHOLD = 4096
+# Legacy files marked for deletion: list only, never totals / baseline compare.
+TO_BE_DELETED = frozenset(
+    {
+        "ub_dll_crc32",
+        "ub_dll_crc_check",
+        "ub_controller_tx",
+        "ub_controller_rx",
+    }
+)
 # Estimate only — not a foundry macro. Revisit when PR #9 §13 sets the node.
 SRAM_UM2_PER_BIT = 0.5
 SRAM_PERIPH_FACTOR = 1.35
@@ -199,8 +208,9 @@ def find_includes(src: Path, tree: Path) -> list[Path]:
     out: list[Path] = []
     for inc in re.findall(r'`include\s+"([^"]+)"', text):
         for base in (
-            src.parent,
+            tree / "rtl" / "pyc_lib",
             tree / "rtl" / "common",
+            src.parent,
             tree / "rtl" / "cmn",
             tree / "rtl",
         ):
@@ -215,8 +225,58 @@ def is_placeholder_name(name: str) -> bool:
     return name.endswith(PLACEHOLDER_TAG)
 
 
+def is_to_be_deleted(name: str) -> bool:
+    return name in TO_BE_DELETED
+
+
+def parse_incdirs_env(raw: str | None) -> list[Path]:
+    """QS_INCDIRS: colon, comma, or whitespace separated extra -I dirs."""
+    if not raw or not raw.strip():
+        return []
+    parts = re.split(r"[:\s,]+", raw.strip())
+    return [Path(p) for p in parts if p]
+
+
+PYC_LIB_FALLBACK_WARN = (
+    "WARN: rtl/pyc_lib/ missing; falling back to rtl/common for Yosys -I "
+    "(temporary until #21/#5 land)"
+)
+
+
+def default_pyc_incdir(tree: Path) -> tuple[Path | None, str | None]:
+    """Primary include dir is rtl/pyc_lib (TOOLCHAIN.lock-pinned pyCircuit).
+
+    Until #21/#5 copy primitives there, fall back to rtl/common with a WARN.
+    """
+    pyc_lib = tree / "rtl" / "pyc_lib"
+    if pyc_lib.is_dir():
+        return pyc_lib.resolve(), None
+    common = tree / "rtl" / "common"
+    if common.is_dir():
+        return common.resolve(), PYC_LIB_FALLBACK_WARN
+    return None, (
+        "WARN: neither rtl/pyc_lib nor rtl/common exists; `include may fail"
+    )
+
+
+def yosys_incdirs(
+    tree: Path, extra: list[Path] | None = None
+) -> tuple[list[Path], str | None]:
+    """Default -I rtl/pyc_lib (or rtl/common fallback); then --incdir / QS_INCDIRS."""
+    dirs: list[Path] = []
+    primary, warn = default_pyc_incdir(tree)
+    if primary is not None:
+        dirs.append(primary)
+    for e in extra or []:
+        p = e if e.is_absolute() else (tree / e)
+        p = p.resolve()
+        if p.is_dir() and p not in dirs:
+            dirs.append(p)
+    return dirs, warn
+
+
 def is_library_cell(stem: str) -> bool:
-    if stem == "pyc_reg":
+    if stem.startswith("pyc_"):
         return True
     if stem == MEM_PRIMITIVE_PREFIX or stem.startswith(MEM_PRIMITIVE_PREFIX + "_"):
         return True
@@ -237,13 +297,16 @@ def list_rtl_leaves(tree: Path) -> dict[str, dict[str, Path]]:
 
     SPEC §2.2: one file per parameter set; module name == filename.
     PRODUCT lives in rtl/<block>/; HOOKS in rtl/<block>/hooks/ with the
-    same name. Library cells (pyc_reg, ub_cmn_mem_1r1w*) are skipped.
+    same name. Library cells (any pyc_*, ub_cmn_mem_1r1w*) and rtl/pyc_lib/
+    are skipped.
     """
     found: dict[str, dict[str, Path]] = {}
     rtl = tree / "rtl"
     if not rtl.is_dir():
         return found
     for block in sorted(p for p in rtl.iterdir() if p.is_dir()):
+        if block.name == "pyc_lib":
+            continue
         for path in sorted(block.iterdir()):
             if path.suffix not in {".v", ".sv"} or path.name.endswith(".vh"):
                 continue
@@ -258,6 +321,10 @@ def list_rtl_leaves(tree: Path) -> dict[str, dict[str, Path]]:
                 if is_library_cell(path.stem):
                     continue
                 found.setdefault(path.stem, {})["hooks"] = path
+    # rtl/*.v roots (legacy ub_controller_tx/rx) so the exclude list can name them.
+    for path in sorted(rtl.iterdir()):
+        if path.suffix in {".v", ".sv"} and is_to_be_deleted(path.stem):
+            found.setdefault(path.stem, {})["product"] = path
     return found
 
 
@@ -299,10 +366,13 @@ def default_tops(repo: Path, tree: Path, base: str, head: str | None) -> list[st
             continue
         if not str(p).startswith("rtl/"):
             continue
+        if "pyc_lib" in p.parts or is_library_cell(p.stem):
+            continue
+        if is_to_be_deleted(p.stem):
+            tops.append(p.stem)
+            continue
         # rtl/<block>/<leaf>.v or rtl/<block>/hooks/<leaf>.v — not rtl/*.v
         if len(p.parts) < 3:
-            continue
-        if is_library_cell(p.stem):
             continue
         tops.append(p.stem)
     seen: set[str] = set()
@@ -1037,12 +1107,12 @@ def synthesize_one(
     variant: str,
     mem_catalog: dict[str, dict[str, Any]],
     sram_bit_threshold: int,
+    extra_incdirs: list[Path] | None = None,
 ) -> dict[str, Any]:
     outdir.mkdir(parents=True, exist_ok=True)
     files = [src]
-    for inc in find_includes(src, tree):
-        if inc not in files:
-            files.append(inc)
+    # Do not also list `include targets in QS_FILES — Yosys -I resolves
+    # them; a second read_verilog redefines pyc_reg.
 
     text = src.read_text(encoding="utf-8", errors="replace")
     clk = find_clock_port(text)
@@ -1106,9 +1176,13 @@ def synthesize_one(
         ch_cmd = "chparam " + " ".join(parts) + f" {top}"
 
     env = os.environ.copy()
+    incdirs, inc_warn = yosys_incdirs(tree, extra_incdirs)
+    if inc_warn:
+        notes.append(inc_warn)
     env["QS_TOP"] = top
     env["QS_FILES"] = " ".join(str(p) for p in files)
     env["QS_LIB_FILES"] = " ".join(str(p) for p in lib_files)
+    env["QS_INCDIRS"] = " ".join(str(p) for p in incdirs)
     env["QS_LIBERTY"] = str(liberty)
     env["QS_OUTDIR"] = str(outdir)
     env["QS_CHPARAM"] = ch_cmd
@@ -1324,6 +1398,8 @@ def product_area_totals(rows: list[dict[str, Any]]) -> dict[str, float]:
         for r in rows
         if r.get("variant") == "PRODUCT"
         and not is_placeholder_name(r.get("top") or "")
+        and not r.get("to_be_deleted")
+        and not is_to_be_deleted(r.get("top") or "")
         and r.get("ok")
     ]
     return {
@@ -1333,23 +1409,57 @@ def product_area_totals(rows: list[dict[str, Any]]) -> dict[str, float]:
     }
 
 
-def write_full_markdown(rows: list[dict[str, Any]]) -> str:
-    main_rows = [r for r in rows if not is_placeholder_name(r.get("top") or "")]
-    ph_rows = [r for r in rows if is_placeholder_name(r.get("top") or "")]
-    totals = product_area_totals(rows)
-    parts = [
-        "## PRODUCT / HOOKS",
-        "",
-        write_markdown_table(main_rows) if main_rows else "_no PRODUCT/HOOKS leaves_",
-        "",
-        (
-            f"**PRODUCT area total** (non-placeholder PRODUCT rows only; "
-            f"HOOKS and `_placeholder` excluded): "
-            f"{totals['area_um2']:.1f} um^2 stdcell, "
-            f"{totals['sram_est_um2']:.1f} um^2 SRAM estimate "
-            f"({int(totals['n'])} leaves)."
-        ),
+def write_full_markdown(
+    rows: list[dict[str, Any]], inc_warn: str | None = None
+) -> str:
+    deleted = [
+        r
+        for r in rows
+        if r.get("to_be_deleted") or is_to_be_deleted(r.get("top") or "")
     ]
+    ph_rows = [
+        r
+        for r in rows
+        if is_placeholder_name(r.get("top") or "") and r not in deleted
+    ]
+    main_rows = [r for r in rows if r not in deleted and r not in ph_rows]
+    totals = product_area_totals(rows)
+    parts: list[str] = []
+    if inc_warn:
+        parts.extend([inc_warn, ""])
+    parts.extend(
+        [
+            "## PRODUCT / HOOKS",
+            "",
+            write_markdown_table(main_rows) if main_rows else "_no PRODUCT/HOOKS leaves_",
+            "",
+            (
+                f"**PRODUCT area total** (non-placeholder PRODUCT rows only; "
+                f"HOOKS, `_placeholder`, and 待删除 / to be deleted excluded): "
+                f"{totals['area_um2']:.1f} um^2 stdcell, "
+                f"{totals['sram_est_um2']:.1f} um^2 SRAM estimate "
+                f"({int(totals['n'])} leaves)."
+            ),
+        ]
+    )
+    if deleted:
+        parts.extend(
+            [
+                "",
+                "## 待删除 / to be deleted",
+                "",
+                "| module | path | notes |",
+                "| --- | --- | --- |",
+            ]
+        )
+        for r in deleted:
+            parts.append(
+                "| {mod} | {src} | {notes} |".format(
+                    mod=r.get("top", ""),
+                    src=r.get("src") or "—",
+                    notes="; ".join(r.get("notes") or []) or "legacy; excluded",
+                )
+            )
     if ph_rows:
         parts.extend(
             [
@@ -1386,7 +1496,13 @@ def self_check() -> int:
     expect(is_placeholder_name("ub_pcs_scrambler_placeholder"), "placeholder suffix")
     expect(not is_placeholder_name("ub_pcs_scrambler"), "non-placeholder")
     expect(is_library_cell("ub_cmn_mem_1r1w_d128w64"), "mem is library cell")
+    expect(is_library_cell("pyc_reg"), "pyc_reg is library")
+    expect(is_library_cell("pyc_foo"), "any pyc_* is library")
     expect(not is_library_cell("ub_pcs_lane_dist_x4"), "leaf is not library")
+    expect(not is_library_cell("ub_pyc_rst_adapt"), "ub_pyc_* is a leaf")
+    expect(is_to_be_deleted("ub_dll_crc32"), "crc32 to-be-deleted")
+    expect(is_to_be_deleted("ub_controller_tx"), "controller_tx to-be-deleted")
+    expect(not is_to_be_deleted("ub_dll_bcrc"), "bcrc is live")
     expect(
         count_instances(
             "  ub_cmn_mem_1r1w_d128w64 u_mem (\n    .clk(clk)\n  );\n",
@@ -1485,6 +1601,50 @@ def self_check() -> int:
     expect(info.get("registered") is True, f"stub registered {info}")
     expect(body.count("sky130_fd_sc_hd__dfxtp_1") == 8, "8 rdata flops")
 
+    with tempfile.TemporaryDirectory() as td:
+        tree = Path(td)
+        (tree / "rtl" / "pyc_lib").mkdir(parents=True)
+        (tree / "rtl" / "dll").mkdir(parents=True)
+        (tree / "rtl" / "pyc_lib" / "qs_inc_cell.v").write_text(
+            "module qs_inc_cell (input a, output y); assign y = a; endmodule\n",
+            encoding="utf-8",
+        )
+        leaf = tree / "rtl" / "dll" / "ub_qs_inc_leaf.v"
+        leaf.write_text(
+            '`include "qs_inc_cell.v"\n'
+            "module ub_qs_inc_leaf (input a, output y);\n"
+            "  qs_inc_cell u (.a(a), .y(y));\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        dirs, warn = yosys_incdirs(tree)
+        expect(warn is None, f"no fallback warn when pyc_lib exists: {warn}")
+        expect(any(p.name == "pyc_lib" for p in dirs), f"incdirs {dirs}")
+        if not shutil.which("yosys"):
+            failures.append("yosys missing; include-read self-test not run")
+        else:
+            inc = " ".join(f"-I {d}" for d in dirs)
+            cp = run(
+                [
+                    "yosys",
+                    "-p",
+                    f"read_verilog {inc} {leaf}; hierarchy -check -top ub_qs_inc_leaf",
+                ]
+            )
+            expect(
+                cp.returncode == 0,
+                f"yosys include read failed:\n{(cp.stdout or '')[-400:]}",
+            )
+    with tempfile.TemporaryDirectory() as td:
+        tree = Path(td)
+        (tree / "rtl" / "common").mkdir(parents=True)
+        dirs, warn = yosys_incdirs(tree)
+        expect(
+            warn is not None and "rtl/common" in (warn or ""),
+            f"fallback warn {warn}",
+        )
+        expect(any(p.name == "common" for p in dirs), f"fallback dirs {dirs}")
+
     if failures:
         print("self-check FAILED:", file=sys.stderr)
         for f in failures:
@@ -1533,6 +1693,12 @@ def main(argv: list[str] | None = None) -> int:
             f"blackbox ub_cmn_mem_1r1w (and blackbox.yml) instances whose "
             f"depth×width exceeds this many bits (default {DEFAULT_SRAM_BIT_THRESHOLD})"
         ),
+    )
+    ap.add_argument(
+        "--incdir",
+        action="append",
+        default=[],
+        help="extra Yosys -I directory (repeatable; default is rtl/pyc_lib)",
     )
     ap.add_argument(
         "--json",
@@ -1602,12 +1768,53 @@ def main(argv: list[str] | None = None) -> int:
         spec_text = spec_path.read_text(encoding="utf-8") if spec_path.is_file() else None
         period_ns, period_src, period_ph = detect_period(spec_text)
 
+        extra_incdirs = list(parse_incdirs_env(os.environ.get("QS_INCDIRS")))
+        extra_incdirs.extend(Path(p) for p in args.incdir)
+        incdirs, inc_warn = yosys_incdirs(tree, extra_incdirs)
+        if inc_warn:
+            print(inc_warn, flush=True)
+
         leaves = list_rtl_leaves(tree)
         if args.tops:
             tops = [t.strip() for t in args.tops.split(",") if t.strip()]
         else:
             tops = default_tops(repo, tree, args.base, args.ref or head_sha)
-        if not tops:
+        deleted_rows: list[dict[str, Any]] = []
+        live_tops: list[str] = []
+        for top in tops:
+            if is_library_cell(top):
+                print(f"==> {top} library cell (not a reported top)", flush=True)
+                continue
+            if is_to_be_deleted(top):
+                rec = leaves.get(top) or {}
+                srcp = rec.get("product") or rec.get("hooks")
+                src_s = ""
+                if srcp:
+                    src_s = (
+                        str(srcp.relative_to(tree))
+                        if srcp.is_relative_to(tree)
+                        else str(srcp)
+                    )
+                print(f"==> {top} 待删除 / to be deleted (not synthesized)", flush=True)
+                deleted_rows.append(
+                    {
+                        "top": top,
+                        "variant": "待删除 / to be deleted",
+                        "ok": True,
+                        "to_be_deleted": True,
+                        "src": src_s,
+                        "notes": [
+                            "legacy; excluded from PRODUCT totals and baseline compare"
+                        ],
+                        "anomalies": [],
+                        "delta_vs_baseline": "excluded (to be deleted)",
+                        "qor_over_10pct": [],
+                        "sram_est_um2": 0.0,
+                    }
+                )
+            else:
+                live_tops.append(top)
+        if not live_tops and not deleted_rows:
             die("no tops to synthesize (pass --tops or touch rtl/<block>/ leaves)")
 
         bb_yml = tree / "scripts" / "gate" / "blackbox.yml"
@@ -1618,7 +1825,7 @@ def main(argv: list[str] | None = None) -> int:
 
         versions = tool_versions(liberty, liberty_meta)
         jobs: list[tuple[str, str, Path, dict[str, str] | None]] = []
-        for top in tops:
+        for top in live_tops:
             rec = leaves.get(top)
             if not rec or ("product" not in rec and "hooks" not in rec):
                 jobs.append((top, "PRODUCT", Path(), None))
@@ -1630,10 +1837,8 @@ def main(argv: list[str] | None = None) -> int:
                 jobs.append((top, "PRODUCT", rec["product"], extra))
             if "hooks" in rec:
                 jobs.append((top, "HOOKS", rec["hooks"], extra))
-            if "product" not in rec and "hooks" in rec:
-                pass  # hooks-only already queued
 
-        results: list[dict[str, Any]] = []
+        results: list[dict[str, Any]] = list(deleted_rows)
         for top, variant, src, extra in jobs:
             if not src:
                 results.append(
@@ -1662,6 +1867,7 @@ def main(argv: list[str] | None = None) -> int:
                 variant=variant,
                 mem_catalog=mem_catalog,
                 sram_bit_threshold=args.sram_bit_threshold,
+                extra_incdirs=extra_incdirs,
             )
             results.append(r)
 
@@ -1669,6 +1875,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.baseline_json or args.baseline_report:
             baseline_rows = load_baseline_rows(args.baseline_json, args.baseline_report)
         for r in results:
+            if r.get("to_be_deleted") or is_to_be_deleted(r.get("top") or ""):
+                r["delta_vs_baseline"] = "excluded (to be deleted)"
+                r["qor_over_10pct"] = []
+                continue
             if not baseline_rows:
                 r.setdefault("delta_vs_baseline", "new")
                 r.setdefault("qor_over_10pct", [])
@@ -1701,12 +1911,14 @@ def main(argv: list[str] | None = None) -> int:
             "sram_um2_per_bit": SRAM_UM2_PER_BIT,
             "sram_periph_factor": SRAM_PERIPH_FACTOR,
             "tools": versions,
+            "incdirs": [str(p) for p in incdirs],
+            "incdir_warn": inc_warn,
             "product_totals": product_area_totals(results),
             "results": results,
         }
         jpath = args.json or (out / "results.json")
         jpath.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        print(write_full_markdown(results))
+        print(write_full_markdown(results, inc_warn=inc_warn))
         print(f"\nSRAM formula: {SRAM_FORMULA_LABEL}")
         print(f"JSON: {jpath}")
         return 0 if all(r.get("ok") for r in results) else 1

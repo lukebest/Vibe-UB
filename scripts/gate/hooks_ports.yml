@@ -1,0 +1,79 @@
+# Allowed extra HOOKS ports vs PRODUCT (Xia ruling, SPEC §11 (f)).
+# Same approval rules as waivers/: only a verification gatekeeper
+# in approver is loaded. Empty / TODO / non-gatekeeper → ignored.
+#
+# Module not listed: HOOKS ports must equal PRODUCT (no tb_test_mode).
+# Module listed: HOOKS ports = PRODUCT ports + extra_ports (must include
+# tb_test_mode and the SPEC §10 tb_* for that module).
+#
+# Xia backdoor naming (HOOKS only, gated by tb_test_mode):
+#   tb_<inst>_bd_*        storage / array backdoor
+#   tb_<inst>_bd_vld_*    valid-preload companion for that backdoor
+# Both classes must be listed here (SPEC §10). Any other tb_* is blocked.
+# PRODUCT netlists must not carry tb_* ports.
+# eqy ties tb_test_mode / tb_inj_* / tb_<inst>_bd_* / tb_<inst>_bd_vld_* low.
+#
+# CODEOWNERS: /scripts/gate/ is gatekeeper-owned. Do not self-approve drafts.
+
+entries:
+  - id: HOOKS-UB-LMSM
+    module: ub_lmsm
+    extra_ports:
+      - tb_test_mode
+      - tb_inj_am_lock
+      - tb_inj_lid_bad
+      - tb_obs_link_ready
+      - tb_obs_link_up
+      - tb_obs_lmsm_st
+    reason: SPEC §10.2 / §11 (f) — LMSM named test hooks
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 hook list for ub_lmsm changes
+
+  - id: HOOKS-UB-DLL-CREDIT
+    module: ub_dll_credit
+    extra_ports:
+      - tb_test_mode
+      - tb_inj_crd_cells
+      - tb_obs_crd_cells
+      - tb_obs_crd_pend
+      - tb_obs_crd_low
+      - tb_obs_crd_bp
+      - tb_obs_crd_to
+    reason: SPEC §10.2 / §11 (f) — credit named test hooks
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 hook list for ub_dll_credit changes
+
+  - id: HOOKS-UB-DLL
+    module: ub_dll
+    extra_ports:
+      - tb_test_mode
+      - tb_obs_dll_sm_st
+      - tb_obs_consume_flits
+    reason: SPEC §10.2 / §11 (f) — DLL named test hooks
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 hook list for ub_dll changes
+
+  - id: HOOKS-UB-CONTROLLER
+    module: ub_controller
+    extra_ports:
+      - tb_test_mode
+      - tb_inj_am_lock
+      - tb_inj_lid_bad
+      - tb_inj_crd_cells
+      - tb_obs_link_ready
+      - tb_obs_link_up
+      - tb_obs_lmsm_st
+      - tb_obs_crd_cells
+      - tb_obs_crd_pend
+      - tb_obs_crd_low
+      - tb_obs_crd_bp
+      - tb_obs_crd_to
+      - tb_obs_dll_sm_st
+      - tb_obs_consume_flits
+    reason: SPEC §10.2 / §11 (f) — top-level hook ports
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 top-level hook list changes

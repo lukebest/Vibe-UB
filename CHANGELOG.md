@@ -5,6 +5,7 @@
 ### Added
 
 - M1 RTL leaf batch 1 (pyCircuit): whitelist `ub_rst_sync`; generated `ub_pyc_rst_adapt`, `ub_pcs_scrambler` / `ub_pcs_descrambler`, `ub_pcs_lane_dist_x4` / `_x8` / `ub_pcs_lane_dedist_x4` / `_x8`, `ub_dll_bcrc` / `ub_dll_bcrc_check`. STEP 1 leaves are real `@module` + `compile()` + `pycc --emit=verilog --logic-depth=64` (same invocation as PR #11; LLVM 19.1.1). PRODUCT at `rtl/<block>/<leaf>[_<tag>].v` and HOOKS at `rtl/<block>/hooks/` (SPEC §2.2 / CODING_STYLE §5 / §11). SPEC §10 lists no hook ports (HOOKS ≡ PRODUCT). Local SPEC-formula pre-check under `scripts/precheck/` (non-gating; official refs are `formal/<layer>/ref/` on PR #16). Scrambler / descrambler leftover f-string emitters pending STEP 2.
+- 工具守门 CI：`.github/workflows/gate.yml` + `scripts/gate/` + `make gate`（emit / 端口一致性 / lint / CDC / formal / synth-check / regmap `--check` / tb-selfcheck）。名单在 `gate/`（legacy / handwritten / stubs / hooks_ports），豁免在 `waivers/`，批准规则相同。等价主工具 eqy（`TOOLCHAIN.lock` `eqy_lock`），不可用则回退 Yosys `equiv_*` 并注明工具。规则分册 `docs/rules/verif_gate.md`。CODEOWNERS 将 `waivers/`、`gate/`、gate workflow 指给 `lukebest`。不改 `rtl/`、`tb/models/`、`model/`。SPEC §11 仅补 Xia 端口裁定 (f)。
 - `docs/VERIF_PLAN.md` §8.8：轨道 C 内存管理（UMMU + 译码器）测试点（docs-only；公共 §8.7 / §13 / §14 / §15 另 PR 并入）。
 - `scripts/impl/quick_synth.sh`：合入前叶子快速综合（Yosys flatten + Sky130 hd tt proxy + OpenSTA 最差建立路径）。Informational；不进验证门禁。规则见 `docs/rules/impl_quick_synth.md`。
 - `TOOLCHAIN.lock` + `tb/` uvm-python 骨架、golden-model 接口、双网表自检入口（叠在 M1 SPEC 上；不改 `rtl/` / SPEC 类文档）。
@@ -23,6 +24,11 @@
 
 ### Changed
 
+- `docs/rules/verif_gate.md` v0.4：后门命名 `tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`（HOOKS only，§10 登记，eqy 拉低）；`ub_cmn_mem_1r1w` 时钟口 `core_clk`；存储变体 `d<DEPTH>w<WIDTH>[m<WMASK_W>]`；regmap `variants:`（PR #11 格式）`product_` 的 `SCR_PLACEHOLDER` 必须为 0，`=1` 非 PRODUCT 只 lint/TB，`NUM_VL`/`NUM_LANES` 与变体名一致。GATE-TB-SB-001：分段比对按段计次数。
+- `docs/rules/verif_gate.md` v0.3：§8.0.1 / §11 增补 GATE-TB-SB-001（记分板须统计实际比对次数，结束时断言次数 `> 0` 且等于预期；审查清单，不自动拦截）。
+- `docs/TEAM.md` §4、`docs/PROCESS.md` §2：豁免清单从 `docs/WAIVERS.md` 改为 `waivers/`。
+- `scripts/impl/quick_synth.*` + `docs/rules/impl_quick_synth.md` v0.3：Yosys 默认 `-I rtl/pyc_lib`（pycc `pyc_reg.v` 等；未落地时回退 `rtl/common` 并 WARN）；`--incdir` / `QS_INCDIRS` 为额外路径；`pyc_*` 不作报告 top；`ub_dll_crc32` / `ub_dll_crc_check` / `ub_controller_tx` / `ub_controller_rx` 只报「待删除 / to be deleted」，不进合计、不对 baseline。
+- SPEC §2.2 + CODING_STYLE §1 / §5：pycc 运行库原语（`pyc_reg.v` 等运行时发出的 `pyc_*`）只放 `rtl/pyc_lib/`，从 `TOOLCHAIN.lock` 钉死版本原样拷贝、不得改；其它 `rtl/<layer>/` 与 `hooks/` 不得含 `pyc_*`；filelist 引用该目录；`` `include `` 用 `-I rtl/pyc_lib`。门禁细则见 `docs/rules/verif_gate.md`。
 - `docs/VERIF_PLAN.md`：公共 §8.7 / §13 / §14 / §15 并入轨道 C 内存管理计数与追溯（§8.8 正文不动）。
 - `scripts/impl/quick_synth.*` + `docs/rules/impl_quick_synth.md` v0.2：按 SPEC §2.2 每文件一个 top（无必经 `chparam`）；`_placeholder` 单独表且不计入 PRODUCT 面积；`--baseline-map` / `--baseline-report` 对照旧模块+参数；QoR（cells / area / depth / slack）相对 baseline 超 10% 标旗；`ub_cmn_mem_1r1w`（及 `scripts/gate/blackbox.yml`）超过可配 4096-bit 阈值作黑盒并报 SRAM 估算列，小实例仍综合为 flop；STA 按 1 拍 registered read。
 - `docs/SPEC.md` §2.2：pycc 按参数集展开固定网表（`<leaf>_<tag>` 命名；占位变体 `_placeholder`）。

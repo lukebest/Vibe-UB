@@ -87,7 +87,7 @@
 
 | 项 | 约定 |
 | --- | --- |
-| 清单落点 | `docs/WAIVERS.md` 为后续文件（FUTURE）；落地前条目仍按下列格式书面记录，并由守门人批准 |
+| 清单落点 | `waivers/*.yml`（`approvers.yml` 限定守门人 login） |
 | 条目格式 | ID / 检查项 / 模块 / 理由 / 批准人 / 日期 |
 | 现有实践 | [CODING_STYLE.md](CODING_STYLE.md) §7 具名 waiver（如 `WAIVER_CRD_UF_CNT`、`WAIVER_CRD_UF_IRQ`）；覆盖率豁免见 [VERIF_PLAN.md](VERIF_PLAN.md) §9 |
 

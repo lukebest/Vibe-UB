@@ -1,0 +1,24 @@
+[tasks]
+bmc
+cover
+
+[options]
+depth 16
+bmc:
+mode bmc
+--
+cover:
+mode cover
+--
+
+[engines]
+smtbmc z3
+
+[script]
+read -formal ub_irq_if_props.sv
+read -formal ub_irq_harness.sv
+prep -top ub_irq_harness
+
+[files]
+ub_irq_if_props.sv
+ub_irq_harness.sv

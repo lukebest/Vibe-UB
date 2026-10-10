@@ -1,0 +1,24 @@
+[tasks]
+bmc
+cover
+
+[options]
+depth 16
+bmc:
+mode bmc
+--
+cover:
+mode cover
+--
+
+[engines]
+smtbmc z3
+
+[script]
+read -formal ub_pma_pcs_if_props.sv
+read -formal ub_pma_pcs_harness.sv
+prep -top ub_pma_pcs_harness
+
+[files]
+ub_pma_pcs_if_props.sv
+ub_pma_pcs_harness.sv

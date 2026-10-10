@@ -24,3 +24,9 @@ formal/**/*_bmc/
 formal/**/*_cover/
 formal/**/*_prove/
 formal/*/*/
+
+# Impl quick-synth: never commit PDK / liberty / local work dirs
+.cache/sky130/
+scripts/impl/.cache/
+reports/impl/quick_synth/_work/
+.history_sta

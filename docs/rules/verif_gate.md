@@ -208,6 +208,9 @@ M1 单时钟 `core_clk`（SPEC §4.1）。`rst_n` 异步置位、同步释放，
 | GATE-EQY-001 | PRODUCT≡HOOKS。本环境 **eqy 装不上**，主工具是 Yosys `equiv_make` / `equiv_simple` / `equiv_induct` / `equiv_status -assert`。eqy 若在 PATH 再用。报告写明 `tool=yosys-equiv` 或 `tool=eqy`。按 SPEC §2.2 变体逐个跑；`_placeholder` 不做等价 | SPEC §11 (d)；设计 spike | 2026-10-10 |
 | GATE-EQY-002 | 无钩子叶子：端口一一对应后直接比对。有钩子模块：`tb_test_mode=0`，并把 `tb_inj_*`、`tb_<inst>_bd_*`、`tb_<inst>_bd_vld_*` 拉低后再比对 | SPEC §11 (d)(f) | 2026-10-10 |
 | GATE-EQY-003 | 上层等价把 DEPTH×WIDTH 超阈值的 `ub_cmn_mem_1r1w` 变体当黑盒，**两边同一份**；原语只对 ≤4096 bit（含 `d64w64m16`）做完整 PRODUCT≡HOOKS | 实现对齐 | 2026-10-10 |
+| GATE-EQY-004 | 公式参考等价（`formal/<层>/ref/` + `scripts/gate/equiv_ref.sh`）满足以下**其一**即通过：(1) Yosys `equiv_make` / `equiv_simple` / `equiv_induct` 全部证明，没有未证的 `$equiv`；(2) `miter -equiv -flatten` 加 `sat -tempinduct -prove` 证明通过。报告必须写明用的是哪一种。每个参考都要配故意做错的假网表（例如 lane 用正向映射 `CA<i*N+j>`，BCRC 改错一位 CRC）；假网表必须报失败，否则这一项不算通过 | PM | 2026-10-10 |
+
+公式参考等价与 PRODUCT≡HOOKS 分开：入口是 `scripts/gate/equiv_ref.sh`，参考在 `formal/<层>/ref/`。上表 (1)(2) 二选一；日志写 `tool=yosys-equiv` 或 `tool=yosys-miter-sat`。假网表不过则本项失败。本条先入规则册，脚本尚未落地。
 
 白名单手写与 `_placeholder` 变体跳过 emit / hooks / 等价。Yosys 缺失：`EQUIV_TOOL_MISSING`，拦截（不静默）。
 
@@ -353,6 +356,7 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 | VER-GATE-004 | 工具版本对照 `TOOLCHAIN.lock`，对不上要明文打印 | D7 / D16 | 2026-10-10 |
 | VER-GATE-005 | 手写 SV / stub\|macro / 钩子端口三份 `scripts/gate/` 清单 | D6；SPEC §11 | 2026-10-10 |
 | VER-GATE-006 | 等价主工具 Yosys equiv_*；eqy 可用再用 | SPEC §11 (d) | 2026-10-10 |
+| VER-GATE-015 | 公式参考等价（`formal/<层>/ref/`）：Yosys `equiv_*` 全证或 `miter`+`sat -tempinduct` 其一通过，报告写明路径；每个参考须有假网表且必须失败 | PM | 2026-10-10 |
 | VER-GATE-007 | `ub_cmn_mem_1r1w` 是 `cmn` 普通叶子；变体 `d<DEPTH>w<WIDTH>[m<WMASK_W>]`；DEPTH×WIDTH 超阈值上层当黑盒；原语完整综合/等价 ≤4096 bit（含 `d64w64m16`）；`blackbox.yml` 无 `primitive` | Xia | 2026-10-10 |
 | VER-GATE-008 | 成对模块 TB 两侧独立 vs `model/` + 定向用例；审查项，不自动拦截 | A 线 lane dist | 2026-10-10 |
 | VER-GATE-009 | SPEC §2.2 变体逐个跑；`_placeholder` 只 lint/TB；PRODUCT 不得例化；源码须有 `PLACEHOLDER_SOURCE` | SPEC §2.2 | 2026-10-10 |

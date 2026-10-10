@@ -44,6 +44,25 @@ def _require_sim(netlist: str):
     return ready
 
 
+def _is_pow2(n: int) -> bool:
+    return n > 0 and (n & (n - 1)) == 0
+
+
+def _negative_cases_for(variant) -> list[str]:
+    """OOR encodings do not exist when DEPTH is a power of two (AW bits fill [0, DEPTH))."""
+    cases = list(NEGATIVE_CASES)
+    if _is_pow2(variant.depth):
+        skipped = [c for c in cases if c.startswith("oor_")]
+        cases = [c for c in cases if not c.startswith("oor_")]
+        for case in skipped:
+            print(
+                f"SKIP {variant.module} {case}: DEPTH={variant.depth} is 2^AW; "
+                "no out-of-range encoding fits on waddr/raddr",
+                flush=True,
+            )
+    return cases
+
+
 @pytest.mark.sim
 @pytest.mark.parametrize("netlist", ["product", "hooks"])
 def test_rtl_positive_all_variants(netlist):
@@ -70,7 +89,7 @@ def test_rtl_negative_all_variants(netlist):
 
     print(f"SEED {SEED}", flush=True)
     for variant in variants:
-        for case in NEGATIVE_CASES:
+        for case in _negative_cases_for(variant):
             run_sim_variant(
                 variant,
                 case=case,

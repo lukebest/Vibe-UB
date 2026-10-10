@@ -92,9 +92,11 @@ def bits_or_reduce(m: Circuit, word):
 
 
 def drive_gen(crc_q, word_q, done_q, start, valid_in, last, nxt, m: Circuit):
+    # Xia SPEC §2.6: start&valid absorbs (nxt already seeded from INIT);
+    # start&~valid writes INIT only; start before previous last restarts.
     init = u(CRC_W, INIT)
-    crc_q.set(mux(start, init, nxt), when=(start | valid_in))
-    eat_last = (~start) & valid_in & last
+    crc_q.set(mux(valid_in, nxt, init), when=(start | valid_in))
+    eat_last = valid_in & last
     word_q.set(pack_tx_word(m, nxt), when=eat_last)
     done_q.set(eat_last)
     return eat_last

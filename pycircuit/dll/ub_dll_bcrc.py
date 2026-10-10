@@ -7,7 +7,7 @@ SPEC §10 lists no hooks: HOOKS ports match PRODUCT.
 
 from __future__ import annotations
 
-from pycircuit import Circuit, module, u
+from pycircuit import Circuit, module, mux, u
 
 from dll.bcrc_hw import drive_gen, next_crc_hw
 from dll.bcrc_matrix import CRC_W, FLIT_W, INIT, WORD_W
@@ -28,7 +28,8 @@ def _ports(m: Circuit):
     crc_q = m.out("crc_q", clk=clk, rst=rst, width=CRC_W, init=u(CRC_W, INIT))
     word_q = m.out("word_q", clk=clk, rst=rst, width=WORD_W, init=u(WORD_W, 0))
     done_q = m.out("done_q", clk=clk, rst=rst, width=1, init=u(1, 0))
-    nxt = next_crc_hw(m, crc_q.out(), data_in, last)
+    seed = mux(start, u(CRC_W, INIT), crc_q.out())
+    nxt = next_crc_hw(m, seed, data_in, last)
     drive_gen(crc_q, word_q, done_q, start, valid_in, last, nxt, m)
     m.output("crc_word", word_q.out())
     m.output("done", done_q.out())

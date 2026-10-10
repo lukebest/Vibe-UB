@@ -8,7 +8,7 @@ Same XOR-matrix CRC30 as ub_dll_bcrc. On last:
 
 from __future__ import annotations
 
-from pycircuit import Circuit, module, u
+from pycircuit import Circuit, module, mux, u
 
 from dll.bcrc_hw import bits_or_reduce, drive_gen, next_crc_hw
 from dll.bcrc_matrix import CRC_W, FLIT_W, INIT, WORD_W
@@ -25,9 +25,10 @@ def _check_regs(m: Circuit, nxt, crc_recv, eat_last, ok_q, fail_q, eflag_q, zero
     recv_rsvd = crc_recv.slice(lsb=31, width=1)
     any_diff = bits_or_reduce(m, nxt ^ recv_crc)
     match = ~any_diff
-    ok_q.set(match & ~(recv_rsvd & zero_q.out()), when=eat_last)
-    fail_q.set(any_diff, when=eat_last)
-    eflag_q.set(recv_flag, when=eat_last)
+    # Pulse with done (gold: crc_ok = done & compare). Consume rsvd for -Wall.
+    ok_q.set(eat_last & match & ~(recv_rsvd & zero_q.out()))
+    fail_q.set(eat_last & any_diff)
+    eflag_q.set(eat_last & recv_flag)
 
 
 @module(name="ub_dll_bcrc_check")
@@ -48,7 +49,8 @@ def build(m: Circuit, test_hooks: int = 0) -> None:
     eflag_q = m.out("eflag_q", clk=clk, rst=rst, width=1, init=u(1, 0))
     zero_q = m.out("zero_q", clk=clk, rst=rst, width=1, init=u(1, 0))
     zero_q.set(u(1, 0))
-    nxt = next_crc_hw(m, crc_q.out(), data_in, last)
+    seed = mux(start, u(CRC_W, INIT), crc_q.out())
+    nxt = next_crc_hw(m, seed, data_in, last)
     eat_last = drive_gen(crc_q, word_q, done_q, start, valid_in, last, nxt, m)
     _check_regs(m, nxt, crc_recv, eat_last, ok_q, fail_q, eflag_q, zero_q)
     m.output("crc_word", word_q.out())

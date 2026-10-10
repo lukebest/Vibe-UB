@@ -1,6 +1,7 @@
 // Vendored from lukebest/pyCircuit @ 43cc5918 runtime/verilog/pyc_reg.v (pyc4.0).
 // Native polarity is synchronous active-high `rst` (SPEC §4.2 / CODING_STYLE §2).
 // Business leaves use this polarity via rst_pyc from ub_pyc_rst_adapt.
+// Runtime primitive — do not edit. PR #21 moves this file to rtl/pyc_lib/.
 
 module pyc_reg #(
   parameter WIDTH = 1

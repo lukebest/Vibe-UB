@@ -15,6 +15,7 @@
 - `docs/rules/`：architect / design / verification / backend 规则库骨架（v0.1）。
 - `docs/DECISIONS.md` D17：团队分工与流程（Luke Liu via Firstmate，2026-10-10 16:48 Asia/Shanghai）。
 - `docs/DECISIONS.md` D18：全层级范围，作为完整 UB 控制器（Luke Liu via Firstmate，2026-10-10 17:04 Asia/Shanghai）；D18 取代 D2 的分阶段范围。
+- `docs/DECISIONS.md` D19：三线并行与新增角色（Luke Liu via Firstmate，2026-10-10 17:22 Asia/Shanghai）。
 - 寄存器表单一来源 `docs/regmap/regmap.yaml` + `scripts/gen_regmap.py`：生成 `docs/REGMAP.md`、`pycircuit/csr/ub_csr_regs.py`、`tb/ral/ub_regmodel.py`、`sw/include/ub_regs.h`、`sw/hal/ub_regs_access.{h,c}`、`model/regs.py`。检查：`python3 scripts/gen_regmap.py --check`。CI：`.github/workflows/regmap.yml`。CSR Python 在 `pycircuit/csr/`（`rtl/` 只放生成 Verilog）。RAL 在 `tb/ral/`。写响应下一拍 `csr_rvalid=0` 写入 YAML 总线规则（SPEC §3.2.3）。`scripts/emit_rtl.py` 注册 `ub_csr` 为 PR #5 合入后的 follow-up，本 PR 不手写 / 不提交 `rtl/csr/*.v`。
 
 ### Changed
@@ -28,3 +29,4 @@
 - 模块名对齐 CODING_STYLE §5：`pcs_fec_enc`→`ub_pcs_fec_enc`，`pcs_fec_dec`→`ub_pcs_fec_dec`，`pcs_scrambler`→`ub_pcs_scrambler`，`pcs_descrambler`→`ub_pcs_descrambler`，`pcs_lane_dist`→`ub_pcs_lane_dist`，`pcs_lane_dedist`→`ub_pcs_lane_dedist`，`pcs_amctl_tx`→`ub_pcs_amctl_tx`，`pcs_amctl_rx`→`ub_pcs_amctl_rx`，`pcs_deskew`→`ub_pcs_deskew`，`segmenter`→`ub_dll_segmenter`，`reassembler`→`ub_dll_reassembler`，BCRC TX/RX→`ub_dll_bcrc` / `ub_dll_bcrc_check`，credit/VL/retry→`ub_dll_credit` / `ub_dll_vl` / `ub_dll_retry`。
 - `LMSM_CTRL.START` 更名为 `CTRL.LMSM_START`（REGMAP `0x0000` bit1）。关闭 `STATUS.RETRY_REQ_ST` / `RETRY_ACK_ST` 与 `PARAM_PHY.NUM_LANES_{TX,RX}` 编码（二进制 1/2/4/8）；保留值 RTL 不产出、TB assert。
 - `docs/TEAM.md`、`docs/PROCESS.md`：按 D18 写全层级范围；PROCESS §6 为「全层级推进」。
+- `docs/TEAM.md`、`docs/PROCESS.md`：按 D19 写入三条轨道、轨道所有权，以及「设计-B」/「验证-B」、「设计-C」/「验证-C」新角色。

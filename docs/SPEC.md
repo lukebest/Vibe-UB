@@ -232,6 +232,15 @@ flowchart TB
 
 `ub_dll_bcrc` / `ub_dll_bcrc_check` 按 `FLIT_W=160` 流式计算，1 拍给出 `crc_word` / 比较结果。检查口只比对 30-bit CRC30；`ERROR_FLAG` 不参与 CRC 符合性。
 
+**流式接口拍位（已定）：**
+
+- `start` 与 `valid_in` 同拍：该拍 flit 为本 DLLDB 首 flit，计入 CRC；等效于先置初值全 1，再按 MSB-first 逐字节折入该拍 20 字节。
+- `start`、`valid_in`、`last` 同拍：单 flit 块，只算该拍末尾 4 字节 BCRC 之前的 16 字节，按本节 1 拍延迟给出 `crc_word`。
+- `start==1 && valid_in==0`：只把寄存器置回全 1，不折数据。
+- 上一块未见 `last` 又来 `start`：以新的 `start` 为准，从初值重新算。
+
+以上与 `tb/models/ub_dll_bcrc.py` 的 `start()` / `eat()` 一致。结论由架构 Xia 于 2026-10-10 裁定。
+
 Init Block 字段名只作标识符使用，位定义见 UB-DL §4.3.3.9，本仓库不抄表。协商流程见 §4.4。
 
 ---

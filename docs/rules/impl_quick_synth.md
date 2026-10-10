@@ -4,7 +4,7 @@
 | --- | --- |
 | 分册 | `docs/rules/impl_quick_synth.md` |
 | 所有者 | 后端实现 |
-| 版本 | v0.2 (2026-10-10) |
+| 版本 | v0.3 (2026-10-10) |
 | 类别 | 合入前快速综合的面积 / 时序反馈（proxy，非签核） |
 | 配套 | [backend.md](backend.md)、[TEAM.md](../TEAM.md)、[PROCESS.md](../PROCESS.md)、[SPEC.md](../SPEC.md) |
 | 脚本 | `scripts/impl/quick_synth.sh` |
@@ -37,9 +37,14 @@
    - PRODUCT：`rtl/<block>/<leaf>_<tag>.v`（白名单 `.sv` 同样）。
    - HOOKS：同名，放 `rtl/<block>/hooks/`，作次行。生成期展开，Verilog 里无 `` `ifdef ``。
    - `_placeholder` 变体（用占位值生成、仅 lint / TB）进 **单独表**，**不计入 PRODUCT 面积合计**。
+   - 待删除遗留：`ub_dll_crc32`、`ub_dll_crc_check`、`ub_controller_tx`、`ub_controller_rx` 只进 **「待删除 / to be deleted」** 行，**不综合、不进合计、不对 baseline**。
+   - 任何 `pyc_*` 模块是库单元（`rtl/pyc_lib/`），不是报告 top。
    - **不**再默认 `chparam`。`--chparam KEY=VAL` / `TOP:KEY=VAL` 只作可选覆盖（模块里若已无该 parameter 则跳过并注明）。
 2. **Yosys**
-   - `read_verilog`（`.sv` 加 `-sv`）。大 SRAM 用 `read_verilog -lib` 作黑盒。
+   - `read_verilog`（`.sv` 加 `-sv`）。默认 **`-I rtl/pyc_lib`**（pycc runtime 原语，如 `pyc_reg.v`，从 TOOLCHAIN.lock 钉住的 pyCircuit 原样拷入）。`--incdir` / 环境变量 `QS_INCDIRS` 可再加目录。
+   - `rtl/pyc_lib/` 尚未落地时（#21 / #5 之前）**回退 `-I rtl/common`**，报告里打一行 `WARN`；临时，定库目录后去掉回退。
+   - 不把 `` `include `` 目标再列进 `QS_FILES`（否则 `pyc_reg` 会重定义）。
+   - 大 SRAM 用 `read_verilog -lib` 作黑盒。
    - `synth -top <m> -flatten`。
    - `dfflibmap` + `abc -liberty` 映到 Sky130 hd tt。
    - `stat -liberty`：mapped **cell 数**、**面积 um²**、**flop 数**（`df*` / `edf*` / `sdf*`）。黑盒 SRAM 实例从 cell 数里扣掉。
@@ -69,7 +74,7 @@
      - `0.5 µm²/bit`：SkyWater 130nm 6T bit 的数量级（公开 HD bit 约 0.3–0.5 µm²）。
      - `1.35`：译码 / sense-amp / I/O 周边（教材常见 25–50%）。
      - 工艺未定（PR #9 §13）前用此 proxy；**定节点后重看阈值与公式**。
-   - PRODUCT 面积合计只加非 `_placeholder` 的 PRODUCT 行的 liberty stdcell；SRAM est 另报一列、另合计。HOOKS 不进 PRODUCT 合计。
+   - PRODUCT 面积合计只加非 `_placeholder`、非待删除的 PRODUCT 行的 liberty stdcell；SRAM est 另报一列、另合计。HOOKS 不进 PRODUCT 合计。
 6. **工具与 liberty 出处**
    - 报告写死 Yosys / OpenSTA 版本，以及 liberty 的来源 URL / commit。PDK **不进仓库**；脚本下载或读 `SKY130_HD_LIB`。
 
@@ -110,6 +115,8 @@ OPEN §13 参数已按 §2.2 做成 `_placeholder` 固定网表时：综合进 p
 | IMP-QS-006 | `_placeholder` 变体单独列表，不计入 PRODUCT 面积合计 | SPEC §2.2 | 2026-10-10 |
 | IMP-QS-007 | 可用 `--baseline-map` 把迁移后的 `<leaf>_<tag>` 对到旧模块+参数；cells / area / depth / slack 相对 baseline 超 10% 标旗 | 本分册 | 2026-10-10 |
 | IMP-QS-008 | `ub_cmn_mem_1r1w`（及 `scripts/gate/blackbox.yml` 中的模块）depth×width 超过可配阈值（默认 4096 bit）作黑盒，SRAM est 列用标明的 bit 面积公式；小实例按 flop 综合；STA 按 1 拍 registered read。阈值与公式在工艺确定后重看 | 本分册；PR #9 §13 | 2026-10-10 |
+| IMP-QS-009 | Yosys 默认 `-I rtl/pyc_lib`（TOOLCHAIN.lock 钉住的 pyCircuit 原语）。目录未到时回退 `rtl/common` 并 WARN。`--incdir` / `QS_INCDIRS` 为额外路径。`pyc_*` 不作报告 top | 本分册；#21 / #5 | 2026-10-10 |
+| IMP-QS-010 | `ub_dll_crc32` / `ub_dll_crc_check` / `ub_controller_tx` / `ub_controller_rx` 只报「待删除 / to be deleted」，不进合计、不对 baseline | 本分册 | 2026-10-10 |
 
 ---
 
@@ -128,6 +135,9 @@ scripts/impl/quick_synth.sh --ref <git-ref> --out /tmp/qs \
 
 # 可选 chparam 覆盖（默认不需要）
 scripts/impl/quick_synth.sh --work-tree . --tops ub_foo --chparam NUM_LANES=4 --out /tmp/qs
+
+# 额外 include（默认已有 -I rtl/pyc_lib）
+scripts/impl/quick_synth.sh --work-tree . --incdir /tmp/extra --out /tmp/qs
 
 scripts/impl/quick_synth.sh --self-check
 ```

@@ -27,8 +27,12 @@ def export_functional(path: str | Path) -> None:
     for name, node in coverage_db.items():
         covered = getattr(node, "coverage", None)
         size = getattr(node, "size", None)
-        payload[name] = {
+        entry = {
             "coverage": covered,
             "size": size,
         }
+        detailed = getattr(node, "detailed_coverage", None)
+        if detailed:
+            entry["detailed"] = {str(k): v for k, v in detailed.items()}
+        payload[name] = entry
     dest.write_text(json.dumps(payload, indent=2) + "\n")

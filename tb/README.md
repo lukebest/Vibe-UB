@@ -65,6 +65,23 @@ tb/scripts/run_selfcheck.sh
 `TEST_HOOKS=0` compiles `harness/tb_passthru_hooks0.sv` (no `tb_*` ports).
 `TEST_HOOKS=1` compiles `harness/tb_passthru_hooks1.sv` (SPEC §10 bundle).
 
+## Leaf batch 1
+
+uvm-python TBs for `ub_rst_sync`, `ub_pyc_rst_adapt`, `ub_pcs_lane_dist` /
+`ub_pcs_lane_dedist` / collect loopback, `ub_dll_bcrc` / `ub_dll_bcrc_check`.
+Scoreboards import goldens via `tb/vibe_uvm/golden.py` (`model/` first, then
+`tb/models`). Scrambler leaves are not in this batch (SPEC §13).
+
+```bash
+make -C tb leaf LEAF=ub_rst_sync TEST_HOOKS=0 SIM=icarus
+make -C tb leaf-batch1 SIM=icarus          # gate
+make -C tb leaf-batch1 SIM=verilator       # compare
+```
+
+Each leaf is compiled twice (`TEST_HOOKS=0` / `=1`). These leaves have no
+product hooks (SPEC §10); the HOOKS wrapper only adds unused `tb_*` ports.
+Lane TBs sweep `NUM_LANES=1/2/4/8`. Seeds print as `SEED <n>` (D8).
+
 ## Coverage scaffold
 
 | Kind | Where | Notes |

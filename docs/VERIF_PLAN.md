@@ -573,8 +573,216 @@ FEC / BCRC 错由 D3 PMA 模型改符号，无对应钩子。
 | TP-DEF-TP-001 | UB-TP §6.2–§6.4 | RTP/CTP/UTP 与传输重传 | — | — | — | — | 推迟 |
 | TP-DEF-TP-002 | UB-TP §6.5–§6.6 | 多路径与拥塞控制 | — | — | — | — | 推迟 |
 | TP-DEF-TA-001 | UB-TA §7.2–§7.4 | 事务头与事务类型 | — | — | — | — | 推迟 |
-| TP-DEF-UP-001 | 第 8–11 章 | FUN/MEM/RSC/SEC | — | — | — | — | 推迟 |
+| TP-DEF-UP-001 | 第 8、10、11 章 | FUN/RSC/SEC（内存管理见 §8.8） | — | — | — | — | 推迟 |
 | TP-DEF-HOOK-001 | SPEC §10.2；D2 | `tb_obs_nw_dll_data` | — | — | — | — | 推迟 |
+
+### 8.8 内存管理（轨道 C）
+
+本小节为轨道 C 专属，只在此处增删内存管理测试点。列定义沿用上文 §8，不改公共表头。依据 `docs/arch/mem/UARCH.md`（叶子划分 §3、接口 §4、具名信号契约 §5、流水线与旁路 §6、失效 §7、错误与事件 §8、必选/可选 §9、大表项表 §10、待决 §11–§12）。设计与验证独立，只共享 SPEC、接口契约与断言；查表 / 译码的标准答案为 Xia 在 `model/` 的 Python 参考模型（UMMU 查表 / 译码参考模型尚未提交，检查列写「`model/` 参考模型（待 Xia）」）。
+
+结构叶子的 TB 直接驱动 UARCH §5 的具名信号，不依赖字段布局。字段解码相关测试点只写到解码叶子名和 UARCH §5 具名信号。必选特性里程碑 = **M1**；UARCH §9 列为可选 / 延后的标 **后续**。RTL 尚未交付，故多数状态 = **RTL未就绪**；依赖待决项的标 **待定**，见 §8.8.5。本小节自带计数、待定清单与第 9 章反向追溯；公共 §8.7 / §13 / §14 / §15 由另 PR 并入。
+
+#### 8.8.1 单元级 — 内存管理 UMMU
+
+| ID | 规范 | 描述 | 激励 | 检查 | 覆盖 | 里程碑 | 状态 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TP-UNIT-MEM-001 | §11.6.4；UARCH §4 | `EE_bits` 非 0 直接失败（首轮无 TEE） | 查询口打非 0 `EE_bits` | 失败原因=配置类失败；`model/` 参考模型（待 Xia） | cp_mem_ee | M1 | RTL未就绪 |
+| TP-UNIT-MEM-002 | §9.4；UARCH §6.1 | UBA 超出上下文有效位数 | 构造越界 UBA | 失败原因=UBA 越界；`model/` 参考模型（待 Xia） | cp_mem_uba_oob | M1 | RTL未就绪 |
+| TP-UNIT-MEM-003 | UARCH §6.1 | 下标计算：TECT / TCT 缓存 / TLB 组按 UARCH 下标混合算法 | 扫 ENT_IDX、TokenID、页号组合 | 三处下标与模型一致；同拍发读 | cp_mem_idx | M1 | RTL未就绪 |
+| TP-UNIT-MEM-004 | §9.4.2.1；UARCH §5.1 | `cfg_v`=0 | 驱动 `cfg_v=0` | 回失败；`model/` 参考模型（待 Xia） | cp_mem_cfg_v | M1 | RTL未就绪 |
+| TP-UNIT-MEM-005 | §9.4.2.1；UARCH §5.1、§8 | `cfg_abort`：回失败、不记事件 | 驱动 `cfg_abort=1` | 失败；事件口无新记录 | cp_mem_cfg_abort | M1 | RTL未就绪 |
+| TP-UNIT-MEM-006 | §9.4.2.1；UARCH §5.1、§8 | `cfg_illegal`：回错误并记事件（含合法但不支持的编码） | 驱动 `cfg_illegal` / `cfg_ill_cause` | 失败+事件；`model/` 参考模型（待 Xia） | cp_mem_cfg_ill | M1 | RTL未就绪 |
+| TP-UNIT-MEM-007 | §9.4.2.1；UARCH §5.1 | 安全 / 特权 / 指令 / 内存属性覆盖 | 分别打 `cfg_*_ovr_*`、`cfg_mem_attr*` | 输出属性跟覆盖信号；`model/` 参考模型（待 Xia） | cx_mem_cfg_ovr | M1 | RTL未就绪 |
+| TP-UNIT-MEM-008 | UARCH §4、§10 | CSR 读回与查找共用读口，查找优先 | 同拍 CSR 读与查询 | 查询得数据；CSR 读推迟或后一拍 | cp_mem_cfg_pri | M1 | RTL未就绪 |
+| TP-UNIT-MEM-009 | §9.4.2.2；UARCH §6.1 | TCT 缓存命中 | 预装后查同一 {ENT_IDX, TokenID} | 命中；上下文束=`model/` 参考模型（待 Xia） | cp_mem_tct_hit | M1 | RTL未就绪 |
+| TP-UNIT-MEM-010 | §9.4.2.2；UARCH §6.2 | TCT 缓存缺失 | 冷缓存查询 | 经 `ub_mem_tbl_rd` 填充后重放命中 | cp_mem_tct_miss | M1 | RTL未就绪 |
+| TP-UNIT-MEM-011 | §9.4.2.2；UARCH §9 | 线性 TCT | `cfg_tct_2lvl=0`，缺失读 64 B | 填充项与模型一致 | cp_mem_tct_lin | M1 | RTL未就绪 |
+| TP-UNIT-MEM-012 | §9.4.2.2；UARCH §9 | 两级 TCT | `cfg_tct_2lvl=1`，多一次 8 B | L1 描述符 + L2 项与模型一致 | cp_mem_tct_2lvl | M1 | RTL未就绪 |
+| TP-UNIT-MEM-013 | §9.4.2.2.2；UARCH §5.2 | `ctx_illegal` | 驱动 `ctx_illegal` / `ctx_ill_cause` | 回错误并记事件；`model/` 参考模型（待 Xia） | cp_mem_ctx_ill | M1 | RTL未就绪 |
+| TP-UNIT-MEM-014 | §9.4.2.2；UARCH §8 | TokenID 越界 | TokenID 超出 `cfg_tct_num` 范围 | 失败原因=TokenID 越界 | cp_mem_tid_oob | M1 | RTL未就绪 |
+| TP-UNIT-MEM-015 | §9.4.4；UARCH §5.2、§6.1 | 上下文排他位 | 驱动 `ctx_e_bit` 与请求 `E_bit` 组合 | 拒绝/通过与模型一致 | cp_mem_ctx_excl | M1 | RTL未就绪 |
+| TP-UNIT-MEM-016 | §9.4；UARCH §5.2、§6.2 | `ctx_matt_wd`：TLB 缺失不遍历，直接记事件 | `ctx_matt_wd=1` 且 TLB 缺失 | 无页表读；记事件；`model/` 参考模型（待 Xia） | cp_mem_matt_wd | M1 | RTL未就绪 |
+| TP-UNIT-MEM-017 | §9.4.3；UARCH §4 | TLB 路 0 命中（one-hot 定向，锁定方向） | 只预装路 0 | 命中路 one-hot=路 0；翻译束=`model/` 参考模型（待 Xia） | cp_mem_tlb_w0 | M1 | RTL未就绪 |
+| TP-UNIT-MEM-018 | §9.4.3；UARCH §4 | TLB 路 1 命中（one-hot 定向，锁定方向） | 只预装路 1 | 命中路=路 1；同上 | cp_mem_tlb_w1 | M1 | RTL未就绪 |
+| TP-UNIT-MEM-019 | §9.4.3；UARCH §4 | TLB 路 2 命中（one-hot 定向，锁定方向） | 只预装路 2 | 命中路=路 2；同上 | cp_mem_tlb_w2 | M1 | RTL未就绪 |
+| TP-UNIT-MEM-020 | §9.4.3；UARCH §4 | TLB 路 3 命中（one-hot 定向，锁定方向） | 只预装路 3 | 命中路=路 3；同上 | cp_mem_tlb_w3 | M1 | RTL未就绪 |
+| TP-UNIT-MEM-021 | UARCH §6.1 | TLB 组冲突 | 同组不同标签连续填充 | 各标签独立命中/替换；`model/` 参考模型（待 Xia） | cp_mem_tlb_conf | M1 | RTL未就绪 |
+| TP-UNIT-MEM-022 | UARCH §4、§6.1 | 伪 LRU 替换（白盒，按 UARCH 下标混合算法） | 同组填满后再填新项 | 替换路=模型给出的伪 LRU | cp_mem_tlb_plru | M1 | RTL未就绪 |
+| TP-UNIT-MEM-023 | §9.4.3；UARCH §4、§6.2 | 块描述符拆成 4 KB 项填充 | 遍历遇到块描述符 | TLB 填 4 KB 项；`model/` 参考模型（待 Xia） | cp_mem_blk_split | M1 | RTL未就绪 |
+| TP-UNIT-MEM-024 | UARCH §6.1 | 查表侧与参考模型逐位比对（自环只当补充） | 命中查询 | 查表输出逐位=`model/` 参考模型（待 Xia）。`docs/rules/verif_gate.md` 若落地则从其口径 | cp_mem_lkup_bits | M1 | RTL未就绪 |
+| TP-UNIT-MEM-025 | UARCH §6.2 | 回填侧与参考模型逐位比对（自环只当补充） | 缺失后填充 | 填充写入逐位=`model/` 参考模型（待 Xia）。与 MEM-024 分开计 | cp_mem_fill_bits | M1 | RTL未就绪 |
+| TP-UNIT-MEM-026 | §9.4.3；UARCH §4 | 页表遍历起始级由输入宽度推出 | 扫合法输入宽度 | 起始级=`model/` 参考模型（待 Xia） | cp_mem_ptw_slvl | M1 | RTL未就绪 |
+| TP-UNIT-MEM-027 | §9.4.3；UARCH §4 | 页表遍历最多 4 级 | 需满 4 级才出页的表 | 恰好 4 次表读；不再多读 | cp_mem_ptw_4 | M1 | RTL未就绪 |
+| TP-UNIT-MEM-028 | §9.4.3；UARCH §8 | 各类翻译故障 | 无效 / 保留 / 错误描述符 | 失败原因=翻译遍历故障；`model/` 参考模型（待 Xia） | cp_mem_ptw_flt | M1 | RTL未就绪 |
+| TP-UNIT-MEM-029 | §9.4.3；UARCH §8 | AF 故障 | 描述符 `desc_af` 未置且须报 | 失败原因=AF 故障 | cp_mem_af | M1 | RTL未就绪 |
+| TP-UNIT-MEM-030 | §9.4；UARCH §5.2、§8 | 记录位控制翻译故障 / AF 是否记事件 | 扫 `ctx_fbr` / `ctx_affd` | 记或不记与模型一致；其余须记情形始终记 | cx_mem_rec | M1 | RTL未就绪 |
+| TP-UNIT-MEM-031 | §9.4.4.2；UARCH §5.4 | PLB/MAPT 闭区间范围边界：`mapte_base`、`mapte_limit`、base-1、limit+1 | 四点定向 UBA | 闭区间内命中、外失败；`model/` 参考模型（待 Xia） | cx_mem_rng | M1 | RTL未就绪 |
+| TP-UNIT-MEM-032 | §9.4.4.2；UARCH §9 | 单项 MAPT | `ctx_mapt_multi=0`，1 次 32 B | 权限束=`model/` 参考模型（待 Xia） | cp_mem_mapt_s | M1 | RTL未就绪 |
+| TP-UNIT-MEM-033 | §9.4.4.2；UARCH §9 | 多级 MAPT（4 KB、只用基块） | `ctx_mapt_multi=1`，最多 4 次 32 B | 逐级比范围、看终止位；与模型一致 | cp_mem_mapt_m | M1 | RTL未就绪 |
+| TP-UNIT-MEM-034 | §9.4.4.2；UARCH §5.4 | `mapte_last` | 驱动最后一级 / 非最后一级 | 终止或继续与模型一致 | cp_mem_mapte_last | M1 | RTL未就绪 |
+| TP-UNIT-MEM-035 | §9.4.4.2；UARCH §5.4 | `mapte_next_other_blk`：首轮视为非法 | 驱动该信号=1 | 回非法 / 失败；不跟到其他块 | cp_mem_mapte_oblk | M1 | RTL未就绪 |
+| TP-UNIT-MEM-036 | §9.4.4.3.2；UARCH §5.4 | TokenValue 两值匹配 | 请求值等于 `mapte_tv0` 或 `mapte_tv1` | 比较通过 | cp_mem_tv_hit | M1 | RTL未就绪 |
+| TP-UNIT-MEM-037 | §9.4.4.3.2；UARCH §5.4 | TokenValue 两值都不匹配 | 请求值不等于两值 | 失败原因=TokenValue 失败 | cp_mem_tv_miss | M1 | RTL未就绪 |
+| TP-UNIT-MEM-038 | §9.4.4.3.2；UARCH §7 | TokenValue 变化后作废 PLB 项并重走 MAPT | PLB 命中但 TokenValue 不符 | 作废该项、重走再比；`model/` 参考模型（待 Xia） | cp_mem_tv_rewalk | M1 | RTL未就绪 |
+| TP-UNIT-MEM-039 | §9.4.4.3；UARCH §5.4 | MAPT 排他位 | 驱动 `mapte_e_bit` 与请求 `E_bit` | 拒绝/通过与模型一致 | cp_mem_mapt_excl | M1 | RTL未就绪 |
+| TP-UNIT-MEM-040 | §9.4.4.3；UARCH §5.4 | 访问类型读 | 读请求 vs `mapte_perm_r` | 无读许可则访问类型拒绝 | cp_mem_acc_r | M1 | RTL未就绪 |
+| TP-UNIT-MEM-041 | §9.4.4.3；UARCH §5.4 | 访问类型写 | 写请求 vs `mapte_perm_w` | 无写许可则访问类型拒绝 | cp_mem_acc_w | M1 | RTL未就绪 |
+| TP-UNIT-MEM-042 | §9.4.4.3；UARCH §5.4 | 访问类型原子（须写权限） | 原子请求 vs `mapte_perm_w` / `mapte_perm_a` | 无写许可则拒绝；`model/` 参考模型（待 Xia） | cp_mem_acc_a | M1 | RTL未就绪 |
+| TP-UNIT-MEM-043 | §9.4.4.3.5；UARCH §6.1 | `ub_mem_perm_cmp` 按 §9.4.4.3.5 失败类别优先级 | 同拍构造多种权限失败 | 报出类别=`model/` 参考模型（待 Xia） | cx_mem_perm_pri | M1 | RTL未就绪 |
+| TP-UNIT-MEM-044 | UARCH §4 | 表读口 `ub_mem_tbl_rd` 固定优先级 TCT > 页表 > MAPT | 三源同时请求 | 只放行 TCT，其余等待 | cp_mem_rd_pri | M1 | RTL未就绪 |
+| TP-UNIT-MEM-045 | UARCH §4、§6.2 | 表读口只有一个未决 | 连续打缺失 | 至多一个 `mem2host_rd` 未决 | cp_mem_rd_one | M1 | RTL未就绪 |
+| TP-UNIT-MEM-046 | UARCH §4、§8 | 表读错误映射成「表读错误」 | 响应带错误 | 失败原因=表读错误 | cp_mem_rd_err | M1 | RTL未就绪 |
+| TP-UNIT-MEM-047 | UARCH §6.1 | 命中路径 3 拍（P0–P2） | 全缓存命中查询 | 握手到结果=3 拍 | cp_mem_hit3 | M1 | RTL未就绪 |
+| TP-UNIT-MEM-048 | UARCH §4 | 每拍接收 1 个查询 | 连续 valid | 每拍收 1；无丢拍 | cp_mem_1qpc | M1 | RTL未就绪 |
+| TP-UNIT-MEM-049 | UARCH §4 | 按序返回（`tag` 对齐） | 连续命中、不同 tag | 返回序=接收序 | cp_mem_ord | M1 | RTL未就绪 |
+| TP-UNIT-MEM-050 | UARCH §6.2 | 缺失阻塞：后续请求 P0 的 ready=0 | 制造一个缺失后再打查询 | 缺失期间 ready=0 | cp_mem_blk | M1 | RTL未就绪 |
+| TP-UNIT-MEM-051 | UARCH §6.2 | 填充后从 P0 重放；结果只经命中路径产生 | 缺失→填充 | 重放走 P0–P2；无第二条结果通路 | cp_mem_replay | M1 | RTL未就绪 |
+| TP-UNIT-MEM-052 | UARCH §6.3 | 写后读旁路：填充与另一请求查找同拍、同址 | 定向：同拍 `we && re && waddr==raddr` | P1 用旁路数据，不得读到旧值；`model/` 参考模型（待 Xia） | cp_mem_bypass | M1 | RTL未就绪 |
+| TP-UNIT-MEM-053 | §11.4.4；UARCH §7 | 全部失效：一拍清各缓存 valid | 发全部失效 | 下一拍查找全缺失 | cp_mem_inv_all | M1 | RTL未就绪 |
+| TP-UNIT-MEM-054 | §11.4.4；UARCH §7 | 按 ENT_IDX / TokenID 扫描失效：TLB 64 拍 | 发按条件失效 | TLB 扫描 64 拍后目标项无效 | cp_mem_inv_tlb | M1 | RTL未就绪 |
+| TP-UNIT-MEM-055 | §11.4.4；UARCH §7 | 按 ENT_IDX / TokenID 扫描失效：TCT 缓存 64 拍 | 同上 | TCT 缓存 64 拍后目标项无效 | cp_mem_inv_tct | M1 | RTL未就绪 |
+| TP-UNIT-MEM-056 | §11.4.4；UARCH §7 | 按 ENT_IDX / TokenID 扫描失效：PLB 1 拍 | 同上 | PLB 1 拍清目标项 | cp_mem_inv_plb | M1 | RTL未就绪 |
+| TP-UNIT-MEM-057 | UARCH §7 | 扫描失效期间查找口 ready=0 | 扫描中打查询 | ready=0，不接受新查 | cp_mem_inv_nrdy | M1 | RTL未就绪 |
+| TP-UNIT-MEM-058 | UARCH §7 | 扫描后结果正确 | 扫描完成再查 | 已失效项缺失；未命中条件的项仍命中 | cp_mem_inv_post | M1 | RTL未就绪 |
+| TP-UNIT-MEM-059 | UARCH §7 | SYNC：此前命令生效、无未决缺失，写完成事件 | 失效后发 SYNC | 完成事件；之后查找见新状态 | cp_mem_sync | M1 | RTL未就绪 |
+| TP-UNIT-MEM-060 | UARCH §7 | CSR 改 TECT 不自动失效下游缓存 | 只写 TECT、不发失效 | TCT/TLB/PLB 仍命中旧项 | cp_mem_tect_noinv | M1 | RTL未就绪 |
+| TP-UNIT-MEM-061 | UARCH §8 | 4 bit 失败原因枚举每一类至少一次 | 定向构造各类失败 | 覆盖：配置无效、配置终止、配置非法、TokenID 越界、上下文无效、上下文排他拒绝、UBA 越界、翻译遍历故障、AF 故障、页权限拒绝、MAPT 表项无效、MAPT 范围失败、TokenValue 失败、MAPT 排他拒绝、访问类型拒绝、表读错误 | cx_mem_cause | M1 | RTL未就绪 |
+| TP-UNIT-MEM-062 | UARCH §8 | 除「配置终止」外都记事件 | 各类失败各一次 | 仅 `cfg_abort` 无事件；其余有 | cx_mem_evt | M1 | RTL未就绪 |
+| TP-UNIT-MEM-063 | UARCH §8、§11 D-04 | 一次查询多种失败时报错优先级（流水级，非 §9.4.4.3.5） | 同拍打配置+上下文+越界等 | 报哪一类 **待定** | cp_mem_pri_d04 | M1 | **待定** |
+| TP-UNIT-MEM-064 | UARCH §8、§11 D-12 | 事件队列溢出（满则置溢出、丢后续） | 灌满事件 FIFO 后再失败 | 溢出标志；格式等 Q-E09 | cp_mem_evt_ovf | M1 | **待定** |
+| TP-UNIT-MEM-065 | UARCH §10；CODING_STYLE §10 | 每个 `ub_cmn_mem_1r1w` 实例（含译码器表）：有效位在原语外的复位触发器 | 复位；读各表 | valid 随 `rst_pyc` 清；阵列本体无复位 | cp_mem_vld_ff | M1 | RTL未就绪 |
+| TP-UNIT-MEM-066 | UARCH §10 | TB 断言：有效位为 0 的表项读出数据不流到下游 | 预装无效项后查找 | 断言永不触发；不得当命中用 | cp_mem_vld_gate | M1 | RTL未就绪 |
+| TP-UNIT-MEM-067 | UARCH §10 | 回归用 `+verilator+rand+reset+2` 随机化阵列初值 | Verilator 该 plusarg | 仍只认 valid=1 的项；MEM-066 断言成立 | cp_mem_rand_rst | M1 | RTL未就绪 |
+| TP-UNIT-MEM-068 | UARCH §10 | 原语 `ASSERT_NO_UNINIT_READ=0`，由 MEM-066 断言接替 | 静态/仿真对照 | 原语侧该断言关闭；TB 断言在岗 | cp_mem_no_uninit | M1 | RTL未就绪 |
+| TP-UNIT-MEM-069 | SPEC §10；UARCH §10 | `tb_<inst>_bd_*` 预装/读出与 `tb_<inst>_bd_vld_*` 同拍写 valid | HOOKS 后门预装后再查 | 读出与预装一致；命中行为正确 | cp_mem_bd | M1 | RTL未就绪 |
+| TP-UNIT-MEM-070 | SPEC §10；UARCH §10 | 后门口由 `tb_test_mode` 门控 | mode=0 打后门；再 mode=1 | mode=0 不介入；mode=1 生效 | cp_mem_bd_mode | M1 | RTL未就绪 |
+| TP-UNIT-MEM-071 | SPEC §10、§11；UARCH §10 | 后门只在 HOOKS 网表；PRODUCT 无这些端口 | 枚举两套网表端口 | PRODUCT 无 `tb_*_bd_*`；HOOKS 有 | cp_mem_bd_prod | M1 | RTL未就绪 |
+| TP-UNIT-MEM-072 | §9.4.2.1；UARCH §5.1 | `ub_mem_tecte_dec`：解码输出与参考模型一致 | 喂原始 TECT 镜像 | §5.1 信号束=`model/` 参考模型（待 Xia）。字段布局能否进公开仓库待船长（S-01） | cp_mem_tecte_dec | M1 | **待定** |
+| TP-UNIT-MEM-073 | §9.4.2.1；UARCH §5.1 | `ub_mem_tecte_dec`：非法编码折成 `cfg_illegal` / `cfg_ill_cause` | 保留 / 不支持编码 | 只看这两根信号。原因：S-01 | cp_mem_tecte_ill | M1 | **待定** |
+| TP-UNIT-MEM-074 | §9.4.2.2.2；UARCH §5.2 | `ub_mem_tcte_dec`：解码输出与参考模型一致 | 喂原始 TCTE | §5.2 信号束=`model/` 参考模型（待 Xia）。原因：S-01 | cp_mem_tcte_dec | M1 | **待定** |
+| TP-UNIT-MEM-075 | §9.4.2.2.2；UARCH §5.2 | `ub_mem_tcte_dec`：非法编码折成 `ctx_illegal` / `ctx_ill_cause` | 首轮不支持编码 | 只看这两根信号。原因：S-01 | cp_mem_tcte_ill | M1 | **待定** |
+| TP-UNIT-MEM-076 | §9.4.2.2.3；UARCH §5.3 | `ub_mem_l1tct_dec`：解码输出与参考模型一致；非法折成 `l1tct_illegal` | 喂 L1 TCT 描述符 | §5.3 信号=`model/` 参考模型（待 Xia）。原因：S-01 | cp_mem_l1tct_dec | M1 | **待定** |
+| TP-UNIT-MEM-077 | §9.4.4.2；UARCH §5.4 | `ub_mem_mapte_dec`：解码输出与参考模型一致 | 喂单项/多级 MAPTE | §5.4 信号束=`model/` 参考模型（待 Xia）。原因：S-01 | cp_mem_mapte_dec | M1 | **待定** |
+| TP-UNIT-MEM-078 | §9.4.4.2；UARCH §5.4 | `ub_mem_mapte_dec`：非法编码折成对应 `*_illegal` | 非法 / 越界指针 | 结构叶子只看非法信号。原因：S-01 | cp_mem_mapte_ill | M1 | **待定** |
+| TP-UNIT-MEM-079 | §9.4.3；UARCH §5.6 | `ub_mem_ptw_desc_dec`：解码输出与参考模型一致 | 喂页表描述符 | §5.6 信号束=`model/` 参考模型（待 Xia）。原因：S-01 | cp_mem_desc_dec | M1 | **待定** |
+| TP-UNIT-MEM-080 | §9.4；UARCH §9 | 事件合并：接受 `cfg_em_en`，首轮不合并 | 连续同类失败、`cfg_em_en=1` | 仍逐条记；不合并 | cp_mem_em_nomrg | M1 | RTL未就绪 |
+| TP-UNIT-MEM-081 | UARCH §9 | 流量监测标识只透传 | 预装 `cfg_mtm_*` / `ctx_mtm_*` | 边带原样出；不计数 | cp_mem_mtm | M1 | RTL未就绪 |
+| TP-UNIT-MEM-082 | §9.4.4.2；UARCH §9 | 多级 MAPT 2 MB | — | 延后，需船长明确接受（Q-A17） | — | 后续 | RTL未就绪 |
+| TP-UNIT-MEM-083 | §9.4.3；UARCH §9 | 硬件更新访问 / 脏标志 | — | 延后，需船长明确接受（Q-A18） | — | 后续 | RTL未就绪 |
+| TP-UNIT-MEM-084 | §9.4.4.2；UARCH §9 | 多块 MAPT | — | 延后（Q-A16） | — | 后续 | RTL未就绪 |
+| TP-UNIT-MEM-085 | §9.4.3；UARCH §9 | Stage 2 / 安全态 Stage 2 | — | 延后（Q-A03） | — | 后续 | RTL未就绪 |
+| TP-UNIT-MEM-086 | UARCH §9 | Stall | — | 延后（Q-A19） | — | 后续 | RTL未就绪 |
+| TP-UNIT-MEM-087 | UARCH §9 | 事件真正合并 | — | 首轮只接受配置；真正合并后续（Q-A20） | — | 后续 | RTL未就绪 |
+| TP-UNIT-MEM-088 | §11.6.4；UARCH §9 | TEE（`EE_bits` 选表） | — | 延后；非 0 已由 MEM-001 回错（Q-E03） | — | 后续 | RTL未就绪 |
+| TP-UNIT-MEM-089 | UARCH §9 | Positive PLB 免失效优化 | — | 首轮只做小 PLB，不做该优化（Q-C04） | — | 后续 | RTL未就绪 |
+| TP-UNIT-MEM-090 | §9.4.4.1；UARCH §9 | 委托非特权软件管 MAPT | — | 延后（Q-E12） | — | 后续 | RTL未就绪 |
+
+#### 8.8.2 单元级 — 内存管理译码器
+
+| ID | 规范 | 描述 | 激励 | 检查 | 覆盖 | 里程碑 | 状态 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TP-UNIT-DEC-001 | App. D.4.1.5；UARCH §6.4 | D0：主机 PA 减 MMIO 基址；与窗口比越界 | 窗内 / 窗外 PA | 窗外失败；窗内进入后续拍；`model/` 参考模型（待 Xia） | cp_dec_win | M1 | RTL未就绪 |
+| TP-UNIT-DEC-002 | §9.5；UARCH §6.4 | 译码翻译缓存命中（1 MB 粒度，标签 `PA[43:20]`） | 预装后查同 1 MB 块 | 命中取结果束；`model/` 参考模型（待 Xia） | cp_dec_tlb_hit | M1 | RTL未就绪 |
+| TP-UNIT-DEC-003 | §9.5.1；UARCH §5.5、§6.4 | L0 PTE 由 `PA[34:32]` 选 | 同一 64 B 大项、扫该切片 | 选中项=`dent_pte_v` 路径；`model/` 参考模型（待 Xia） | cp_dec_l0_sel | M1 | RTL未就绪 |
+| TP-UNIT-DEC-004 | §9.5.1；UARCH §5.5、§6.4 | PTRE 范围与 `PA[34:20]` 比较的边界 | 打 range 边界 PA | 闭区间内命中、外转 L1 或失败 | cx_dec_ptr_rng | M1 | RTL未就绪 |
+| TP-UNIT-DEC-005 | §9.5.1；UARCH §5.5 | PTRE 最后一级 → 得结果束 | 驱动 `dent_rng_last=1` 且范围命中 | 出结果、不走 L1。格式 / 该位待船长（D-05） | cp_dec_ptr_last | M1 | **待定** |
+| TP-UNIT-DEC-006 | §9.5.1；UARCH §5.5 | PTRE 非最后一级 → 转 L1（完整方案）或回错误（最小表） | 驱动 `dent_rng_last=0` | 转 L1 或失败。待船长（D-05） | cp_dec_ptr_nlast | M1 | **待定** |
+| TP-UNIT-DEC-007 | §9.5；UARCH §6.4 | L1 查找下标 `PA[31:20]`（页表项情形） | L0 为页表项、需 L1 | 下标与模型一致；读回经解码叶子 | cp_dec_l1_p31 | M1 | RTL未就绪 |
+| TP-UNIT-DEC-008 | §9.5；UARCH §6.4 | L1 查找下标 `PA[34:20]`（范围未命中或非最后一级） | L0 为范围项且需 L1 | 下标与模型一致 | cp_dec_l1_p34 | M1 | RTL未就绪 |
+| TP-UNIT-DEC-009 | §9.5.2；UARCH §4 | UBA 64 bit 加法，进位丢弃 | 扫基值与 PA 低位、含进位 | UBA=`model/` 参考模型（待 Xia）；进位不出现在结果 | cp_dec_uba_add | M1 | RTL未就绪 |
+| TP-UNIT-DEC-010 | UARCH §6.4 | 命中路径 4 拍（D0–D3） | 翻译缓存或 L0 直接得结果 | 握手到结果=4 拍 | cp_dec_hit4 | M1 | RTL未就绪 |
+| TP-UNIT-DEC-011 | App. D.4.1.7；UARCH §7 | 译码器全部失效 | 发全部失效 | 翻译缓存 valid 一拍清。Xia 提案，待船长（Q-B08） | cp_dec_inv_all | M1 | **待定** |
+| TP-UNIT-DEC-012 | App. D.4.1.7；UARCH §7 | 按 PA 范围失效，扫描翻译缓存 32 拍 | 发范围失效 | 32 拍后范围内无效、范围外仍在。待船长（Q-B08） | cp_dec_inv_rng | M1 | **待定** |
+| TP-UNIT-DEC-013 | App. D.4.1.7；UARCH §7 | 译码器 SYNC | 失效后发 SYNC | 完成事件；之后查找见新状态。待船长（Q-B08） | cp_dec_sync | M1 | **待定** |
+| TP-UNIT-DEC-014 | UARCH §10 | L0 若选合成一块分段写：有效位按段（每行 8 位），与模型按段 `rdata_valid` 对应 | 分段写后读 | 各段 valid 与 `rdata_valid` 一一对应。依赖 D-14 | cp_dec_l0_seg | M1 | **待定** |
+| TP-UNIT-DEC-015 | §9.5；UARCH §6.4、§11 D-14 | L0 表放片上：下标 `PA[43:35]`，8 块并读或整行读 | 片上方案编译 / 参数 | D1 同时读翻译缓存与 L0。L0 放置待船长（D-14 / C-D1） | cp_dec_l0_onchip | M1 | **待定** |
+| TP-UNIT-DEC-016 | §9.5；UARCH §6.4、§11 D-14 | L0 表放内存：命中只读翻译缓存，缺失走 `ub_mem_dec_walk` | 内存方案 | 命中路径仍 4 拍；缺失先读 L0 再读 L1。待船长（D-14 / C-D1） | cp_dec_l0_mem | M1 | **待定** |
+| TP-UNIT-DEC-017 | §9.5.1；UARCH §5.5 | `ub_mem_dec_ent_dec`：解码输出与参考模型一致 | 喂 L0/L1 原始数据 | §5.5 信号束=`model/` 参考模型（待 Xia）。原因：S-01 | cp_dec_ent_dec | M1 | **待定** |
+| TP-UNIT-DEC-018 | §9.5.1；UARCH §5.5 | `ub_mem_dec_ent_dec`：非法编码折成对应 `*_illegal` / `*_ill_cause` | 非法大项 | 结构逻辑只看非法信号。原因：S-01 | cp_dec_ent_ill | M1 | **待定** |
+| TP-UNIT-DEC-019 | §9.5.1；UARCH §5.5 | L0 PTE / L0 PTRE / L1 PTE 格式 | — | 格式待船长（D-05）。本 TP 占位，格式冻结后补激励 | — | M1 | **待定** |
+
+#### 8.8.3 子系统级 — 内存管理
+
+| ID | 规范 | 描述 | 激励 | 检查 | 覆盖 | 里程碑 | 状态 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TP-SUB-MEM-001 | §9.4；UARCH §6.1 | UMMU 命中路径端到端：请求检查→配置→上下文→TLB→权限，3 拍出结果 | 全缓存预装后查询 | PA / 属性 / 成功=`model/` 参考模型（待 Xia） | cp_sub_mem_hit | M1 | RTL未就绪 |
+| TP-SUB-MEM-002 | §9.4.2.2；UARCH §6.2 | TCT 缺失→填充→从 P0 重放→命中路径出结果 | 冷 TCT | 只经命中路径出结果；表读优先级见 MEM-044 | cp_sub_mem_tct | M1 | RTL未就绪 |
+| TP-SUB-MEM-003 | §9.4.3；UARCH §6.2 | TLB 缺失→页表遍历→填充→重放 | 冷 TLB、允许遍历 | 填充后命中；查表侧 / 回填侧分别对模型（MEM-024/025） | cp_sub_mem_ptw | M1 | RTL未就绪 |
+| TP-SUB-MEM-004 | §9.4.4；UARCH §6.2 | PLB 缺失→MAPT 遍历→填 PLB→重放 | 冷 PLB、须权限检查 | 权限结果=`model/` 参考模型（待 Xia） | cp_sub_mem_mapt | M1 | RTL未就绪 |
+| TP-SUB-MEM-005 | UARCH §4 | 表读口争用：TCT / 页表 / MAPT，固定优先级且单未决 | 交错制造三类缺失 | 服务序 TCT > 页表 > MAPT；同时最多一个未决 | cp_sub_mem_arb | M1 | RTL未就绪 |
+| TP-SUB-MEM-006 | UARCH §7 | 全部失效后再查：应缺失并正确重填 | 命中后全部失效再查 | 先缺失，重填后与模型一致 | cp_sub_mem_inva | M1 | RTL未就绪 |
+| TP-SUB-MEM-007 | UARCH §7 | 扫描失效期间 ready=0，扫描后结果正确 | 按 ENT_IDX / TokenID 扫描中打查询 | 扫描中不收新查；完成后目标无效、其余仍对 | cp_sub_mem_invs | M1 | RTL未就绪 |
+| TP-SUB-MEM-008 | UARCH §6.3 | 写后读旁路定向：填充与另一请求查找同拍同址 | 子系统编排同拍冲突 | 查找见新值；`model/` 参考模型（待 Xia） | cp_sub_mem_byp | M1 | RTL未就绪 |
+| TP-SUB-MEM-009 | UARCH §8 | 失败回请求方；除配置终止外记事件 | 扫失败类别 | 4 bit 原因与事件与模型一致（溢出见 MEM-064） | cx_sub_mem_err | M1 | RTL未就绪 |
+| TP-SUB-MEM-010 | §9.5；UARCH §6.4 | 译码器命中 4 拍端到端 | 窗内 PA、翻译缓存或 L0 命中 | UBMD / TokenValue=`model/` 参考模型（待 Xia） | cp_sub_dec_hit | M1 | RTL未就绪 |
+| TP-SUB-MEM-011 | §9.5；UARCH §6.4 | 译码器缺失：L0 / L1 再填翻译缓存，随后命中 | 冷翻译缓存 | 回填后 1 MB 粒度命中；下标切片见 DEC-003/007/008 | cp_sub_dec_fill | M1 | RTL未就绪 |
+| TP-SUB-MEM-012 | SPEC §10、§11 | HOOKS 后门可预装；PRODUCT 无 `tb_*` 后门口 | 两套网表 | 与 MEM-069–071 同口径，覆盖 UMMU+译码器实例 | cp_sub_mem_net | M1 | RTL未就绪 |
+| TP-SUB-MEM-013 | UARCH §5；D17 | 结构叶子 TB 只驱动 UARCH §5 具名信号，不依赖字段布局 | 子系统 / 叶 TB 端口清单 | 无表项字段切片激励；解码叶子隔离在 MEM-072–079、DEC-017–019 | cp_sub_mem_named | M1 | RTL未就绪 |
+
+#### 8.8.4 本小节测试点统计
+
+口径与公共 §13 相同（一行一桶），但**只统计本小节**，不改公共合计。
+
+| 层 | 总行 | M1（本小节分母） | 后续 | 推迟 | 一期不做 |
+| --- | --- | --- | --- | --- | --- |
+| 单元 UMMU（§8.8.1） | 90 | 81 | 9 | 0 | 0 |
+| 单元译码器（§8.8.2） | 19 | 19 | 0 | 0 | 0 |
+| 子系统内存管理（§8.8.3） | 13 | 13 | 0 | 0 | 0 |
+| **本小节合计** | **122** | **113** | **9** | **0** | **0** |
+
+113 + 9 + 0 + 0 = 122。
+
+本小节 M1 分母拆分：RTL未就绪 92 + 待定 21 = 113。无「计划」「计划（waiver）」。未实现的 RTL未就绪 / 待定 记 SKIP，不算 PASS，也不算功能覆盖达成。
+
+#### 8.8.5 本小节待定清单
+
+| 待决 | 事项 | 受影响 TP | 状态原因 |
+| --- | --- | --- | --- |
+| D-04 | 一次查询多种失败时的流水级报错优先级 | TP-UNIT-MEM-063 | 规范未写；UARCH 草案暂按配置→上下文→越界→翻译→权限 |
+| Q-E09 / D-12 | UMMU 事件格式、寄存器切片、队列溢出行为 | TP-UNIT-MEM-064 | 事件 FIFO 溢出等 Q-E09 |
+| S-01（UARCH D-01） | 解码叶子字段布局能否进公开仓库 | TP-UNIT-MEM-072–079、TP-UNIT-DEC-017–018 | 字段布局待船长；结构叶子不依赖布局 |
+| D-05 | 译码器 L0 PTE / L0 PTRE / L1 PTE 格式；PTRE「最后一级」 | TP-UNIT-DEC-005、006、019 | 格式待船长 |
+| Q-B08 | 译码器全部失效 / 按 PA 范围失效 / SYNC（Xia 提案） | TP-UNIT-DEC-011–013 | 待船长确认 |
+| D-14 / C-D1 | 译码 L0 表放片上还是放内存；片上 8 块或单块分段写 | TP-UNIT-DEC-014–016 | 两种放置都列 TP，待船长选 |
+| Q-A17 | 多级 MAPT 2 MB | TP-UNIT-MEM-082 | 后续 |
+| Q-A18 | 硬件更新访问 / 脏标志 | TP-UNIT-MEM-083 | 后续 |
+| Q-A16 | 多块 MAPT | TP-UNIT-MEM-084 | 后续 |
+| Q-A03 | Stage 2 / 安全态 Stage 2 | TP-UNIT-MEM-085 | 后续 |
+| Q-A19 | Stall | TP-UNIT-MEM-086 | 后续 |
+| Q-A20 | 事件真正合并 | TP-UNIT-MEM-087 | 后续 |
+| Q-E03 | TEE 选表 | TP-UNIT-MEM-088 | 后续；非 0 已由 MEM-001 覆盖 |
+| Q-C04 | Positive PLB | TP-UNIT-MEM-089 | 后续 |
+| Q-E12 | 委托非特权软件管 MAPT | TP-UNIT-MEM-090 | 后续 |
+
+`model/` UMMU 查表 / 译码参考模型尚未提交（待 Xia）：所有「`model/` 参考模型（待 Xia）」检查在模型入库前记 SKIP，不记 PASS。
+
+#### 8.8.6 本小节 SPEC→TP 反向追溯
+
+第 9 章各节 → 本小节 TP。项目 SPEC 的钩子 / 双网表章节一并列出。非功能叙述不要求独立 TP。
+
+| 规范 | 功能需求（短述） | 主 TP |
+| --- | --- | --- |
+| §9.1–§9.3 | 总述、Home-User、UBMD | TP-SUB-MEM-001、TP-UNIT-MEM-001–003 |
+| §9.4.2.1 | TECT / 配置查找、非法与终止 | TP-UNIT-MEM-004–008、072–073 |
+| §9.4.2.2 / §9.4.2.2.2 / §9.4.2.2.3 | 线性/两级 TCT、上下文非法、TokenID | TP-UNIT-MEM-009–016、074–076 |
+| §9.4.3 | Stage 1 翻译、TLB、遍历、块拆 4 KB、AF | TP-UNIT-MEM-017–030、079；TP-SUB-MEM-003 |
+| §9.4.4.1–§9.4.4.2 | 单项/多级 MAPT、范围闭区间、`mapte_*` | TP-UNIT-MEM-031–035、077–078；TP-SUB-MEM-004 |
+| §9.4.4.3–§9.4.4.3.5 | TokenValue、排他、访问类型、失败类别优先级 | TP-UNIT-MEM-036–043 |
+| §9.5 / §9.5.1 | 译码器表项选择、范围、L1 | TP-UNIT-DEC-002–008、017–019；TP-SUB-MEM-010–011 |
+| §9.5.2 | UBA 加法、进位丢弃 | TP-UNIT-DEC-009 |
+| App. D.4.1.5 | MMIO 基址相减与窗口越界 | TP-UNIT-DEC-001 |
+| App. D.4.1.6 | 译码器中断向量 | 待 RSC 契约；本小节不单列 |
+| App. D.4.1.7–D.4.1.10 | 译码器全部失效、按 PA 范围失效、SYNC | TP-UNIT-DEC-011–013 |
+| §11.4.4 | 按组 / 按条件失效 | TP-UNIT-MEM-053–058；TP-SUB-MEM-006–007 |
+| §11.6.4 | TEE / `EE_bits` | TP-UNIT-MEM-001、088 |
+| SPEC §10、§11 | 后门、`tb_test_mode`、HOOKS vs PRODUCT | TP-UNIT-MEM-069–071；TP-SUB-MEM-012 |
+| UARCH §6 | 命中 3/4 拍、缺失阻塞与重放、写后读旁路 | TP-UNIT-MEM-047–052、TP-UNIT-DEC-010；TP-SUB-MEM-001–008 |
+| UARCH §7 | 全部失效、扫描失效、SYNC、CSR 改 TECT 不自动失效 | TP-UNIT-MEM-053–060 |
+| UARCH §8 | 4 bit 失败原因、记事件、溢出 | TP-UNIT-MEM-061–064；TP-SUB-MEM-009 |
+| UARCH §9 | 必选/可选边界 | TP-UNIT-MEM-080–090 |
+| UARCH §10 | 原语外 valid、随机初值、后门 | TP-UNIT-MEM-065–071；TP-UNIT-DEC-014–016 |
+
+本小节范围内：第 9 章已列功能需求均有 TP。App. D.4.1.6 中断接 RSC，等 ch10 契约，不记本小节漏项。
 
 ---
 
@@ -748,14 +956,17 @@ Xia 已写死：存在两份网表，不得混用验收口径。
 | 子系统 PCS | 20 | 15 | 0 | 0 | 5（皆 D4） |
 | 子系统 DLL | 21 | 20 | 1 | 0 | 0 |
 | 顶层 | 21 | 18 | 1 | 1 | 1（D11） |
+| 单元 UMMU（§8.8.1） | 90 | 81 | 9 | 0 | 0 |
+| 单元译码器（§8.8.2） | 19 | 19 | 0 | 0 | 0 |
+| 子系统内存管理（§8.8.3） | 13 | 13 | 0 | 0 | 0 |
 | 推迟占位 NW/TP/TA/钩子 | 7 | 0 | 0 | 7 | 0 |
-| **合计** | **189** | **161** | **5** | **13** | **10** |
+| **合计** | **311** | **274** | **14** | **13** | **10** |
 
-161 + 5 + 13 + 10 = 189。
+274 + 14 + 13 + 10 = 311。内存管理三行与 §8.8.4 一致（122 = 113 + 9）。
 
-M1 分母拆分：计划 116 + 计划（waiver）2 + RTL未就绪 28 + 待定 15 = 161。未实现的 RTL未就绪 / 待定 记 SKIP，不算 PASS，也不算功能覆盖达成。
+M1 分母拆分：计划 116 + 计划（waiver）2 + RTL未就绪 120 + 待定 36 = 274。其中内存管理 RTL未就绪 92 + 待定 21 = 113（§8.8.4）。未实现的 RTL未就绪 / 待定 记 SKIP，不算 PASS，也不算功能覆盖达成。
 
-待定 15 条：SPEC §13 映射 14 + unpack drain 1（PCS-026）。无等 SPEC 澄清项。矛盾清单空。
+待定 36 条：原 SPEC §13 映射 14 + unpack drain 1（PCS-026）+ 内存管理 21（§8.8.5）。无等 SPEC 澄清项。矛盾清单空。
 
 ---
 
@@ -813,6 +1024,19 @@ Q4 已关：TX Lane_ID 口（`lmsm2pcs_lane_id_mode` / `base` / `map`）、LMB �
 3. D10 `legacy/` 迁移未做；官方门不跑手写 `tb/*.v`。
 4. pyc4.0 生成物未齐 → 对应 TP = RTL未就绪。
 
+### 14.5 内存管理待决（轨道 C，详表见 §8.8.5）
+
+| 待决 | 事项 | 受影响 TP |
+| --- | --- | --- |
+| D-04 | 一次查询多种失败时的流水级报错优先级 | TP-UNIT-MEM-063 |
+| D-12 / Q-E09 | 事件格式、寄存器切片、队列溢出 | TP-UNIT-MEM-064 |
+| S-01 | 解码叶子字段布局能否进公开仓库 | TP-UNIT-MEM-072–079、TP-UNIT-DEC-017–018 |
+| D-05 | L0 PTE / L0 PTRE / L1 PTE 格式；PTRE「最后一级」 | TP-UNIT-DEC-005、006、019 |
+| Q-B08 | 译码器全部失效 / 按 PA 范围失效 / SYNC | TP-UNIT-DEC-011–013 |
+| D-14 / C-D1 | 译码 L0 表放片上还是放内存 | TP-UNIT-DEC-014–016 |
+
+`model/` UMMU 查表 / 译码参考模型尚未提交（待 Xia）。UARCH §9 可选/延后项（后续，非本表待定）见 §8.8.5。
+
 ---
 
 ## 15. SPEC → TP 反向追溯
@@ -857,6 +1081,11 @@ Xia 标准：每条 SPEC **功能需求**至少一条 TP。下表按 SPEC 章节
 | §11 (a)–(e) | 两套网表、双 mode、PRODUCT 冒烟（含 TEST 窗）、eqy、CRD_UF waiver | TOP-015–018/021、CSR-019、DLL-024 |
 | §12 | 与现网冲突（重写对齐） | 非功能需求；PCS-006、PMA-002、RST-001、CDC-004 覆盖偏差 |
 | §13 | 开放问题 | 见 §14.1，0 条无映射 |
+| UB 第 9 章 | UMMU + 译码器（Home / User 内存管理） | 见 §8.8.6；MEM-*、DEC-*、SUB-MEM-* |
+| UB §9.1–§9.3 | 总述、Home-User、UBMD | 见 §8.8.6 |
+| UB §9.4 | UMMU：配置 / 上下文 / 翻译 / 权限 | 见 §8.8.6 |
+| UB §9.5 | 译码器 | 见 §8.8.6 |
+| App. D.4.1.5–D.4.1.10 | 译码器窗口、失效、SYNC | 见 §8.8.6 |
 | REGMAP §2.1 | CTRL/STATUS/IRQ/`PORT_CNA`；`RETRY_*_ST` 合法码与保留断言 | CSR-008/012–014/020–022/026–027 |
 | REGMAP §2.2 | PARAM_*；`NUM_LANES_*` 合法值与保留断言 | CSR-015/028 |
 | REGMAP §2.3 | ERR 饱和 + `CNT_CLR` 0x0224 bit0–8 + COUNT 只读 | CSR-016/017/025 |

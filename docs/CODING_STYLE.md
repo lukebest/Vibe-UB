@@ -13,7 +13,7 @@
   - **PRODUCT**（`TEST_HOOKS=0`）：无 `tb_*` 端口；lint / CDC / 综合 / 实现 / FPGA **只认这一套**。
   - **HOOKS**（`TEST_HOOKS=1`）：须过 lint 与 CDC，**不得**实现。回归与行覆盖率在此网上跑（`tb_test_mode` 为 0 与 1）；覆盖率分母含钩子 mux，钩子代码不另开 waiver。
   - PRODUCT 另跑与钩子无关的 smoke。
-  - 形式等价（Yosys eqy 或同等开源工具）：PRODUCT vs HOOKS（`tb_test_mode=0`，全部 `tb_inj_*` 接复位值，§10 点名存储的 `tb_<inst>_bd_*` 含 `tb_<inst>_bd_vld_*` 输入接低）必须等价，否则阻断交付。
+  - 形式等价：规范工具是 Yosys **`equiv`**（版本见 `TOOLCHAIN.lock`）；eqy 可安装后可作为可选补充。PRODUCT vs HOOKS（`tb_test_mode=0`，全部 `tb_*` 钩子输入接低，含 `tb_inj_*` 复位值与 §10 点名存储的 `tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`）必须等价，否则阻断交付。见 SPEC §11 (d)。
 - 禁止在生成 Verilog 里再用 `` `ifdef TEST_HOOKS `` 做第二套分叉。
 
 ---
@@ -51,7 +51,7 @@
   1. 顶层功能端口；
   2. [SPEC.md](SPEC.md) §10 列出的 `tb_inj_*` / `tb_obs_*`（且 `TEST_HOOKS=1` 与 `tb_test_mode` 门控）；
   3. [REGMAP.md](REGMAP.md) 寄存器（测试窗仅 `tb_test_mode=1` 生效）；
-  4. **例外：** SPEC §10 **点名**的存储阵列，HOOKS 网表上的 backdoor 口 `tb_<inst>_bd_*`：阵列 `tb_<inst>_bd_we` / `tb_<inst>_bd_addr` / `tb_<inst>_bd_wdata` / `tb_<inst>_bd_re` / `tb_<inst>_bd_rdata`，以及原语外 valid flop 的伴随口 `tb_<inst>_bd_vld_*`（`tb_test_mode` 门控；与阵列口一样列入 SPEC §10）。PRODUCT 无这些口。eqy：`tb_test_mode=0` 且全部 `tb_<inst>_bd_*` 输入接低。
+  4. **例外：** SPEC §10 **点名**的存储阵列，HOOKS 网表上的 backdoor 口 `tb_<inst>_bd_*`：阵列 `tb_<inst>_bd_we` / `tb_<inst>_bd_addr` / `tb_<inst>_bd_wdata` / `tb_<inst>_bd_re` / `tb_<inst>_bd_rdata`，以及原语外 valid flop 的伴随口 `tb_<inst>_bd_vld_*`（`tb_test_mode` 门控；与阵列口一样列入 SPEC §10）。PRODUCT 无这些口。等价检查：`tb_test_mode=0` 且全部 `tb_<inst>_bd_*` 输入接低。
 - 禁止 force / deposit FSM 当前态或非法态。默认分支用 **具名 waiver** 覆盖（见 §7）。到达 `Link_Active` 必须走真实转移，用 `LMSM_TMR_SCALE` 缩短超时。
 - 叶子内部（CRC / FEC / deskew / 缓冲）走叶子端口或 wrapper 共仿真，不加产品钩子。**除此例外外，不得**再给叶子内部缓冲加钩子。
 - PCS RX unpack `n==0 && have`：**待定**（验证确认端口可达性，否则删分支或 waiver）。

@@ -19,6 +19,8 @@ class Mem1r1wCoverage:
         waddr: int,
         re: int | bool,
         raddr: int,
+        wmask: int | None = None,
+        nseg: int = 1,
     ) -> None:
         we_b = bool(we)
         re_b = bool(re)
@@ -51,6 +53,20 @@ class Mem1r1wCoverage:
             self.hits.add("oor_waddr")
         if re_b and not (0 <= int(raddr) < int(depth)):
             self.hits.add("oor_raddr")
+        if we_b and int(nseg) > 1 and wmask is not None:
+            mask = int(wmask) & ((1 << int(nseg)) - 1)
+            all_seg = (1 << int(nseg)) - 1
+            if mask == 0:
+                self.hits.add("wmask_zero")
+            elif mask == all_seg:
+                self.hits.add("wmask_all")
+            bits = mask.bit_count()
+            if bits == 1:
+                self.hits.add("wmask_single")
+                self.hits.add("wmask_onehot")
+                self.hits.add(f"wmask_onehot:{mask.bit_length() - 1}")
+            elif bits == 2 and (mask & (mask >> 1)):
+                self.hits.add("wmask_adjacent")
 
     def require(self, *names: str) -> None:
         missing = [n for n in names if n not in self.hits]

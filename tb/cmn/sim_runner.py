@@ -33,6 +33,7 @@ def _build_and_test(
     case: str,
     seed: int,
     tb_check: bool,
+    random_n: int = 80,
 ) -> None:
     from cocotb.runner import get_runner
 
@@ -52,6 +53,7 @@ def _build_and_test(
         dut_module=variant.module,
         depth=variant.depth,
         width=variant.width,
+        wmask_w=variant.wmask_w,
         assert_no_uninit_read=assert_no_uninit_read,
         tb_check=tb_check,
     )
@@ -65,7 +67,9 @@ def _build_and_test(
         "CMN_SEED": str(int(seed)),
         "CMN_DEPTH": str(int(variant.depth)),
         "CMN_WIDTH": str(int(variant.width)),
+        "CMN_WMASK_W": str(int(variant.wmask_w)),
         "CMN_ASSERT_NO_UNINIT_READ": str(int(bool(assert_no_uninit_read))),
+        "CMN_RANDOM_N": str(int(random_n)),
         "CMN_VARIANT": variant.module,
         "CMN_NETLIST": variant.netlist,
         "COCOTB_RESULTS_FILE": str(build_dir / "results.xml"),
@@ -118,13 +122,18 @@ def _build_and_test(
 
 
 def _require_formal_bind_ports() -> None:
-    """TB wrapper binds if_props with core_clk and no reset."""
+    """TB wrapper binds if_props with core_clk, no reset, and a wmask pin."""
     if not FORMAL_PROPS.is_file():
         raise LeafPortError(
             f"formal bind requested but {FORMAL_PROPS} is missing"
         )
     ports = parse_module_ports_file(FORMAL_PROPS, "ub_cmn_mem_1r1w_if_props")
     check_leaf_ports(ports, module="ub_cmn_mem_1r1w_if_props")
+    if "wmask" not in ports:
+        raise LeafPortError(
+            "ub_cmn_mem_1r1w_if_props missing wmask bind pin "
+            "(tied 1 when NSEG=1; connected when NSEG>1)"
+        )
 
 
 def _clear_stale_results(build_dir: Path) -> None:
@@ -171,6 +180,7 @@ def run_sim_variant(
     case: str,
     assert_no_uninit_read: bool,
     seed: int = 1,
+    random_n: int = 80,
 ) -> None:
     reason = rtl_sim_skip_reason(netlist=variant.netlist)
     if reason:
@@ -182,4 +192,5 @@ def run_sim_variant(
         case=case,
         seed=seed,
         tb_check=want is None,
+        random_n=random_n,
     )

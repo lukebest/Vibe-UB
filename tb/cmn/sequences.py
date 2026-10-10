@@ -5,7 +5,7 @@ from __future__ import annotations
 from random import Random
 
 from model.ub_cmn_mem_1r1w import clog2
-from tb.cmn.items import MemCycle
+from tb.cmn.items import MemCycle, all_seg_mask
 
 # DEPTH/WIDTH combos include a non-power-of-two DEPTH (5) as required.
 POSITIVE_COMBOS: tuple[tuple[int, int, bool], ...] = (
@@ -32,6 +32,27 @@ POSITIVE_CASES: tuple[str, ...] = (
     "data_eq_addr",
 )
 NEGATIVE_CASES: tuple[str, ...] = ("oor_waddr", "oor_raddr", "uninit", "uninit_conflict")
+
+# DEPTH, WIDTH, WMASK_W, ANUR — NSEG>1 Python self-check combos.
+WMASK_COMBOS: tuple[tuple[int, int, int, bool], ...] = (
+    (4, 16, 4, True),
+    (4, 16, 4, False),
+    (8, 16, 4, True),
+    (64, 64, 16, True),
+)
+WMASK_CASES: tuple[str, ...] = (
+    "wmask_single",
+    "wmask_adjacent",
+    "wmask_all",
+    "wmask_zero",
+    "wmask_conflict",
+    "wmask_onehot",
+)
+WMASK_NEG_CASES: tuple[str, ...] = ("wmask_partial_uninit",)
+SMOKE_CASES: tuple[str, ...] = ("random", "wmask_single", "conflict")
+SMOKE_RANDOM_N = 8
+FULL_WMASK_TAGS = frozenset({"d64w64m16"})
+SMOKE_WMASK_TAGS = frozenset({"d512w512m64"})
 
 
 def addr_bits(depth: int) -> int:
@@ -113,19 +134,141 @@ def seq_random_legal(
     n: int = 80,
     *,
     assert_no_uninit_read: bool = True,
+    wmask_w: int | None = None,
 ) -> list[MemCycle]:
     rng = Random(seed)
-    written = [False] * depth
+    if wmask_w is None:
+        wmask_w = width
+    nseg = width // int(wmask_w)
+    written = [0] * depth
     cycles: list[MemCycle] = []
     for _ in range(n):
         item = MemCycle()
         item.randomize_legal(
-            rng, depth, width, written, assert_no_uninit_read=assert_no_uninit_read
+            rng,
+            depth,
+            width,
+            written,
+            assert_no_uninit_read=assert_no_uninit_read,
+            wmask_w=wmask_w,
         )
         cycles.append(item)
         if item.we:
-            written[item.waddr] = True
+            written[item.waddr] |= item.resolved_wmask(nseg)
     return cycles
+
+
+def _seg_pattern(nseg: int, wmask_w: int, fill: int) -> int:
+    sm = (1 << wmask_w) - 1
+    word = 0
+    val = fill & sm
+    for seg in range(nseg):
+        word |= val << (seg * wmask_w)
+    return word
+
+
+def _seg_unique(seg: int, wmask_w: int) -> int:
+    sm = (1 << wmask_w) - 1
+    return ((0x5A + int(seg) * 0x11) & sm) << (int(seg) * wmask_w)
+
+
+def seq_wmask_single(depth: int, width: int, wmask_w: int) -> list[MemCycle]:
+    """Fill, then overwrite one segment; others must hold."""
+    nseg = width // wmask_w
+    addr = 0
+    old = _seg_pattern(nseg, wmask_w, 0x1)
+    new = _seg_unique(0, wmask_w) | (old & ~((1 << wmask_w) - 1))
+    return [
+        MemCycle(we=1, waddr=addr, wdata=old, wmask=all_seg_mask(nseg)),
+        MemCycle(re=1, raddr=addr),
+        MemCycle(we=1, waddr=addr, wdata=new, wmask=1 << 0),
+        MemCycle(re=1, raddr=addr),
+    ]
+
+
+def seq_wmask_adjacent(depth: int, width: int, wmask_w: int) -> list[MemCycle]:
+    nseg = width // wmask_w
+    addr = min(1, depth - 1)
+    old = _seg_pattern(nseg, wmask_w, 0x2)
+    new = _seg_unique(0, wmask_w) | _seg_unique(1, wmask_w)
+    return [
+        MemCycle(we=1, waddr=addr, wdata=old, wmask=all_seg_mask(nseg)),
+        MemCycle(re=1, raddr=addr),
+        MemCycle(we=1, waddr=addr, wdata=new, wmask=0b0011),
+        MemCycle(re=1, raddr=addr),
+    ]
+
+
+def seq_wmask_all(depth: int, width: int, wmask_w: int) -> list[MemCycle]:
+    nseg = width // wmask_w
+    addr = 0
+    data = 0
+    for seg in range(nseg):
+        data |= _seg_unique(seg, wmask_w)
+    return [
+        MemCycle(we=1, waddr=addr, wdata=data, wmask=all_seg_mask(nseg)),
+        MemCycle(re=1, raddr=addr),
+    ]
+
+
+def seq_wmask_zero(depth: int, width: int, wmask_w: int) -> list[MemCycle]:
+    """wmask=0 must not change a previously written word."""
+    nseg = width // wmask_w
+    addr = 0
+    old = _seg_pattern(nseg, wmask_w, 0x3)
+    junk = _seg_pattern(nseg, wmask_w, 0xC)
+    return [
+        MemCycle(we=1, waddr=addr, wdata=old, wmask=all_seg_mask(nseg)),
+        MemCycle(re=1, raddr=addr),
+        MemCycle(we=1, waddr=addr, wdata=junk, wmask=0),
+        MemCycle(re=1, raddr=addr),
+    ]
+
+
+def seq_wmask_conflict(depth: int, width: int, wmask_w: int) -> list[MemCycle]:
+    """Same-cycle same-address: every segment reads old."""
+    nseg = width // wmask_w
+    addr = min(2, depth - 1)
+    old = _seg_pattern(nseg, wmask_w, 0x1)
+    new = 0
+    for seg in range(nseg):
+        new |= _seg_unique(seg, wmask_w)
+    return [
+        MemCycle(we=1, waddr=addr, wdata=old, wmask=all_seg_mask(nseg)),
+        MemCycle(
+            we=1, waddr=addr, wdata=new, re=1, raddr=addr, wmask=0b0011
+        ),
+        MemCycle(re=1, raddr=addr),
+    ]
+
+
+def seq_wmask_onehot(depth: int, width: int, wmask_w: int) -> list[MemCycle]:
+    """One-hot scan after a baseline fill. Catches reversed wmask order."""
+    nseg = width // wmask_w
+    addr = 0
+    old = _seg_pattern(nseg, wmask_w, 0x4)
+    cycles = [
+        MemCycle(we=1, waddr=addr, wdata=old, wmask=all_seg_mask(nseg)),
+        MemCycle(re=1, raddr=addr),
+    ]
+    for seg in range(nseg):
+        data = _seg_unique(seg, wmask_w)
+        # Keep other lanes of wdata distinct so a reversed DUT cannot hide.
+        for other in range(nseg):
+            if other != seg:
+                data |= ((0xA + other) & ((1 << wmask_w) - 1)) << (other * wmask_w)
+        cycles.append(MemCycle(we=1, waddr=addr, wdata=data, wmask=1 << seg))
+        cycles.append(MemCycle(re=1, raddr=addr))
+    return cycles
+
+
+def seq_wmask_partial_uninit(depth: int, width: int, wmask_w: int) -> list[MemCycle]:
+    """Write only segment 0, then read — ANUR=1 is a violation."""
+    addr = 0
+    return [
+        MemCycle(we=1, waddr=addr, wdata=_seg_unique(0, wmask_w), wmask=1 << 0),
+        MemCycle(re=1, raddr=addr),
+    ]
 
 
 def _payload(addr: int, width: int) -> int:
@@ -225,10 +368,20 @@ def make_sequence(
     seed: int,
     *,
     assert_no_uninit_read: bool = True,
+    wmask_w: int | None = None,
+    random_n: int | None = None,
 ) -> list[MemCycle]:
+    if wmask_w is None:
+        wmask_w = width
     if case == "random":
+        n = 80 if random_n is None else int(random_n)
         return seq_random_legal(
-            depth, width, seed, assert_no_uninit_read=assert_no_uninit_read
+            depth,
+            width,
+            seed,
+            n,
+            assert_no_uninit_read=assert_no_uninit_read,
+            wmask_w=wmask_w,
         )
     if case == "conflict":
         return seq_conflict_read_old(depth, width)
@@ -256,12 +409,28 @@ def make_sequence(
         return seq_uninit_same_cycle_write(0 if depth == 1 else 1)
     if case == "uninit_ok":
         return seq_uninit_read(0)
+    if case == "wmask_single":
+        return seq_wmask_single(depth, width, wmask_w)
+    if case == "wmask_adjacent":
+        return seq_wmask_adjacent(depth, width, wmask_w)
+    if case == "wmask_all":
+        return seq_wmask_all(depth, width, wmask_w)
+    if case == "wmask_zero":
+        return seq_wmask_zero(depth, width, wmask_w)
+    if case == "wmask_conflict":
+        return seq_wmask_conflict(depth, width, wmask_w)
+    if case == "wmask_onehot":
+        return seq_wmask_onehot(depth, width, wmask_w)
+    if case in {"wmask_partial_uninit", "wmask_partial_ok"}:
+        return seq_wmask_partial_uninit(depth, width, wmask_w)
     raise ValueError(f"unknown case {case!r}")
 
 
 def expected_violation(case: str, assert_no_uninit_read: bool) -> str | None:
     if case in {"oor_waddr", "oor_raddr"}:
         return "oor"
-    if case in {"uninit", "uninit_conflict"} and assert_no_uninit_read:
+    if case in {"uninit", "uninit_conflict", "wmask_partial_uninit"} and (
+        assert_no_uninit_read
+    ):
         return "uninit"
     return None

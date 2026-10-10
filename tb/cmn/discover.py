@@ -21,7 +21,11 @@ from pathlib import Path
 from model.ub_cmn_mem_1r1w import clog2
 from tb.cmn.ports import (
     CLK_PORT,
+    WMASK_PORT,
+    LeafPortError,
     check_leaf_ports,
+    check_wmask_port,
+    parse_module_port_widths,
     parse_module_ports,
 )
 
@@ -34,15 +38,23 @@ META_SUFFIXES = {".json", ".yml", ".yaml"}
 
 _MODULE_RE = re.compile(r"^\s*module\s+(\w+)", re.MULTILINE)
 _TAG_DEPTH_WIDTH = (
-    re.compile(r"^d(?P<depth>\d+)w(?P<width>\d+)(?:_placeholder)?$"),
-    re.compile(r"^d(?P<depth>\d+)_w(?P<width>\d+)(?:_placeholder)?$"),
-    re.compile(r"^depth(?P<depth>\d+)_width(?P<width>\d+)(?:_placeholder)?$"),
+    re.compile(
+        r"^d(?P<depth>\d+)w(?P<width>\d+)(?:m(?P<wmask>\d+))?(?:_placeholder)?$"
+    ),
+    re.compile(
+        r"^d(?P<depth>\d+)_w(?P<width>\d+)(?:_m(?P<wmask>\d+))?(?:_placeholder)?$"
+    ),
+    re.compile(
+        r"^depth(?P<depth>\d+)_width(?P<width>\d+)"
+        r"(?:_wmask(?P<wmask>\d+))?(?:_placeholder)?$"
+    ),
 )
 _COMMENT_DW = re.compile(
     r"\bDEPTH\s*=\s*(\d+)\b.*\bWIDTH\s*=\s*(\d+)\b"
     r"|\bWIDTH\s*=\s*(\d+)\b.*\bDEPTH\s*=\s*(\d+)\b",
     re.IGNORECASE | re.DOTALL,
 )
+_COMMENT_WMASK = re.compile(r"\bWMASK_W\s*=\s*(\d+)\b", re.IGNORECASE)
 _PORT_WADDR = re.compile(r"\bwaddr\b[^;\n]*\[\s*(\d+)\s*:\s*0\s*\]", re.IGNORECASE)
 _PORT_WDATA = re.compile(r"\bwdata\b[^;\n]*\[\s*(\d+)\s*:\s*0\s*\]", re.IGNORECASE)
 
@@ -56,6 +68,7 @@ class MemVariant:
     tag: str
     depth: int
     width: int
+    wmask_w: int
     netlist: str  # "product" | "hooks"
     placeholder: bool = False
     source: str = "tag"
@@ -65,6 +78,10 @@ class MemVariant:
     @property
     def aw(self) -> int:
         return max(1, clog2(self.depth))
+
+    @property
+    def nseg(self) -> int:
+        return self.width // self.wmask_w if self.wmask_w else 1
 
     @property
     def clk_port(self) -> str | None:
@@ -102,13 +119,18 @@ def _split_leaf_tag(module: str) -> tuple[str, bool] | None:
     return tag, placeholder
 
 
-def _parse_tag_depth_width(tag: str) -> tuple[int, int] | None:
+def _parse_tag_params(tag: str) -> tuple[int, int, int | None] | None:
     if not tag:
         return None
     for cre in _TAG_DEPTH_WIDTH:
         match = cre.match(tag)
         if match:
-            return int(match.group("depth")), int(match.group("width"))
+            wmask = match.groupdict().get("wmask")
+            return (
+                int(match.group("depth")),
+                int(match.group("width")),
+                int(wmask) if wmask else None,
+            )
     return None
 
 
@@ -137,27 +159,39 @@ def _looks_like_mapping(obj: object) -> bool:
     return isinstance(obj, dict)
 
 
-def _coerce_dw(raw: dict) -> tuple[int, int] | None:
-    def pick(*keys: str) -> int | None:
-        for key in keys:
-            if key in raw and raw[key] not in (None, ""):
-                return int(raw[key], 0) if isinstance(raw[key], str) else int(raw[key])
-        return None
+def _pick_int(raw: dict, *keys: str) -> int | None:
+    for key in keys:
+        if key in raw and raw[key] not in (None, ""):
+            return int(raw[key], 0) if isinstance(raw[key], str) else int(raw[key])
+    return None
 
-    depth = pick("DEPTH", "depth")
-    width = pick("WIDTH", "width")
+
+def _coerce_dw(raw: dict) -> tuple[int, int] | None:
+    depth = _pick_int(raw, "DEPTH", "depth")
+    width = _pick_int(raw, "WIDTH", "width")
     if depth is None or width is None:
         return None
     return depth, width
 
 
-def _from_comments(text: str) -> tuple[int, int] | None:
+def _coerce_params(raw: dict) -> tuple[int, int, int | None] | None:
+    dw = _coerce_dw(raw)
+    if dw is None:
+        return None
+    wmask = _pick_int(raw, "WMASK_W", "wmask_w", "wmask")
+    return dw[0], dw[1], wmask
+
+
+def _from_comments(text: str) -> tuple[int, int, int | None] | None:
     match = _COMMENT_DW.search(text)
     if not match:
         return None
     if match.group(1) is not None:
-        return int(match.group(1)), int(match.group(2))
-    return int(match.group(4)), int(match.group(3))
+        depth, width = int(match.group(1)), int(match.group(2))
+    else:
+        depth, width = int(match.group(4)), int(match.group(3))
+    wm = _COMMENT_WMASK.search(text)
+    return depth, width, int(wm.group(1)) if wm else None
 
 
 def _port_widths(text: str) -> tuple[int | None, int | None]:
@@ -197,7 +231,8 @@ def _pycircuit_tag_table(repo: Path) -> dict[str, dict]:
             tag, body = match.group(1), match.group(2)
             raw: dict = {}
             for pair in re.finditer(
-                r"[\"']?(DEPTH|WIDTH|depth|width)[\"']?\s*[:=]\s*(\d+)", body
+                r"[\"']?(DEPTH|WIDTH|WMASK_W|depth|width|wmask_w)[\"']?\s*[:=]\s*(\d+)",
+                body,
             ):
                 raw[pair.group(1)] = int(pair.group(2))
             if _coerce_dw(raw):
@@ -225,33 +260,36 @@ def parse_variant_file(
         return None
 
     source = "tag"
-    dw = _parse_tag_depth_width(tag)
-    if dw is None:
-        side = _coerce_dw(_load_sidecar(path))
+    params = _parse_tag_params(tag)
+    if params is None:
+        side = _coerce_params(_load_sidecar(path))
         if side:
-            dw = side
+            params = side
             source = "sidecar"
-    if dw is None:
+    if params is None:
         comment = _from_comments(text)
         if comment:
-            dw = comment
+            params = comment
             source = "comment"
     table = tag_table if tag_table is not None else {}
-    if dw is None and tag in table:
-        got = _coerce_dw(table[tag])
+    if params is None and tag in table:
+        got = _coerce_params(table[tag])
         if got:
-            dw = got
+            params = got
             source = "pycircuit"
-    if dw is None and "" in table and not tag:
-        got = _coerce_dw(table[""])
+    if params is None and "" in table and not tag:
+        got = _coerce_params(table[""])
         if got:
-            dw = got
+            params = got
             source = "pycircuit"
-    if dw is None:
+    if params is None:
         return None
 
-    depth, width = dw
+    depth, width, wmask_opt = params
     if depth < 1 or width < 1:
+        return None
+    wmask_w = int(wmask_opt) if wmask_opt is not None else int(width)
+    if wmask_w < 1:
         return None
     _aw, port_w = _port_widths(text)
     extras: dict = {}
@@ -260,14 +298,19 @@ def parse_variant_file(
     if _aw is not None:
         extras["port_aw"] = _aw
     extras["repo"] = str(repo) if repo is not None else ""
+    extras["wmask_w"] = wmask_w
     ports = parse_module_ports(text, module)
     extras["ports"] = list(ports)
+    widths = parse_module_port_widths(text, module)
+    if WMASK_PORT in widths:
+        extras["wmask_width"] = widths[WMASK_PORT]
     return MemVariant(
         path=path.resolve(),
         module=module,
         tag=tag,
         depth=depth,
         width=width,
+        wmask_w=wmask_w,
         netlist=netlist,
         placeholder=placeholder or tag.endswith("placeholder") or path.stem.endswith(
             "_placeholder"
@@ -378,5 +421,20 @@ def rtl_sim_skip_reason(
 
 
 def require_variant_ports(variant: MemVariant) -> None:
-    """Error if the netlist is not ``core_clk`` + data ports and no reset."""
+    """Error if the netlist is not ``core_clk`` + data ports and no reset.
+
+    ``wmask[NSEG-1:0]`` is required iff ``NSEG>1``; a whole-word leaf must
+    not grow a ``wmask`` pin, and a segmented leaf must match ``NSEG``.
+    """
     check_leaf_ports(variant.ports, module=variant.module)
+    if variant.width % variant.wmask_w != 0:
+        raise LeafPortError(
+            f"{variant.module} WIDTH={variant.width} is not a multiple of "
+            f"WMASK_W={variant.wmask_w}"
+        )
+    check_wmask_port(
+        variant.ports,
+        nseg=variant.nseg,
+        wmask_width=variant.extras.get("wmask_width"),
+        module=variant.module,
+    )

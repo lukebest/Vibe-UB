@@ -14,6 +14,11 @@ class Mem1r1wDriver:
         handle.wdata.value = int(cycle.wdata)
         handle.re.value = int(bool(cycle.re))
         handle.raddr.value = int(cycle.raddr)
+        if hasattr(handle, "wmask"):
+            nseg = getattr(handle, "nseg", None)
+            if nseg is None:
+                nseg = len(handle.wmask)
+            handle.wmask.value = cycle.resolved_wmask(int(nseg))
 
     def idle(self, handle) -> None:
         self.drive(handle, MemCycle())

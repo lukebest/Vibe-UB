@@ -18,7 +18,11 @@ from tb.cmn.ports import (
     CLK_PORT,
     LeafPortError,
     RST_FORBIDDEN_ZH,
+    WMASK_FORBIDDEN_ZH,
+    WMASK_MISSING_ZH,
+    WMASK_WIDTH_ZH,
     check_leaf_ports,
+    check_wmask_port,
     parse_module_ports,
 )
 
@@ -47,6 +51,7 @@ def test_parse_d5w8_tag(tmp_path: Path):
     var = parse_variant_file(path, netlist="product")
     assert var is not None
     assert var.depth == 5 and var.width == 8
+    assert var.wmask_w == 8 and var.nseg == 1
     assert var.module == f"{LEAF}_d5w8"
     assert var.tag == "d5w8"
     assert var.source == "tag"
@@ -141,6 +146,11 @@ def test_emit_wrapper_bakes_constants_no_dut_parameter(tmp_path: Path):
     assert "rst_pyc" not in text
     assert f"input  wire             clk\n" not in text
     assert ".clk   (clk)" not in text
+    assert "localparam integer WMASK_W = 8" in text
+    assert ".wmask    (1'b1)" in text
+    assert ".wmask (wmask)" not in text
+    assert "input  wire [1-1:0] wmask" not in text
+    assert ".WMASK_W(WMASK_W)" in text
 
 
 def test_parse_parameterized_formal_if_props():
@@ -252,6 +262,137 @@ def test_repo_product_netlist_ports_are_parsed():
         assert var.ports, f"{var.module} ANSI port list was empty"
         try:
             require_variant_ports(var)
-            print(f"  port check OK ({CLK_PORT}, no reset)", flush=True)
+            print(
+                f"  port check OK ({CLK_PORT}, no reset, "
+                f"WMASK_W={var.wmask_w} NSEG={var.nseg})",
+                flush=True,
+            )
         except LeafPortError as exc:
             print(f"  port check FAIL (sim will error, no silent remap): {exc}", flush=True)
+
+
+def _write_xia_leaf(
+    path: Path,
+    module: str,
+    aw: int,
+    width: int,
+    *,
+    wmask_n: int | None = None,
+) -> Path:
+    wmask_decl = f"  input [{wmask_n}-1:0] wmask,\n" if wmask_n else ""
+    path.write_text(
+        f"""
+module {module} (
+  input core_clk,
+  input we,
+  input [{aw}-1:0] waddr,
+  input [{width}-1:0] wdata,
+{wmask_decl}  input re,
+  input [{aw}-1:0] raddr,
+  output [{width}-1:0] rdata
+);
+endmodule
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_parse_d64w64m16_tag(tmp_path: Path):
+    path = _write_xia_leaf(
+        tmp_path / f"{LEAF}_d64w64m16.v", f"{LEAF}_d64w64m16", 6, 64, wmask_n=4
+    )
+    var = parse_variant_file(path, netlist="product")
+    assert var is not None
+    assert (var.depth, var.width, var.wmask_w, var.nseg) == (64, 64, 16, 4)
+    assert var.tag == "d64w64m16"
+    assert "wmask" in var.ports
+    assert var.extras.get("wmask_width") == 4
+    require_variant_ports(var)
+
+
+def test_parse_d512w512m64_tag(tmp_path: Path):
+    path = _write_xia_leaf(
+        tmp_path / f"{LEAF}_d512w512m64.v", f"{LEAF}_d512w512m64", 9, 512, wmask_n=8
+    )
+    var = parse_variant_file(path, netlist="product")
+    assert var is not None
+    assert (var.depth, var.width, var.wmask_w, var.nseg) == (512, 512, 64, 8)
+    require_variant_ports(var)
+
+
+def test_nseg_gt1_missing_wmask_errors(tmp_path: Path):
+    path = _write_xia_leaf(
+        tmp_path / f"{LEAF}_d64w64m16.v", f"{LEAF}_d64w64m16", 6, 64
+    )
+    var = parse_variant_file(path, netlist="product")
+    assert var is not None and var.nseg == 4
+    try:
+        require_variant_ports(var)
+    except LeafPortError as exc:
+        assert WMASK_MISSING_ZH in str(exc)
+    else:
+        raise AssertionError("expected LeafPortError for missing wmask")
+
+
+def test_nseg_gt1_wrong_wmask_width_errors(tmp_path: Path):
+    path = _write_xia_leaf(
+        tmp_path / f"{LEAF}_d64w64m16.v", f"{LEAF}_d64w64m16", 6, 64, wmask_n=8
+    )
+    var = parse_variant_file(path, netlist="product")
+    assert var is not None
+    try:
+        require_variant_ports(var)
+    except LeafPortError as exc:
+        assert WMASK_WIDTH_ZH in str(exc)
+        assert "8" in str(exc) and "4" in str(exc)
+    else:
+        raise AssertionError("expected LeafPortError for wrong wmask width")
+
+
+def test_nseg1_extra_wmask_errors(tmp_path: Path):
+    path = _write_xia_leaf(
+        tmp_path / f"{LEAF}_d5w8.v", f"{LEAF}_d5w8", 3, 8, wmask_n=1
+    )
+    var = parse_variant_file(path, netlist="product")
+    assert var is not None and var.nseg == 1
+    try:
+        require_variant_ports(var)
+    except LeafPortError as exc:
+        assert WMASK_FORBIDDEN_ZH in str(exc)
+    else:
+        raise AssertionError("expected LeafPortError for extra wmask on NSEG=1")
+
+
+def test_check_wmask_port_direct():
+    ok = ("core_clk", "we", "waddr", "wdata", "re", "raddr", "rdata")
+    check_wmask_port(ok, nseg=1, module="n1")
+    check_wmask_port(ok + ("wmask",), nseg=4, wmask_width=4, module="n4")
+    try:
+        check_wmask_port(ok, nseg=4, module="n4")
+    except LeafPortError as exc:
+        assert WMASK_MISSING_ZH in str(exc)
+    else:
+        raise AssertionError("expected missing-wmask error")
+
+
+def test_emit_wrapper_wmask_when_nseg_gt1(tmp_path: Path):
+    dest = tmp_path / "wrap_m16.sv"
+    emit_wrapper(
+        dest,
+        dut_module=f"{LEAF}_d64w64m16",
+        depth=64,
+        width=64,
+        wmask_w=16,
+        assert_no_uninit_read=True,
+        tb_check=True,
+    )
+    text = dest.read_text(encoding="utf-8")
+    assert "input  wire [4-1:0] wmask" in text
+    assert ".wmask (wmask)" in text
+    assert ".wmask    (wmask)" in text
+    assert ".WMASK_W(WMASK_W)" in text
+    assert "localparam integer WMASK_W = 16" in text
+    assert f"{LEAF}_d64w64m16 #(" not in text
+    assert "rst_n" not in text
+    assert "rst_pyc" not in text

@@ -24,7 +24,13 @@ def step_fake(
     driven = handle.sample_inputs()
     if driven != cycle.as_tuple():
         raise AssertionError(f"driver did not present cycle {cycle}: got {driven}")
-    expected, flags = scoreboard.predict(*cycle.as_tuple())
+    if handle.nseg > 1 and handle.resolved_wmask() != cycle.resolved_wmask(handle.nseg):
+        raise AssertionError(
+            f"driver did not present wmask={cycle.resolved_wmask(handle.nseg):#x}: "
+            f"got {handle.resolved_wmask():#x}"
+        )
+    wmask = cycle.resolved_wmask(scoreboard.nseg) if scoreboard.nseg > 1 else None
+    expected, flags = scoreboard.predict(*cycle.as_tuple(), wmask=wmask)
     actual = handle.posedge()
     coverage.sample(
         depth=scoreboard.depth,
@@ -34,6 +40,8 @@ def step_fake(
         waddr=cycle.waddr,
         re=cycle.re,
         raddr=cycle.raddr,
+        wmask=wmask if scoreboard.nseg > 1 else None,
+        nseg=scoreboard.nseg,
     )
     if expect_violation:
         if not scoreboard.last_saw(expect_violation):
@@ -55,16 +63,23 @@ def run_cycles(
     width: int,
     cycles: list[MemCycle],
     *,
+    wmask_w: int | None = None,
     assert_no_uninit_read: bool = True,
     expect_violation: str | None = None,
     coverage: Mem1r1wCoverage | None = None,
     compare: bool = True,
 ) -> tuple[FakeMemHandle, Mem1r1wScoreboard, Mem1r1wCoverage]:
     handle = FakeMemHandle(
-        depth, width, assert_no_uninit_read=assert_no_uninit_read
+        depth,
+        width,
+        wmask_w=wmask_w,
+        assert_no_uninit_read=assert_no_uninit_read,
     )
     scoreboard = Mem1r1wScoreboard(
-        depth, width, assert_no_uninit_read=assert_no_uninit_read
+        depth,
+        width,
+        wmask_w=wmask_w,
+        assert_no_uninit_read=assert_no_uninit_read,
     )
     driver = Mem1r1wDriver()
     cov = coverage if coverage is not None else Mem1r1wCoverage()

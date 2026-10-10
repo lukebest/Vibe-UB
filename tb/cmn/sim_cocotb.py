@@ -10,7 +10,7 @@ from cocotb.triggers import NextTimeStep, ReadOnly, RisingEdge
 
 from tb.cmn.coverage import Mem1r1wCoverage
 from tb.cmn.driver import Mem1r1wDriver
-from tb.cmn.ports import CLK_PORT
+from tb.cmn.ports import CLK_PORT, WMASK_FORBIDDEN_ZH, WMASK_MISSING_ZH, WMASK_WIDTH_ZH
 from tb.cmn.scoreboard import Mem1r1wScoreboard
 from tb.cmn.sequences import expected_violation, make_sequence
 
@@ -31,7 +31,7 @@ def _sample_int(sig):
         return None
 
 
-def _require_ports(dut) -> None:
+def _require_ports(dut, nseg: int) -> None:
     needed = (CLK_PORT, "we", "waddr", "wdata", "re", "raddr", "rdata")
     missing = [n for n in needed if not hasattr(dut, n)]
     if missing:
@@ -40,19 +40,32 @@ def _require_ports(dut) -> None:
             "DUT/wrapper missing contract ports "
             f"{missing}; expected clock '{CLK_PORT}' and no reset; have={have}"
         )
+    if nseg > 1:
+        if not hasattr(dut, "wmask"):
+            raise AssertionError(
+                f"{WMASK_MISSING_ZH}，NSEG={nseg} 预期 wmask[{nseg}-1:0]"
+            )
+        got = len(dut.wmask)
+        if got != nseg:
+            raise AssertionError(f"{WMASK_WIDTH_ZH}: wmask 位宽为 {got}，预期 {nseg}")
+    elif hasattr(dut, "wmask"):
+        raise AssertionError(f"{WMASK_FORBIDDEN_ZH}（NSEG=1）")
 
 
 @cocotb.test()
 async def test_ub_cmn_mem_1r1w(dut):
-    _require_ports(dut)
     seed = _env_int("CMN_SEED", 1)
     case = os.environ.get("CMN_CASE", "random")
     depth = _env_int("CMN_DEPTH", 8)
     width = _env_int("CMN_WIDTH", 16)
+    wmask_w = _env_int("CMN_WMASK_W", width)
+    nseg = width // wmask_w
     anur = bool(_env_int("CMN_ASSERT_NO_UNINIT_READ", 1))
+    random_n = _env_int("CMN_RANDOM_N", 80)
+    _require_ports(dut, nseg)
     print(f"SEED {seed}", flush=True)
     print(
-        f"CMN case={case} DEPTH={depth} WIDTH={width} "
+        f"CMN case={case} DEPTH={depth} WIDTH={width} WMASK_W={wmask_w} NSEG={nseg} "
         f"ASSERT_NO_UNINIT_READ={int(anur)} "
         f"variant={os.environ.get('CMN_VARIANT', '?')} "
         f"netlist={os.environ.get('CMN_NETLIST', '?')}",
@@ -60,7 +73,9 @@ async def test_ub_cmn_mem_1r1w(dut):
     )
 
     driver = Mem1r1wDriver()
-    scoreboard = Mem1r1wScoreboard(depth, width, assert_no_uninit_read=anur)
+    scoreboard = Mem1r1wScoreboard(
+        depth, width, wmask_w=wmask_w, assert_no_uninit_read=anur
+    )
     coverage = Mem1r1wCoverage()
     clk = getattr(dut, CLK_PORT)
     driver.idle(dut)
@@ -70,14 +85,23 @@ async def test_ub_cmn_mem_1r1w(dut):
     for _ in range(2):
         await RisingEdge(clk)
 
-    cycles = make_sequence(case, depth, width, seed, assert_no_uninit_read=anur)
+    cycles = make_sequence(
+        case,
+        depth,
+        width,
+        seed,
+        assert_no_uninit_read=anur,
+        wmask_w=wmask_w,
+        random_n=random_n,
+    )
     want = expected_violation(case, anur)
     saw = False
     last = len(cycles) - 1
 
     for i, cycle in enumerate(cycles):
         driver.drive(dut, cycle)
-        _expected, flags = scoreboard.predict(*cycle.as_tuple())
+        wmask = cycle.resolved_wmask(nseg) if nseg > 1 else None
+        _expected, flags = scoreboard.predict(*cycle.as_tuple(), wmask=wmask)
         await RisingEdge(clk)
         await ReadOnly()
         actual = _sample_int(dut.rdata)
@@ -89,6 +113,8 @@ async def test_ub_cmn_mem_1r1w(dut):
             waddr=cycle.waddr,
             re=cycle.re,
             raddr=cycle.raddr,
+            wmask=wmask,
+            nseg=nseg,
         )
         violating = bool(want) and i == last
         if violating:
@@ -119,9 +145,22 @@ async def test_ub_cmn_mem_1r1w(dut):
                     "scoreboard skipped every beat; defined-flag reverse check failed "
                     f"(n_compare=0 n_skip={scoreboard.n_skip})"
                 )
+            if nseg > 1 and case.startswith("wmask"):
+                if case == "wmask_partial_ok":
+                    scoreboard.assert_seg_compares(compared=[0], untouched=list(range(1, nseg)))
+                elif case in {
+                    "wmask_single",
+                    "wmask_adjacent",
+                    "wmask_all",
+                    "wmask_zero",
+                    "wmask_conflict",
+                    "wmask_onehot",
+                }:
+                    scoreboard.assert_seg_compares(min_each=1)
     print(
         f"PASS ub_cmn_mem_1r1w case={case} "
         f"n_compare={scoreboard.n_compare} n_skip={scoreboard.n_skip} "
+        f"n_compare_seg={scoreboard.n_compare_seg} "
         f"cover={sorted(coverage.hits)}",
         flush=True,
     )

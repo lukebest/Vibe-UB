@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from model.ub_cmn_mem_1r1w import UbCmnMem1r1w, clog2
+from tb.cmn.items import all_seg_mask
 from tb.cmn.ports import CLK_PORT
 
 
@@ -16,6 +17,7 @@ class FakeMemHandle:
 
     Clock is ``core_clk``. The leaf has no reset port. ``undefine_array()``
     calls the model ``reset_written()`` (array undefined; rdata holds).
+    ``NSEG>1`` exposes ``wmask``; ``NSEG=1`` does not.
     """
 
     def __init__(
@@ -23,10 +25,13 @@ class FakeMemHandle:
         depth: int,
         width: int,
         *,
+        wmask_w: int | None = None,
         assert_no_uninit_read: bool = True,
     ) -> None:
         self.depth = int(depth)
         self.width = int(width)
+        self.wmask_w = int(self.width if wmask_w is None else wmask_w)
+        self.nseg = self.width // self.wmask_w
         self.aw = max(1, clog2(self.depth))
         self.core_clk = _Val(0)
         if CLK_PORT != "core_clk":
@@ -38,13 +43,16 @@ class FakeMemHandle:
         self.raddr = _Val(0)
         self.rdata = _Val(0)
         self.rdata_defined = False
+        if self.nseg > 1:
+            self.wmask = _Val(all_seg_mask(self.nseg))
         self.inner = UbCmnMem1r1w(
             self.depth,
             self.width,
+            wmask_w=self.wmask_w,
             assert_no_uninit_read=assert_no_uninit_read,
             strict=False,
         )
-        self.trace: list[tuple[int, int, int, int, int]] = []
+        self.trace: list[tuple] = []
 
     def sample_inputs(self) -> tuple[int, int, int, int, int]:
         return (
@@ -55,15 +63,28 @@ class FakeMemHandle:
             int(self.raddr.value),
         )
 
+    def resolved_wmask(self) -> int:
+        if self.nseg <= 1:
+            return 1
+        return int(self.wmask.value) & all_seg_mask(self.nseg)
+
+    def tick_args(self) -> tuple:
+        base = self.sample_inputs()
+        if self.nseg <= 1:
+            return base
+        return base + (self.resolved_wmask(),)
+
     def undefine_array(self) -> None:
         """Mark the array undefined. Does not clear the rdata register."""
         self.inner.reset_written()
 
     def posedge(self) -> int | None:
         """Rising ``core_clk``: apply the currently driven ports to the inner model."""
-        cyc = self.sample_inputs()
+        cyc = self.tick_args()
         self.trace.append(cyc)
-        rdata = self.inner.tick(*cyc)
+        rdata = self.inner.tick(*cyc) if self.nseg == 1 else self.inner.tick(
+            *cyc[:5], wmask=cyc[5]
+        )
         self.rdata_defined = rdata is not None
         if rdata is None:
             return None
@@ -90,8 +111,36 @@ class AddrAliasFakeHandle(FakeMemHandle):
 
     def posedge(self) -> int | None:
         we, waddr, wdata, re, raddr = self.sample_inputs()
-        self.trace.append((we, waddr, wdata, re, raddr))
-        rdata = self.inner.tick(we, waddr & ~1, wdata, re, raddr & ~1)
+        wmask = self.resolved_wmask() if self.nseg > 1 else None
+        if self.nseg > 1:
+            self.trace.append((we, waddr, wdata, re, raddr, wmask))
+        else:
+            self.trace.append((we, waddr, wdata, re, raddr))
+        rdata = self.inner.tick(
+            we, waddr & ~1, wdata, re, raddr & ~1, wmask=wmask
+        )
+        self.rdata_defined = rdata is not None
+        if rdata is None:
+            return None
+        self.rdata.value = int(rdata)
+        return int(rdata)
+
+
+class WmaskSwapFakeHandle(FakeMemHandle):
+    """Reverses ``wmask`` bit order. Scoreboard must fail (catches swapped segs)."""
+
+    def posedge(self) -> int | None:
+        we, waddr, wdata, re, raddr = self.sample_inputs()
+        wmask = self.resolved_wmask()
+        if self.nseg > 1:
+            self.trace.append((we, waddr, wdata, re, raddr, wmask))
+        else:
+            self.trace.append((we, waddr, wdata, re, raddr))
+        rev = 0
+        for seg in range(self.nseg):
+            if wmask & (1 << seg):
+                rev |= 1 << (self.nseg - 1 - seg)
+        rdata = self.inner.tick(we, waddr, wdata, re, raddr, wmask=rev)
         self.rdata_defined = rdata is not None
         if rdata is None:
             return None

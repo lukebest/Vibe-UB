@@ -251,7 +251,9 @@ if run_yosys "$SCRIPT4" "$((EQUIV_TMO + 15))"; then
 fi
 
 # 5) BCRC: affine next-state basis (complete for the remainder map).
-if [[ "$LEAF" == ub_dll_bcrc || "$LEAF" == ub_dll_bcrc_check ]]; then
+# Handwritten fakes have no pyc_reg / crc_q; they already failed tempinduct.
+if [[ "$LEAF" == ub_dll_bcrc || "$LEAF" == ub_dll_bcrc_check ]] \
+   && grep -qE 'pyc_reg|crc_q__next' "$NET_ABS"; then
   echo "equiv_ref note: SAT timed out on the 190-input XOR; running next-state basis"
   INC_ARGS=()
   for d in "${INC_FLAGS[@]+"${INC_FLAGS[@]}"}"; do

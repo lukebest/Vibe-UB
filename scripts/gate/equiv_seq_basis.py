@@ -22,7 +22,7 @@ INIT = 0x3FFFFFFF
 
 
 def _parse_eval_hex(line: str) -> int:
-    # Eval result: \crc_n = 30'000... or 30'h1a
+    # Eval result: \crc_n = 30'000... or 30'h1a or \word_n = 0.
     m = re.search(r"=\s*(\d+)'h([0-9a-fA-F]+)", line)
     if m:
         return int(m.group(2), 16)
@@ -32,6 +32,9 @@ def _parse_eval_hex(line: str) -> int:
     m = re.search(r"=\s*(\d+)'d(\d+)", line)
     if m:
         return int(m.group(2), 10)
+    m = re.search(r"=\s*([0-9a-fA-Fx]+)\.?\s*$", line)
+    if m:
+        return int(m.group(1), 0)
     raise ValueError(f"unparsed eval: {line}")
 
 

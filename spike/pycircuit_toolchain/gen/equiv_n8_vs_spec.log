@@ -1,0 +1,367 @@
+
+ /----------------------------------------------------------------------------\
+ |                                                                            |
+ |  yosys -- Yosys Open SYnthesis Suite                                       |
+ |                                                                            |
+ |  Copyright (C) 2012 - 2020  Claire Xenia Wolf <claire@yosyshq.com>         |
+ |                                                                            |
+ |  Permission to use, copy, modify, and/or distribute this software for any  |
+ |  purpose with or without fee is hereby granted, provided that the above    |
+ |  copyright notice and this permission notice appear in all copies.         |
+ |                                                                            |
+ |  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES  |
+ |  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF          |
+ |  MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR   |
+ |  ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES    |
+ |  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN     |
+ |  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF   |
+ |  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.            |
+ |                                                                            |
+ \----------------------------------------------------------------------------/
+
+ Yosys 0.33 (git sha1 2584903a060)
+
+
+-- Running command `
+    read_verilog -sv /workspace/spike/pycircuit_toolchain/ref/ub_pcs_lane_dist_spec.v
+    chparam -set NUM_LANES 8 -set PMA_W 32 -set SYM_W 8 ub_pcs_lane_dist_spec
+    hierarchy -check -top ub_pcs_lane_dist_spec
+    flatten
+    rename ub_pcs_lane_dist_spec gold
+    design -stash gold
+
+    read_verilog -sv /workspace/spike/pycircuit_toolchain/gen/n8/ub_pcs_lane_dist.v
+    hierarchy -check -top ub_pcs_lane_dist
+    flatten
+    rename ub_pcs_lane_dist gate
+    design -stash gate
+
+    design -reset
+    design -copy-from gold -as gold gold
+    design -copy-from gate -as gate gate
+    equiv_make gold gate equiv
+    equiv_simple equiv
+    equiv_induct equiv
+    equiv_status -assert equiv
+  ' --
+
+1. Executing Verilog-2005 frontend: /workspace/spike/pycircuit_toolchain/ref/ub_pcs_lane_dist_spec.v
+Parsing SystemVerilog input from `/workspace/spike/pycircuit_toolchain/ref/ub_pcs_lane_dist_spec.v' to AST representation.
+Generating RTLIL representation for module `\ub_pcs_lane_dist_spec'.
+Successfully finished Verilog frontend.
+Parameter \NUM_LANES = 8
+Parameter \PMA_W = 32
+Parameter \SYM_W = 8
+
+2. Executing AST frontend in derive mode using pre-parsed AST for module `\ub_pcs_lane_dist_spec'.
+Parameter \NUM_LANES = 8
+Parameter \PMA_W = 32
+Parameter \SYM_W = 8
+Generating RTLIL representation for module `$paramod$e9eef92e13f3a47e80d4cdb6d3800756fa7549bd\ub_pcs_lane_dist_spec'.
+
+3. Executing HIERARCHY pass (managing design hierarchy).
+
+3.1. Analyzing design hierarchy..
+Top module:  \ub_pcs_lane_dist_spec
+
+3.2. Analyzing design hierarchy..
+Top module:  \ub_pcs_lane_dist_spec
+Removed 0 unused modules.
+
+4. Executing FLATTEN pass (flatten design).
+Renaming module \ub_pcs_lane_dist_spec to \gold.
+
+5. Executing Verilog-2005 frontend: /workspace/spike/pycircuit_toolchain/gen/n8/ub_pcs_lane_dist.v
+Parsing SystemVerilog input from `/workspace/spike/pycircuit_toolchain/gen/n8/ub_pcs_lane_dist.v' to AST representation.
+Generating RTLIL representation for module `\ub_pcs_lane_dist'.
+Successfully finished Verilog frontend.
+
+6. Executing HIERARCHY pass (managing design hierarchy).
+
+6.1. Analyzing design hierarchy..
+Top module:  \ub_pcs_lane_dist
+
+6.2. Analyzing design hierarchy..
+Top module:  \ub_pcs_lane_dist
+Removed 0 unused modules.
+
+7. Executing FLATTEN pass (flatten design).
+Renaming module \ub_pcs_lane_dist to \gate.
+
+8. Executing EQUIV_MAKE pass (creating equiv checking module).
+Presumably equivalent wires: data_in_gold (\data_in_gold), data_in_gate (\data_in_gate) -> data_in
+Presumably equivalent wires: data_out_gold ({ \data_in_gold [7:0] \data_in_gold [71:64] \data_in_gold [135:128] \data_in_gold [199:192] \data_in_gold [15:8] \data_in_gold [79:72] \data_in_gold [143:136] \data_in_gold [207:200] \data_in_gold [23:16] \data_in_gold [87:80] \data_in_gold [151:144] \data_in_gold [215:208] \data_in_gold [31:24] \data_in_gold [95:88] \data_in_gold [159:152] \data_in_gold [223:216] \data_in_gold [39:32] \data_in_gold [103:96] \data_in_gold [167:160] \data_in_gold [231:224] \data_in_gold [47:40] \data_in_gold [111:104] \data_in_gold [175:168] \data_in_gold [239:232] \data_in_gold [55:48] \data_in_gold [119:112] \data_in_gold [183:176] \data_in_gold [247:240] \data_in_gold [63:56] \data_in_gold [127:120] \data_in_gold [191:184] \data_in_gold [255:248] }), data_out_gate ({ \data_in_gate [7:0] \data_in_gate [71:64] \data_in_gate [135:128] \data_in_gate [199:192] \data_in_gate [15:8] \data_in_gate [79:72] \data_in_gate [143:136] \data_in_gate [207:200] \data_in_gate [23:16] \data_in_gate [87:80] \data_in_gate [151:144] \data_in_gate [215:208] \data_in_gate [31:24] \data_in_gate [95:88] \data_in_gate [159:152] \data_in_gate [223:216] \data_in_gate [39:32] \data_in_gate [103:96] \data_in_gate [167:160] \data_in_gate [231:224] \data_in_gate [47:40] \data_in_gate [111:104] \data_in_gate [175:168] \data_in_gate [239:232] \data_in_gate [55:48] \data_in_gate [119:112] \data_in_gate [183:176] \data_in_gate [247:240] \data_in_gate [63:56] \data_in_gate [127:120] \data_in_gate [191:184] \data_in_gate [255:248] }) -> data_out
+
+9. Executing EQUIV_SIMPLE pass.
+Found 256 unproven $equiv cells (1 groups) in equiv:
+ Grouping SAT models for \data_out:
+  Trying to prove $equiv for \data_out [0]: success!
+  Trying to prove $equiv for \data_out [1]: success!
+  Trying to prove $equiv for \data_out [2]: success!
+  Trying to prove $equiv for \data_out [3]: success!
+  Trying to prove $equiv for \data_out [4]: success!
+  Trying to prove $equiv for \data_out [5]: success!
+  Trying to prove $equiv for \data_out [6]: success!
+  Trying to prove $equiv for \data_out [7]: success!
+  Trying to prove $equiv for \data_out [8]: success!
+  Trying to prove $equiv for \data_out [9]: success!
+  Trying to prove $equiv for \data_out [10]: success!
+  Trying to prove $equiv for \data_out [11]: success!
+  Trying to prove $equiv for \data_out [12]: success!
+  Trying to prove $equiv for \data_out [13]: success!
+  Trying to prove $equiv for \data_out [14]: success!
+  Trying to prove $equiv for \data_out [15]: success!
+  Trying to prove $equiv for \data_out [16]: success!
+  Trying to prove $equiv for \data_out [17]: success!
+  Trying to prove $equiv for \data_out [18]: success!
+  Trying to prove $equiv for \data_out [19]: success!
+  Trying to prove $equiv for \data_out [20]: success!
+  Trying to prove $equiv for \data_out [21]: success!
+  Trying to prove $equiv for \data_out [22]: success!
+  Trying to prove $equiv for \data_out [23]: success!
+  Trying to prove $equiv for \data_out [24]: success!
+  Trying to prove $equiv for \data_out [25]: success!
+  Trying to prove $equiv for \data_out [26]: success!
+  Trying to prove $equiv for \data_out [27]: success!
+  Trying to prove $equiv for \data_out [28]: success!
+  Trying to prove $equiv for \data_out [29]: success!
+  Trying to prove $equiv for \data_out [30]: success!
+  Trying to prove $equiv for \data_out [31]: success!
+  Trying to prove $equiv for \data_out [32]: success!
+  Trying to prove $equiv for \data_out [33]: success!
+  Trying to prove $equiv for \data_out [34]: success!
+  Trying to prove $equiv for \data_out [35]: success!
+  Trying to prove $equiv for \data_out [36]: success!
+  Trying to prove $equiv for \data_out [37]: success!
+  Trying to prove $equiv for \data_out [38]: success!
+  Trying to prove $equiv for \data_out [39]: success!
+  Trying to prove $equiv for \data_out [40]: success!
+  Trying to prove $equiv for \data_out [41]: success!
+  Trying to prove $equiv for \data_out [42]: success!
+  Trying to prove $equiv for \data_out [43]: success!
+  Trying to prove $equiv for \data_out [44]: success!
+  Trying to prove $equiv for \data_out [45]: success!
+  Trying to prove $equiv for \data_out [46]: success!
+  Trying to prove $equiv for \data_out [47]: success!
+  Trying to prove $equiv for \data_out [48]: success!
+  Trying to prove $equiv for \data_out [49]: success!
+  Trying to prove $equiv for \data_out [50]: success!
+  Trying to prove $equiv for \data_out [51]: success!
+  Trying to prove $equiv for \data_out [52]: success!
+  Trying to prove $equiv for \data_out [53]: success!
+  Trying to prove $equiv for \data_out [54]: success!
+  Trying to prove $equiv for \data_out [55]: success!
+  Trying to prove $equiv for \data_out [56]: success!
+  Trying to prove $equiv for \data_out [57]: success!
+  Trying to prove $equiv for \data_out [58]: success!
+  Trying to prove $equiv for \data_out [59]: success!
+  Trying to prove $equiv for \data_out [60]: success!
+  Trying to prove $equiv for \data_out [61]: success!
+  Trying to prove $equiv for \data_out [62]: success!
+  Trying to prove $equiv for \data_out [63]: success!
+  Trying to prove $equiv for \data_out [64]: success!
+  Trying to prove $equiv for \data_out [65]: success!
+  Trying to prove $equiv for \data_out [66]: success!
+  Trying to prove $equiv for \data_out [67]: success!
+  Trying to prove $equiv for \data_out [68]: success!
+  Trying to prove $equiv for \data_out [69]: success!
+  Trying to prove $equiv for \data_out [70]: success!
+  Trying to prove $equiv for \data_out [71]: success!
+  Trying to prove $equiv for \data_out [72]: success!
+  Trying to prove $equiv for \data_out [73]: success!
+  Trying to prove $equiv for \data_out [74]: success!
+  Trying to prove $equiv for \data_out [75]: success!
+  Trying to prove $equiv for \data_out [76]: success!
+  Trying to prove $equiv for \data_out [77]: success!
+  Trying to prove $equiv for \data_out [78]: success!
+  Trying to prove $equiv for \data_out [79]: success!
+  Trying to prove $equiv for \data_out [80]: success!
+  Trying to prove $equiv for \data_out [81]: success!
+  Trying to prove $equiv for \data_out [82]: success!
+  Trying to prove $equiv for \data_out [83]: success!
+  Trying to prove $equiv for \data_out [84]: success!
+  Trying to prove $equiv for \data_out [85]: success!
+  Trying to prove $equiv for \data_out [86]: success!
+  Trying to prove $equiv for \data_out [87]: success!
+  Trying to prove $equiv for \data_out [88]: success!
+  Trying to prove $equiv for \data_out [89]: success!
+  Trying to prove $equiv for \data_out [90]: success!
+  Trying to prove $equiv for \data_out [91]: success!
+  Trying to prove $equiv for \data_out [92]: success!
+  Trying to prove $equiv for \data_out [93]: success!
+  Trying to prove $equiv for \data_out [94]: success!
+  Trying to prove $equiv for \data_out [95]: success!
+  Trying to prove $equiv for \data_out [96]: success!
+  Trying to prove $equiv for \data_out [97]: success!
+  Trying to prove $equiv for \data_out [98]: success!
+  Trying to prove $equiv for \data_out [99]: success!
+  Trying to prove $equiv for \data_out [100]: success!
+  Trying to prove $equiv for \data_out [101]: success!
+  Trying to prove $equiv for \data_out [102]: success!
+  Trying to prove $equiv for \data_out [103]: success!
+  Trying to prove $equiv for \data_out [104]: success!
+  Trying to prove $equiv for \data_out [105]: success!
+  Trying to prove $equiv for \data_out [106]: success!
+  Trying to prove $equiv for \data_out [107]: success!
+  Trying to prove $equiv for \data_out [108]: success!
+  Trying to prove $equiv for \data_out [109]: success!
+  Trying to prove $equiv for \data_out [110]: success!
+  Trying to prove $equiv for \data_out [111]: success!
+  Trying to prove $equiv for \data_out [112]: success!
+  Trying to prove $equiv for \data_out [113]: success!
+  Trying to prove $equiv for \data_out [114]: success!
+  Trying to prove $equiv for \data_out [115]: success!
+  Trying to prove $equiv for \data_out [116]: success!
+  Trying to prove $equiv for \data_out [117]: success!
+  Trying to prove $equiv for \data_out [118]: success!
+  Trying to prove $equiv for \data_out [119]: success!
+  Trying to prove $equiv for \data_out [120]: success!
+  Trying to prove $equiv for \data_out [121]: success!
+  Trying to prove $equiv for \data_out [122]: success!
+  Trying to prove $equiv for \data_out [123]: success!
+  Trying to prove $equiv for \data_out [124]: success!
+  Trying to prove $equiv for \data_out [125]: success!
+  Trying to prove $equiv for \data_out [126]: success!
+  Trying to prove $equiv for \data_out [127]: success!
+  Trying to prove $equiv for \data_out [128]: success!
+  Trying to prove $equiv for \data_out [129]: success!
+  Trying to prove $equiv for \data_out [130]: success!
+  Trying to prove $equiv for \data_out [131]: success!
+  Trying to prove $equiv for \data_out [132]: success!
+  Trying to prove $equiv for \data_out [133]: success!
+  Trying to prove $equiv for \data_out [134]: success!
+  Trying to prove $equiv for \data_out [135]: success!
+  Trying to prove $equiv for \data_out [136]: success!
+  Trying to prove $equiv for \data_out [137]: success!
+  Trying to prove $equiv for \data_out [138]: success!
+  Trying to prove $equiv for \data_out [139]: success!
+  Trying to prove $equiv for \data_out [140]: success!
+  Trying to prove $equiv for \data_out [141]: success!
+  Trying to prove $equiv for \data_out [142]: success!
+  Trying to prove $equiv for \data_out [143]: success!
+  Trying to prove $equiv for \data_out [144]: success!
+  Trying to prove $equiv for \data_out [145]: success!
+  Trying to prove $equiv for \data_out [146]: success!
+  Trying to prove $equiv for \data_out [147]: success!
+  Trying to prove $equiv for \data_out [148]: success!
+  Trying to prove $equiv for \data_out [149]: success!
+  Trying to prove $equiv for \data_out [150]: success!
+  Trying to prove $equiv for \data_out [151]: success!
+  Trying to prove $equiv for \data_out [152]: success!
+  Trying to prove $equiv for \data_out [153]: success!
+  Trying to prove $equiv for \data_out [154]: success!
+  Trying to prove $equiv for \data_out [155]: success!
+  Trying to prove $equiv for \data_out [156]: success!
+  Trying to prove $equiv for \data_out [157]: success!
+  Trying to prove $equiv for \data_out [158]: success!
+  Trying to prove $equiv for \data_out [159]: success!
+  Trying to prove $equiv for \data_out [160]: success!
+  Trying to prove $equiv for \data_out [161]: success!
+  Trying to prove $equiv for \data_out [162]: success!
+  Trying to prove $equiv for \data_out [163]: success!
+  Trying to prove $equiv for \data_out [164]: success!
+  Trying to prove $equiv for \data_out [165]: success!
+  Trying to prove $equiv for \data_out [166]: success!
+  Trying to prove $equiv for \data_out [167]: success!
+  Trying to prove $equiv for \data_out [168]: success!
+  Trying to prove $equiv for \data_out [169]: success!
+  Trying to prove $equiv for \data_out [170]: success!
+  Trying to prove $equiv for \data_out [171]: success!
+  Trying to prove $equiv for \data_out [172]: success!
+  Trying to prove $equiv for \data_out [173]: success!
+  Trying to prove $equiv for \data_out [174]: success!
+  Trying to prove $equiv for \data_out [175]: success!
+  Trying to prove $equiv for \data_out [176]: success!
+  Trying to prove $equiv for \data_out [177]: success!
+  Trying to prove $equiv for \data_out [178]: success!
+  Trying to prove $equiv for \data_out [179]: success!
+  Trying to prove $equiv for \data_out [180]: success!
+  Trying to prove $equiv for \data_out [181]: success!
+  Trying to prove $equiv for \data_out [182]: success!
+  Trying to prove $equiv for \data_out [183]: success!
+  Trying to prove $equiv for \data_out [184]: success!
+  Trying to prove $equiv for \data_out [185]: success!
+  Trying to prove $equiv for \data_out [186]: success!
+  Trying to prove $equiv for \data_out [187]: success!
+  Trying to prove $equiv for \data_out [188]: success!
+  Trying to prove $equiv for \data_out [189]: success!
+  Trying to prove $equiv for \data_out [190]: success!
+  Trying to prove $equiv for \data_out [191]: success!
+  Trying to prove $equiv for \data_out [192]: success!
+  Trying to prove $equiv for \data_out [193]: success!
+  Trying to prove $equiv for \data_out [194]: success!
+  Trying to prove $equiv for \data_out [195]: success!
+  Trying to prove $equiv for \data_out [196]: success!
+  Trying to prove $equiv for \data_out [197]: success!
+  Trying to prove $equiv for \data_out [198]: success!
+  Trying to prove $equiv for \data_out [199]: success!
+  Trying to prove $equiv for \data_out [200]: success!
+  Trying to prove $equiv for \data_out [201]: success!
+  Trying to prove $equiv for \data_out [202]: success!
+  Trying to prove $equiv for \data_out [203]: success!
+  Trying to prove $equiv for \data_out [204]: success!
+  Trying to prove $equiv for \data_out [205]: success!
+  Trying to prove $equiv for \data_out [206]: success!
+  Trying to prove $equiv for \data_out [207]: success!
+  Trying to prove $equiv for \data_out [208]: success!
+  Trying to prove $equiv for \data_out [209]: success!
+  Trying to prove $equiv for \data_out [210]: success!
+  Trying to prove $equiv for \data_out [211]: success!
+  Trying to prove $equiv for \data_out [212]: success!
+  Trying to prove $equiv for \data_out [213]: success!
+  Trying to prove $equiv for \data_out [214]: success!
+  Trying to prove $equiv for \data_out [215]: success!
+  Trying to prove $equiv for \data_out [216]: success!
+  Trying to prove $equiv for \data_out [217]: success!
+  Trying to prove $equiv for \data_out [218]: success!
+  Trying to prove $equiv for \data_out [219]: success!
+  Trying to prove $equiv for \data_out [220]: success!
+  Trying to prove $equiv for \data_out [221]: success!
+  Trying to prove $equiv for \data_out [222]: success!
+  Trying to prove $equiv for \data_out [223]: success!
+  Trying to prove $equiv for \data_out [224]: success!
+  Trying to prove $equiv for \data_out [225]: success!
+  Trying to prove $equiv for \data_out [226]: success!
+  Trying to prove $equiv for \data_out [227]: success!
+  Trying to prove $equiv for \data_out [228]: success!
+  Trying to prove $equiv for \data_out [229]: success!
+  Trying to prove $equiv for \data_out [230]: success!
+  Trying to prove $equiv for \data_out [231]: success!
+  Trying to prove $equiv for \data_out [232]: success!
+  Trying to prove $equiv for \data_out [233]: success!
+  Trying to prove $equiv for \data_out [234]: success!
+  Trying to prove $equiv for \data_out [235]: success!
+  Trying to prove $equiv for \data_out [236]: success!
+  Trying to prove $equiv for \data_out [237]: success!
+  Trying to prove $equiv for \data_out [238]: success!
+  Trying to prove $equiv for \data_out [239]: success!
+  Trying to prove $equiv for \data_out [240]: success!
+  Trying to prove $equiv for \data_out [241]: success!
+  Trying to prove $equiv for \data_out [242]: success!
+  Trying to prove $equiv for \data_out [243]: success!
+  Trying to prove $equiv for \data_out [244]: success!
+  Trying to prove $equiv for \data_out [245]: success!
+  Trying to prove $equiv for \data_out [246]: success!
+  Trying to prove $equiv for \data_out [247]: success!
+  Trying to prove $equiv for \data_out [248]: success!
+  Trying to prove $equiv for \data_out [249]: success!
+  Trying to prove $equiv for \data_out [250]: success!
+  Trying to prove $equiv for \data_out [251]: success!
+  Trying to prove $equiv for \data_out [252]: success!
+  Trying to prove $equiv for \data_out [253]: success!
+  Trying to prove $equiv for \data_out [254]: success!
+  Trying to prove $equiv for \data_out [255]: success!
+Proved 256 previously unproven $equiv cells.
+
+10. Executing EQUIV_INDUCT pass.
+No selected unproven $equiv cells found in equiv.
+Proved 0 previously unproven $equiv cells.
+
+11. Executing EQUIV_STATUS pass.
+Found 256 $equiv cells in equiv:
+  Of those cells 256 are proven and 0 are unproven.
+  Equivalence successfully proven!
+
+End of script. Logfile hash: 19d1265e51, CPU: user 0.01s system 0.00s, MEM: 10.52 MB peak
+Yosys 0.33 (git sha1 2584903a060)
+Time spent: 30% 1x chparam (0 sec), 28% 4x read_verilog (0 sec), ...

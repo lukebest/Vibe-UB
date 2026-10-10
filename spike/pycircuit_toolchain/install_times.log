@@ -1,0 +1,41 @@
+=== apt-get update start 2026-10-10T09:41:16Z ===
+=== apt-get update end 2026-10-10T09:41:19Z elapsed=3s ===
+=== apt-get install llvm/mlir/ninja/eda start 2026-10-10T09:41:26Z ===
+=== apt-get install end 2026-10-10T09:42:01Z elapsed=35s ===
+=== versions ===
+19.1.1
+Python 3.12.3
+1.11.1
+Verilator 5.020 2024-01-01 rev (Debian 5.020-1)
+Yosys 0.33 (git sha1 2584903a060)
+ii  libmlir-19-dev:amd64 1:19.1.1-1ubuntu1~24.04.2 amd64        Multi-Level Intermediate Representation library
+ii  llvm-19              1:19.1.1-1ubuntu1~24.04.2 amd64        Modular compiler and toolchain technologies
+ii  llvm-19-dev          1:19.1.1-1ubuntu1~24.04.2 amd64        Modular compiler and toolchain technologies, libraries and headers
+ii  mlir-19-tools        1:19.1.1-1ubuntu1~24.04.2 amd64        Multi-Level Intermediate Representation tools
+ii  ninja-build          1.11.1-2                  amd64        small build system closest in spirit to Make
+ii  verilator            5.020-1                   amd64        fast free Verilog simulator
+ii  yosys                0.33-5build2              amd64        Framework for Verilog RTL synthesis
+=== pyc build start 2026-10-10T09:42:18Z ===
+=== apt-get install g++/libstdc++ start 2026-10-10T09:42:23Z ===
+=== apt-get install g++/libstdc++ end 2026-10-10T09:42:26Z elapsed=3s ===
+g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+=== pyc build retry start 2026-10-10T09:42:26Z ===
+=== apt-get install libzstd-dev start 2026-10-10T09:42:30Z ===
+=== apt-get install libzstd-dev end 2026-10-10T09:42:33Z elapsed=3s ===
+=== pyc build retry2 start 2026-10-10T09:42:33Z ===
+=== pyc build retry2 end 2026-10-10T09:43:04Z elapsed=31s ===
+=== pip install -e pyCircuit start 2026-10-10T09:43:45Z ===
+=== venv + pip install -e start 2026-10-10T09:43:51Z ===
+=== venv + pip install -e end 2026-10-10T09:43:57Z elapsed=6s ===
+=== smoke emit+pycc counter start 2026-10-10T09:43:57Z ===
+=== smoke emit+pycc counter end 2026-10-10T09:43:57Z elapsed=0s ===
+=== emit N=4 start 2026-10-10T09:44:56Z ===
+=== emit N=4 end 2026-10-10T09:44:56Z elapsed=0s ===
+=== pycc N=4 start 2026-10-10T09:44:56Z ===
+=== pycc N=4 end 2026-10-10T09:44:56Z elapsed=0s ===
+=== emit N=4 start 2026-10-10T09:45:24Z ===
+=== emit N=4 end 2026-10-10T09:45:24Z elapsed=0s rc=0 ===
+=== pycc N=4 start 2026-10-10T09:45:24Z ===
+=== pycc N=4 end 2026-10-10T09:45:24Z elapsed=0s ===
+=== emit_and_check start 2026-10-10T09:46:24Z ===
+=== emit_and_check end 2026-10-10T09:46:24Z elapsed=0s rc=0 ===

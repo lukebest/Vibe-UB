@@ -1,0 +1,866 @@
+
+ /----------------------------------------------------------------------------\
+ |                                                                            |
+ |  yosys -- Yosys Open SYnthesis Suite                                       |
+ |                                                                            |
+ |  Copyright (C) 2012 - 2020  Claire Xenia Wolf <claire@yosyshq.com>         |
+ |                                                                            |
+ |  Permission to use, copy, modify, and/or distribute this software for any  |
+ |  purpose with or without fee is hereby granted, provided that the above    |
+ |  copyright notice and this permission notice appear in all copies.         |
+ |                                                                            |
+ |  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES  |
+ |  WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF          |
+ |  MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR   |
+ |  ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES    |
+ |  WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN     |
+ |  ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF   |
+ |  OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.            |
+ |                                                                            |
+ \----------------------------------------------------------------------------/
+
+ Yosys 0.33 (git sha1 2584903a060)
+
+
+-- Running command `
+    read_verilog -sv /workspace/spike/pycircuit_toolchain/ref/ub_pcs_lane_dist_pr_e5bb.v
+    chparam -set NUM_LANES 8 -set PMA_W 32 -set SYM_W 8 ub_pcs_lane_dist
+    hierarchy -check -top ub_pcs_lane_dist
+    flatten
+    rename ub_pcs_lane_dist gold
+    design -stash gold
+
+    read_verilog -sv /workspace/spike/pycircuit_toolchain/gen/n8/ub_pcs_lane_dist.v
+    hierarchy -check -top ub_pcs_lane_dist
+    flatten
+    rename ub_pcs_lane_dist gate
+    design -stash gate
+
+    design -reset
+    design -copy-from gold -as gold gold
+    design -copy-from gate -as gate gate
+    equiv_make gold gate equiv
+    equiv_simple equiv
+    equiv_induct equiv
+    equiv_status -assert equiv
+  ' --
+
+1. Executing Verilog-2005 frontend: /workspace/spike/pycircuit_toolchain/ref/ub_pcs_lane_dist_pr_e5bb.v
+Parsing SystemVerilog input from `/workspace/spike/pycircuit_toolchain/ref/ub_pcs_lane_dist_pr_e5bb.v' to AST representation.
+Generating RTLIL representation for module `\ub_pcs_lane_dist'.
+Successfully finished Verilog frontend.
+Parameter \NUM_LANES = 8
+Parameter \PMA_W = 32
+Parameter \SYM_W = 8
+
+2. Executing AST frontend in derive mode using pre-parsed AST for module `\ub_pcs_lane_dist'.
+Parameter \NUM_LANES = 8
+Parameter \PMA_W = 32
+Parameter \SYM_W = 8
+Generating RTLIL representation for module `$paramod$e9eef92e13f3a47e80d4cdb6d3800756fa7549bd\ub_pcs_lane_dist'.
+
+3. Executing HIERARCHY pass (managing design hierarchy).
+
+3.1. Analyzing design hierarchy..
+Top module:  \ub_pcs_lane_dist
+
+3.2. Analyzing design hierarchy..
+Top module:  \ub_pcs_lane_dist
+Removed 0 unused modules.
+
+4. Executing FLATTEN pass (flatten design).
+Renaming module \ub_pcs_lane_dist to \gold.
+
+5. Executing Verilog-2005 frontend: /workspace/spike/pycircuit_toolchain/gen/n8/ub_pcs_lane_dist.v
+Parsing SystemVerilog input from `/workspace/spike/pycircuit_toolchain/gen/n8/ub_pcs_lane_dist.v' to AST representation.
+Generating RTLIL representation for module `\ub_pcs_lane_dist'.
+Successfully finished Verilog frontend.
+
+6. Executing HIERARCHY pass (managing design hierarchy).
+
+6.1. Analyzing design hierarchy..
+Top module:  \ub_pcs_lane_dist
+
+6.2. Analyzing design hierarchy..
+Top module:  \ub_pcs_lane_dist
+Removed 0 unused modules.
+
+7. Executing FLATTEN pass (flatten design).
+Renaming module \ub_pcs_lane_dist to \gate.
+
+8. Executing EQUIV_MAKE pass (creating equiv checking module).
+Presumably equivalent wires: data_in_gold (\data_in_gold), data_in_gate (\data_in_gate) -> data_in
+Presumably equivalent wires: data_out_gold ({ \data_in_gold [255:248] \data_in_gold [191:184] \data_in_gold [127:120] \data_in_gold [63:56] \data_in_gold [247:240] \data_in_gold [183:176] \data_in_gold [119:112] \data_in_gold [55:48] \data_in_gold [239:232] \data_in_gold [175:168] \data_in_gold [111:104] \data_in_gold [47:40] \data_in_gold [231:224] \data_in_gold [167:160] \data_in_gold [103:96] \data_in_gold [39:32] \data_in_gold [223:216] \data_in_gold [159:152] \data_in_gold [95:88] \data_in_gold [31:24] \data_in_gold [215:208] \data_in_gold [151:144] \data_in_gold [87:80] \data_in_gold [23:16] \data_in_gold [207:200] \data_in_gold [143:136] \data_in_gold [79:72] \data_in_gold [15:8] \data_in_gold [199:192] \data_in_gold [135:128] \data_in_gold [71:64] \data_in_gold [7:0] }), data_out_gate ({ \data_in_gate [7:0] \data_in_gate [71:64] \data_in_gate [135:128] \data_in_gate [199:192] \data_in_gate [15:8] \data_in_gate [79:72] \data_in_gate [143:136] \data_in_gate [207:200] \data_in_gate [23:16] \data_in_gate [87:80] \data_in_gate [151:144] \data_in_gate [215:208] \data_in_gate [31:24] \data_in_gate [95:88] \data_in_gate [159:152] \data_in_gate [223:216] \data_in_gate [39:32] \data_in_gate [103:96] \data_in_gate [167:160] \data_in_gate [231:224] \data_in_gate [47:40] \data_in_gate [111:104] \data_in_gate [175:168] \data_in_gate [239:232] \data_in_gate [55:48] \data_in_gate [119:112] \data_in_gate [183:176] \data_in_gate [247:240] \data_in_gate [63:56] \data_in_gate [127:120] \data_in_gate [191:184] \data_in_gate [255:248] }) -> data_out
+
+9. Executing EQUIV_SIMPLE pass.
+Found 256 unproven $equiv cells (1 groups) in equiv:
+ Grouping SAT models for \data_out:
+  Trying to prove $equiv for \data_out [0]: failed.
+  Trying to prove $equiv for \data_out [1]: failed.
+  Trying to prove $equiv for \data_out [2]: failed.
+  Trying to prove $equiv for \data_out [3]: failed.
+  Trying to prove $equiv for \data_out [4]: failed.
+  Trying to prove $equiv for \data_out [5]: failed.
+  Trying to prove $equiv for \data_out [6]: failed.
+  Trying to prove $equiv for \data_out [7]: failed.
+  Trying to prove $equiv for \data_out [8]: failed.
+  Trying to prove $equiv for \data_out [9]: failed.
+  Trying to prove $equiv for \data_out [10]: failed.
+  Trying to prove $equiv for \data_out [11]: failed.
+  Trying to prove $equiv for \data_out [12]: failed.
+  Trying to prove $equiv for \data_out [13]: failed.
+  Trying to prove $equiv for \data_out [14]: failed.
+  Trying to prove $equiv for \data_out [15]: failed.
+  Trying to prove $equiv for \data_out [16]: failed.
+  Trying to prove $equiv for \data_out [17]: failed.
+  Trying to prove $equiv for \data_out [18]: failed.
+  Trying to prove $equiv for \data_out [19]: failed.
+  Trying to prove $equiv for \data_out [20]: failed.
+  Trying to prove $equiv for \data_out [21]: failed.
+  Trying to prove $equiv for \data_out [22]: failed.
+  Trying to prove $equiv for \data_out [23]: failed.
+  Trying to prove $equiv for \data_out [24]: failed.
+  Trying to prove $equiv for \data_out [25]: failed.
+  Trying to prove $equiv for \data_out [26]: failed.
+  Trying to prove $equiv for \data_out [27]: failed.
+  Trying to prove $equiv for \data_out [28]: failed.
+  Trying to prove $equiv for \data_out [29]: failed.
+  Trying to prove $equiv for \data_out [30]: failed.
+  Trying to prove $equiv for \data_out [31]: failed.
+  Trying to prove $equiv for \data_out [32]: failed.
+  Trying to prove $equiv for \data_out [33]: failed.
+  Trying to prove $equiv for \data_out [34]: failed.
+  Trying to prove $equiv for \data_out [35]: failed.
+  Trying to prove $equiv for \data_out [36]: failed.
+  Trying to prove $equiv for \data_out [37]: failed.
+  Trying to prove $equiv for \data_out [38]: failed.
+  Trying to prove $equiv for \data_out [39]: failed.
+  Trying to prove $equiv for \data_out [40]: failed.
+  Trying to prove $equiv for \data_out [41]: failed.
+  Trying to prove $equiv for \data_out [42]: failed.
+  Trying to prove $equiv for \data_out [43]: failed.
+  Trying to prove $equiv for \data_out [44]: failed.
+  Trying to prove $equiv for \data_out [45]: failed.
+  Trying to prove $equiv for \data_out [46]: failed.
+  Trying to prove $equiv for \data_out [47]: failed.
+  Trying to prove $equiv for \data_out [48]: failed.
+  Trying to prove $equiv for \data_out [49]: failed.
+  Trying to prove $equiv for \data_out [50]: failed.
+  Trying to prove $equiv for \data_out [51]: failed.
+  Trying to prove $equiv for \data_out [52]: failed.
+  Trying to prove $equiv for \data_out [53]: failed.
+  Trying to prove $equiv for \data_out [54]: failed.
+  Trying to prove $equiv for \data_out [55]: failed.
+  Trying to prove $equiv for \data_out [56]: failed.
+  Trying to prove $equiv for \data_out [57]: failed.
+  Trying to prove $equiv for \data_out [58]: failed.
+  Trying to prove $equiv for \data_out [59]: failed.
+  Trying to prove $equiv for \data_out [60]: failed.
+  Trying to prove $equiv for \data_out [61]: failed.
+  Trying to prove $equiv for \data_out [62]: failed.
+  Trying to prove $equiv for \data_out [63]: failed.
+  Trying to prove $equiv for \data_out [64]: failed.
+  Trying to prove $equiv for \data_out [65]: failed.
+  Trying to prove $equiv for \data_out [66]: failed.
+  Trying to prove $equiv for \data_out [67]: failed.
+  Trying to prove $equiv for \data_out [68]: failed.
+  Trying to prove $equiv for \data_out [69]: failed.
+  Trying to prove $equiv for \data_out [70]: failed.
+  Trying to prove $equiv for \data_out [71]: failed.
+  Trying to prove $equiv for \data_out [72]: failed.
+  Trying to prove $equiv for \data_out [73]: failed.
+  Trying to prove $equiv for \data_out [74]: failed.
+  Trying to prove $equiv for \data_out [75]: failed.
+  Trying to prove $equiv for \data_out [76]: failed.
+  Trying to prove $equiv for \data_out [77]: failed.
+  Trying to prove $equiv for \data_out [78]: failed.
+  Trying to prove $equiv for \data_out [79]: failed.
+  Trying to prove $equiv for \data_out [80]: failed.
+  Trying to prove $equiv for \data_out [81]: failed.
+  Trying to prove $equiv for \data_out [82]: failed.
+  Trying to prove $equiv for \data_out [83]: failed.
+  Trying to prove $equiv for \data_out [84]: failed.
+  Trying to prove $equiv for \data_out [85]: failed.
+  Trying to prove $equiv for \data_out [86]: failed.
+  Trying to prove $equiv for \data_out [87]: failed.
+  Trying to prove $equiv for \data_out [88]: failed.
+  Trying to prove $equiv for \data_out [89]: failed.
+  Trying to prove $equiv for \data_out [90]: failed.
+  Trying to prove $equiv for \data_out [91]: failed.
+  Trying to prove $equiv for \data_out [92]: failed.
+  Trying to prove $equiv for \data_out [93]: failed.
+  Trying to prove $equiv for \data_out [94]: failed.
+  Trying to prove $equiv for \data_out [95]: failed.
+  Trying to prove $equiv for \data_out [96]: failed.
+  Trying to prove $equiv for \data_out [97]: failed.
+  Trying to prove $equiv for \data_out [98]: failed.
+  Trying to prove $equiv for \data_out [99]: failed.
+  Trying to prove $equiv for \data_out [100]: failed.
+  Trying to prove $equiv for \data_out [101]: failed.
+  Trying to prove $equiv for \data_out [102]: failed.
+  Trying to prove $equiv for \data_out [103]: failed.
+  Trying to prove $equiv for \data_out [104]: failed.
+  Trying to prove $equiv for \data_out [105]: failed.
+  Trying to prove $equiv for \data_out [106]: failed.
+  Trying to prove $equiv for \data_out [107]: failed.
+  Trying to prove $equiv for \data_out [108]: failed.
+  Trying to prove $equiv for \data_out [109]: failed.
+  Trying to prove $equiv for \data_out [110]: failed.
+  Trying to prove $equiv for \data_out [111]: failed.
+  Trying to prove $equiv for \data_out [112]: failed.
+  Trying to prove $equiv for \data_out [113]: failed.
+  Trying to prove $equiv for \data_out [114]: failed.
+  Trying to prove $equiv for \data_out [115]: failed.
+  Trying to prove $equiv for \data_out [116]: failed.
+  Trying to prove $equiv for \data_out [117]: failed.
+  Trying to prove $equiv for \data_out [118]: failed.
+  Trying to prove $equiv for \data_out [119]: failed.
+  Trying to prove $equiv for \data_out [120]: failed.
+  Trying to prove $equiv for \data_out [121]: failed.
+  Trying to prove $equiv for \data_out [122]: failed.
+  Trying to prove $equiv for \data_out [123]: failed.
+  Trying to prove $equiv for \data_out [124]: failed.
+  Trying to prove $equiv for \data_out [125]: failed.
+  Trying to prove $equiv for \data_out [126]: failed.
+  Trying to prove $equiv for \data_out [127]: failed.
+  Trying to prove $equiv for \data_out [128]: failed.
+  Trying to prove $equiv for \data_out [129]: failed.
+  Trying to prove $equiv for \data_out [130]: failed.
+  Trying to prove $equiv for \data_out [131]: failed.
+  Trying to prove $equiv for \data_out [132]: failed.
+  Trying to prove $equiv for \data_out [133]: failed.
+  Trying to prove $equiv for \data_out [134]: failed.
+  Trying to prove $equiv for \data_out [135]: failed.
+  Trying to prove $equiv for \data_out [136]: failed.
+  Trying to prove $equiv for \data_out [137]: failed.
+  Trying to prove $equiv for \data_out [138]: failed.
+  Trying to prove $equiv for \data_out [139]: failed.
+  Trying to prove $equiv for \data_out [140]: failed.
+  Trying to prove $equiv for \data_out [141]: failed.
+  Trying to prove $equiv for \data_out [142]: failed.
+  Trying to prove $equiv for \data_out [143]: failed.
+  Trying to prove $equiv for \data_out [144]: failed.
+  Trying to prove $equiv for \data_out [145]: failed.
+  Trying to prove $equiv for \data_out [146]: failed.
+  Trying to prove $equiv for \data_out [147]: failed.
+  Trying to prove $equiv for \data_out [148]: failed.
+  Trying to prove $equiv for \data_out [149]: failed.
+  Trying to prove $equiv for \data_out [150]: failed.
+  Trying to prove $equiv for \data_out [151]: failed.
+  Trying to prove $equiv for \data_out [152]: failed.
+  Trying to prove $equiv for \data_out [153]: failed.
+  Trying to prove $equiv for \data_out [154]: failed.
+  Trying to prove $equiv for \data_out [155]: failed.
+  Trying to prove $equiv for \data_out [156]: failed.
+  Trying to prove $equiv for \data_out [157]: failed.
+  Trying to prove $equiv for \data_out [158]: failed.
+  Trying to prove $equiv for \data_out [159]: failed.
+  Trying to prove $equiv for \data_out [160]: failed.
+  Trying to prove $equiv for \data_out [161]: failed.
+  Trying to prove $equiv for \data_out [162]: failed.
+  Trying to prove $equiv for \data_out [163]: failed.
+  Trying to prove $equiv for \data_out [164]: failed.
+  Trying to prove $equiv for \data_out [165]: failed.
+  Trying to prove $equiv for \data_out [166]: failed.
+  Trying to prove $equiv for \data_out [167]: failed.
+  Trying to prove $equiv for \data_out [168]: failed.
+  Trying to prove $equiv for \data_out [169]: failed.
+  Trying to prove $equiv for \data_out [170]: failed.
+  Trying to prove $equiv for \data_out [171]: failed.
+  Trying to prove $equiv for \data_out [172]: failed.
+  Trying to prove $equiv for \data_out [173]: failed.
+  Trying to prove $equiv for \data_out [174]: failed.
+  Trying to prove $equiv for \data_out [175]: failed.
+  Trying to prove $equiv for \data_out [176]: failed.
+  Trying to prove $equiv for \data_out [177]: failed.
+  Trying to prove $equiv for \data_out [178]: failed.
+  Trying to prove $equiv for \data_out [179]: failed.
+  Trying to prove $equiv for \data_out [180]: failed.
+  Trying to prove $equiv for \data_out [181]: failed.
+  Trying to prove $equiv for \data_out [182]: failed.
+  Trying to prove $equiv for \data_out [183]: failed.
+  Trying to prove $equiv for \data_out [184]: failed.
+  Trying to prove $equiv for \data_out [185]: failed.
+  Trying to prove $equiv for \data_out [186]: failed.
+  Trying to prove $equiv for \data_out [187]: failed.
+  Trying to prove $equiv for \data_out [188]: failed.
+  Trying to prove $equiv for \data_out [189]: failed.
+  Trying to prove $equiv for \data_out [190]: failed.
+  Trying to prove $equiv for \data_out [191]: failed.
+  Trying to prove $equiv for \data_out [192]: failed.
+  Trying to prove $equiv for \data_out [193]: failed.
+  Trying to prove $equiv for \data_out [194]: failed.
+  Trying to prove $equiv for \data_out [195]: failed.
+  Trying to prove $equiv for \data_out [196]: failed.
+  Trying to prove $equiv for \data_out [197]: failed.
+  Trying to prove $equiv for \data_out [198]: failed.
+  Trying to prove $equiv for \data_out [199]: failed.
+  Trying to prove $equiv for \data_out [200]: failed.
+  Trying to prove $equiv for \data_out [201]: failed.
+  Trying to prove $equiv for \data_out [202]: failed.
+  Trying to prove $equiv for \data_out [203]: failed.
+  Trying to prove $equiv for \data_out [204]: failed.
+  Trying to prove $equiv for \data_out [205]: failed.
+  Trying to prove $equiv for \data_out [206]: failed.
+  Trying to prove $equiv for \data_out [207]: failed.
+  Trying to prove $equiv for \data_out [208]: failed.
+  Trying to prove $equiv for \data_out [209]: failed.
+  Trying to prove $equiv for \data_out [210]: failed.
+  Trying to prove $equiv for \data_out [211]: failed.
+  Trying to prove $equiv for \data_out [212]: failed.
+  Trying to prove $equiv for \data_out [213]: failed.
+  Trying to prove $equiv for \data_out [214]: failed.
+  Trying to prove $equiv for \data_out [215]: failed.
+  Trying to prove $equiv for \data_out [216]: failed.
+  Trying to prove $equiv for \data_out [217]: failed.
+  Trying to prove $equiv for \data_out [218]: failed.
+  Trying to prove $equiv for \data_out [219]: failed.
+  Trying to prove $equiv for \data_out [220]: failed.
+  Trying to prove $equiv for \data_out [221]: failed.
+  Trying to prove $equiv for \data_out [222]: failed.
+  Trying to prove $equiv for \data_out [223]: failed.
+  Trying to prove $equiv for \data_out [224]: failed.
+  Trying to prove $equiv for \data_out [225]: failed.
+  Trying to prove $equiv for \data_out [226]: failed.
+  Trying to prove $equiv for \data_out [227]: failed.
+  Trying to prove $equiv for \data_out [228]: failed.
+  Trying to prove $equiv for \data_out [229]: failed.
+  Trying to prove $equiv for \data_out [230]: failed.
+  Trying to prove $equiv for \data_out [231]: failed.
+  Trying to prove $equiv for \data_out [232]: failed.
+  Trying to prove $equiv for \data_out [233]: failed.
+  Trying to prove $equiv for \data_out [234]: failed.
+  Trying to prove $equiv for \data_out [235]: failed.
+  Trying to prove $equiv for \data_out [236]: failed.
+  Trying to prove $equiv for \data_out [237]: failed.
+  Trying to prove $equiv for \data_out [238]: failed.
+  Trying to prove $equiv for \data_out [239]: failed.
+  Trying to prove $equiv for \data_out [240]: failed.
+  Trying to prove $equiv for \data_out [241]: failed.
+  Trying to prove $equiv for \data_out [242]: failed.
+  Trying to prove $equiv for \data_out [243]: failed.
+  Trying to prove $equiv for \data_out [244]: failed.
+  Trying to prove $equiv for \data_out [245]: failed.
+  Trying to prove $equiv for \data_out [246]: failed.
+  Trying to prove $equiv for \data_out [247]: failed.
+  Trying to prove $equiv for \data_out [248]: failed.
+  Trying to prove $equiv for \data_out [249]: failed.
+  Trying to prove $equiv for \data_out [250]: failed.
+  Trying to prove $equiv for \data_out [251]: failed.
+  Trying to prove $equiv for \data_out [252]: failed.
+  Trying to prove $equiv for \data_out [253]: failed.
+  Trying to prove $equiv for \data_out [254]: failed.
+  Trying to prove $equiv for \data_out [255]: failed.
+Proved 0 previously unproven $equiv cells.
+
+10. Executing EQUIV_INDUCT pass.
+Found 256 unproven $equiv cells in module equiv:
+  Proving existence of base case for step 1. (3842 clauses over 1666 variables)
+  Proving induction step 1. (7683 clauses over 3331 variables)
+  Proof for induction step failed. Extending to next time step.
+  Proving existence of base case for step 2. (7684 clauses over 3331 variables)
+  Proving induction step 2. (11525 clauses over 4996 variables)
+  Proof for induction step failed. Extending to next time step.
+  Proving existence of base case for step 3. (11526 clauses over 4996 variables)
+  Proving induction step 3. (15367 clauses over 6661 variables)
+  Proof for induction step failed. Extending to next time step.
+  Proving existence of base case for step 4. (15368 clauses over 6661 variables)
+  Proving induction step 4. (19209 clauses over 8326 variables)
+  Proof for induction step failed. Trying to prove individual $equiv from workset.
+  Trying to prove $equiv for \data_out [0]: failed.
+  Trying to prove $equiv for \data_out [3]: failed.
+  Trying to prove $equiv for \data_out [2]: failed.
+  Trying to prove $equiv for \data_out [1]: failed.
+  Trying to prove $equiv for \data_out [11]: failed.
+  Trying to prove $equiv for \data_out [12]: failed.
+  Trying to prove $equiv for \data_out [13]: failed.
+  Trying to prove $equiv for \data_out [14]: failed.
+  Trying to prove $equiv for \data_out [15]: failed.
+  Trying to prove $equiv for \data_out [7]: failed.
+  Trying to prove $equiv for \data_out [8]: failed.
+  Trying to prove $equiv for \data_out [10]: failed.
+  Trying to prove $equiv for \data_out [5]: failed.
+  Trying to prove $equiv for \data_out [6]: failed.
+  Trying to prove $equiv for \data_out [4]: failed.
+  Trying to prove $equiv for \data_out [9]: failed.
+  Trying to prove $equiv for \data_out [16]: failed.
+  Trying to prove $equiv for \data_out [17]: failed.
+  Trying to prove $equiv for \data_out [18]: failed.
+  Trying to prove $equiv for \data_out [19]: failed.
+  Trying to prove $equiv for \data_out [20]: failed.
+  Trying to prove $equiv for \data_out [21]: failed.
+  Trying to prove $equiv for \data_out [22]: failed.
+  Trying to prove $equiv for \data_out [23]: failed.
+  Trying to prove $equiv for \data_out [24]: failed.
+  Trying to prove $equiv for \data_out [25]: failed.
+  Trying to prove $equiv for \data_out [26]: failed.
+  Trying to prove $equiv for \data_out [27]: failed.
+  Trying to prove $equiv for \data_out [28]: failed.
+  Trying to prove $equiv for \data_out [29]: failed.
+  Trying to prove $equiv for \data_out [30]: failed.
+  Trying to prove $equiv for \data_out [31]: failed.
+  Trying to prove $equiv for \data_out [32]: failed.
+  Trying to prove $equiv for \data_out [65]: failed.
+  Trying to prove $equiv for \data_out [33]: failed.
+  Trying to prove $equiv for \data_out [34]: failed.
+  Trying to prove $equiv for \data_out [35]: failed.
+  Trying to prove $equiv for \data_out [36]: failed.
+  Trying to prove $equiv for \data_out [37]: failed.
+  Trying to prove $equiv for \data_out [38]: failed.
+  Trying to prove $equiv for \data_out [39]: failed.
+  Trying to prove $equiv for \data_out [40]: failed.
+  Trying to prove $equiv for \data_out [41]: failed.
+  Trying to prove $equiv for \data_out [42]: failed.
+  Trying to prove $equiv for \data_out [43]: failed.
+  Trying to prove $equiv for \data_out [44]: failed.
+  Trying to prove $equiv for \data_out [45]: failed.
+  Trying to prove $equiv for \data_out [46]: failed.
+  Trying to prove $equiv for \data_out [47]: failed.
+  Trying to prove $equiv for \data_out [48]: failed.
+  Trying to prove $equiv for \data_out [49]: failed.
+  Trying to prove $equiv for \data_out [50]: failed.
+  Trying to prove $equiv for \data_out [51]: failed.
+  Trying to prove $equiv for \data_out [52]: failed.
+  Trying to prove $equiv for \data_out [53]: failed.
+  Trying to prove $equiv for \data_out [54]: failed.
+  Trying to prove $equiv for \data_out [55]: failed.
+  Trying to prove $equiv for \data_out [56]: failed.
+  Trying to prove $equiv for \data_out [57]: failed.
+  Trying to prove $equiv for \data_out [58]: failed.
+  Trying to prove $equiv for \data_out [59]: failed.
+  Trying to prove $equiv for \data_out [60]: failed.
+  Trying to prove $equiv for \data_out [61]: failed.
+  Trying to prove $equiv for \data_out [62]: failed.
+  Trying to prove $equiv for \data_out [63]: failed.
+  Trying to prove $equiv for \data_out [64]: failed.
+  Trying to prove $equiv for \data_out [129]: failed.
+  Trying to prove $equiv for \data_out [130]: failed.
+  Trying to prove $equiv for \data_out [131]: failed.
+  Trying to prove $equiv for \data_out [66]: failed.
+  Trying to prove $equiv for \data_out [67]: failed.
+  Trying to prove $equiv for \data_out [68]: failed.
+  Trying to prove $equiv for \data_out [69]: failed.
+  Trying to prove $equiv for \data_out [70]: failed.
+  Trying to prove $equiv for \data_out [71]: failed.
+  Trying to prove $equiv for \data_out [72]: failed.
+  Trying to prove $equiv for \data_out [73]: failed.
+  Trying to prove $equiv for \data_out [74]: failed.
+  Trying to prove $equiv for \data_out [75]: failed.
+  Trying to prove $equiv for \data_out [76]: failed.
+  Trying to prove $equiv for \data_out [77]: failed.
+  Trying to prove $equiv for \data_out [78]: failed.
+  Trying to prove $equiv for \data_out [79]: failed.
+  Trying to prove $equiv for \data_out [80]: failed.
+  Trying to prove $equiv for \data_out [81]: failed.
+  Trying to prove $equiv for \data_out [82]: failed.
+  Trying to prove $equiv for \data_out [83]: failed.
+  Trying to prove $equiv for \data_out [84]: failed.
+  Trying to prove $equiv for \data_out [85]: failed.
+  Trying to prove $equiv for \data_out [86]: failed.
+  Trying to prove $equiv for \data_out [87]: failed.
+  Trying to prove $equiv for \data_out [88]: failed.
+  Trying to prove $equiv for \data_out [89]: failed.
+  Trying to prove $equiv for \data_out [90]: failed.
+  Trying to prove $equiv for \data_out [91]: failed.
+  Trying to prove $equiv for \data_out [92]: failed.
+  Trying to prove $equiv for \data_out [93]: failed.
+  Trying to prove $equiv for \data_out [94]: failed.
+  Trying to prove $equiv for \data_out [95]: failed.
+  Trying to prove $equiv for \data_out [96]: failed.
+  Trying to prove $equiv for \data_out [97]: failed.
+  Trying to prove $equiv for \data_out [98]: failed.
+  Trying to prove $equiv for \data_out [99]: failed.
+  Trying to prove $equiv for \data_out [100]: failed.
+  Trying to prove $equiv for \data_out [101]: failed.
+  Trying to prove $equiv for \data_out [102]: failed.
+  Trying to prove $equiv for \data_out [103]: failed.
+  Trying to prove $equiv for \data_out [104]: failed.
+  Trying to prove $equiv for \data_out [105]: failed.
+  Trying to prove $equiv for \data_out [106]: failed.
+  Trying to prove $equiv for \data_out [217]: failed.
+  Trying to prove $equiv for \data_out [218]: failed.
+  Trying to prove $equiv for \data_out [107]: failed.
+  Trying to prove $equiv for \data_out [108]: failed.
+  Trying to prove $equiv for \data_out [109]: failed.
+  Trying to prove $equiv for \data_out [110]: failed.
+  Trying to prove $equiv for \data_out [111]: failed.
+  Trying to prove $equiv for \data_out [112]: failed.
+  Trying to prove $equiv for \data_out [113]: failed.
+  Trying to prove $equiv for \data_out [114]: failed.
+  Trying to prove $equiv for \data_out [115]: failed.
+  Trying to prove $equiv for \data_out [116]: failed.
+  Trying to prove $equiv for \data_out [117]: failed.
+  Trying to prove $equiv for \data_out [118]: failed.
+  Trying to prove $equiv for \data_out [119]: failed.
+  Trying to prove $equiv for \data_out [120]: failed.
+  Trying to prove $equiv for \data_out [121]: failed.
+  Trying to prove $equiv for \data_out [122]: failed.
+  Trying to prove $equiv for \data_out [123]: failed.
+  Trying to prove $equiv for \data_out [124]: failed.
+  Trying to prove $equiv for \data_out [125]: failed.
+  Trying to prove $equiv for \data_out [126]: failed.
+  Trying to prove $equiv for \data_out [127]: failed.
+  Trying to prove $equiv for \data_out [128]: failed.
+  Trying to prove $equiv for \data_out [132]: failed.
+  Trying to prove $equiv for \data_out [133]: failed.
+  Trying to prove $equiv for \data_out [134]: failed.
+  Trying to prove $equiv for \data_out [135]: failed.
+  Trying to prove $equiv for \data_out [136]: failed.
+  Trying to prove $equiv for \data_out [137]: failed.
+  Trying to prove $equiv for \data_out [138]: failed.
+  Trying to prove $equiv for \data_out [139]: failed.
+  Trying to prove $equiv for \data_out [140]: failed.
+  Trying to prove $equiv for \data_out [141]: failed.
+  Trying to prove $equiv for \data_out [142]: failed.
+  Trying to prove $equiv for \data_out [143]: failed.
+  Trying to prove $equiv for \data_out [144]: failed.
+  Trying to prove $equiv for \data_out [145]: failed.
+  Trying to prove $equiv for \data_out [146]: failed.
+  Trying to prove $equiv for \data_out [147]: failed.
+  Trying to prove $equiv for \data_out [148]: failed.
+  Trying to prove $equiv for \data_out [149]: failed.
+  Trying to prove $equiv for \data_out [150]: failed.
+  Trying to prove $equiv for \data_out [151]: failed.
+  Trying to prove $equiv for \data_out [152]: failed.
+  Trying to prove $equiv for \data_out [153]: failed.
+  Trying to prove $equiv for \data_out [154]: failed.
+  Trying to prove $equiv for \data_out [155]: failed.
+  Trying to prove $equiv for \data_out [156]: failed.
+  Trying to prove $equiv for \data_out [157]: failed.
+  Trying to prove $equiv for \data_out [158]: failed.
+  Trying to prove $equiv for \data_out [159]: failed.
+  Trying to prove $equiv for \data_out [160]: failed.
+  Trying to prove $equiv for \data_out [161]: failed.
+  Trying to prove $equiv for \data_out [162]: failed.
+  Trying to prove $equiv for \data_out [163]: failed.
+  Trying to prove $equiv for \data_out [164]: failed.
+  Trying to prove $equiv for \data_out [165]: failed.
+  Trying to prove $equiv for \data_out [166]: failed.
+  Trying to prove $equiv for \data_out [167]: failed.
+  Trying to prove $equiv for \data_out [168]: failed.
+  Trying to prove $equiv for \data_out [169]: failed.
+  Trying to prove $equiv for \data_out [170]: failed.
+  Trying to prove $equiv for \data_out [171]: failed.
+  Trying to prove $equiv for \data_out [172]: failed.
+  Trying to prove $equiv for \data_out [173]: failed.
+  Trying to prove $equiv for \data_out [174]: failed.
+  Trying to prove $equiv for \data_out [175]: failed.
+  Trying to prove $equiv for \data_out [176]: failed.
+  Trying to prove $equiv for \data_out [177]: failed.
+  Trying to prove $equiv for \data_out [178]: failed.
+  Trying to prove $equiv for \data_out [179]: failed.
+  Trying to prove $equiv for \data_out [180]: failed.
+  Trying to prove $equiv for \data_out [181]: failed.
+  Trying to prove $equiv for \data_out [182]: failed.
+  Trying to prove $equiv for \data_out [183]: failed.
+  Trying to prove $equiv for \data_out [184]: failed.
+  Trying to prove $equiv for \data_out [185]: failed.
+  Trying to prove $equiv for \data_out [186]: failed.
+  Trying to prove $equiv for \data_out [187]: failed.
+  Trying to prove $equiv for \data_out [188]: failed.
+  Trying to prove $equiv for \data_out [189]: failed.
+  Trying to prove $equiv for \data_out [190]: failed.
+  Trying to prove $equiv for \data_out [191]: failed.
+  Trying to prove $equiv for \data_out [192]: failed.
+  Trying to prove $equiv for \data_out [193]: failed.
+  Trying to prove $equiv for \data_out [194]: failed.
+  Trying to prove $equiv for \data_out [195]: failed.
+  Trying to prove $equiv for \data_out [196]: failed.
+  Trying to prove $equiv for \data_out [197]: failed.
+  Trying to prove $equiv for \data_out [198]: failed.
+  Trying to prove $equiv for \data_out [199]: failed.
+  Trying to prove $equiv for \data_out [200]: failed.
+  Trying to prove $equiv for \data_out [201]: failed.
+  Trying to prove $equiv for \data_out [202]: failed.
+  Trying to prove $equiv for \data_out [203]: failed.
+  Trying to prove $equiv for \data_out [204]: failed.
+  Trying to prove $equiv for \data_out [205]: failed.
+  Trying to prove $equiv for \data_out [206]: failed.
+  Trying to prove $equiv for \data_out [207]: failed.
+  Trying to prove $equiv for \data_out [208]: failed.
+  Trying to prove $equiv for \data_out [209]: failed.
+  Trying to prove $equiv for \data_out [210]: failed.
+  Trying to prove $equiv for \data_out [211]: failed.
+  Trying to prove $equiv for \data_out [212]: failed.
+  Trying to prove $equiv for \data_out [213]: failed.
+  Trying to prove $equiv for \data_out [214]: failed.
+  Trying to prove $equiv for \data_out [215]: failed.
+  Trying to prove $equiv for \data_out [216]: failed.
+  Trying to prove $equiv for \data_out [219]: failed.
+  Trying to prove $equiv for \data_out [220]: failed.
+  Trying to prove $equiv for \data_out [221]: failed.
+  Trying to prove $equiv for \data_out [222]: failed.
+  Trying to prove $equiv for \data_out [223]: failed.
+  Trying to prove $equiv for \data_out [224]: failed.
+  Trying to prove $equiv for \data_out [225]: failed.
+  Trying to prove $equiv for \data_out [226]: failed.
+  Trying to prove $equiv for \data_out [227]: failed.
+  Trying to prove $equiv for \data_out [228]: failed.
+  Trying to prove $equiv for \data_out [229]: failed.
+  Trying to prove $equiv for \data_out [230]: failed.
+  Trying to prove $equiv for \data_out [231]: failed.
+  Trying to prove $equiv for \data_out [232]: failed.
+  Trying to prove $equiv for \data_out [233]: failed.
+  Trying to prove $equiv for \data_out [234]: failed.
+  Trying to prove $equiv for \data_out [235]: failed.
+  Trying to prove $equiv for \data_out [236]: failed.
+  Trying to prove $equiv for \data_out [237]: failed.
+  Trying to prove $equiv for \data_out [238]: failed.
+  Trying to prove $equiv for \data_out [239]: failed.
+  Trying to prove $equiv for \data_out [240]: failed.
+  Trying to prove $equiv for \data_out [241]: failed.
+  Trying to prove $equiv for \data_out [242]: failed.
+  Trying to prove $equiv for \data_out [243]: failed.
+  Trying to prove $equiv for \data_out [244]: failed.
+  Trying to prove $equiv for \data_out [245]: failed.
+  Trying to prove $equiv for \data_out [246]: failed.
+  Trying to prove $equiv for \data_out [247]: failed.
+  Trying to prove $equiv for \data_out [248]: failed.
+  Trying to prove $equiv for \data_out [249]: failed.
+  Trying to prove $equiv for \data_out [250]: failed.
+  Trying to prove $equiv for \data_out [251]: failed.
+  Trying to prove $equiv for \data_out [252]: failed.
+  Trying to prove $equiv for \data_out [253]: failed.
+  Trying to prove $equiv for \data_out [254]: failed.
+  Trying to prove $equiv for \data_out [255]: failed.
+Proved 0 previously unproven $equiv cells.
+
+11. Executing EQUIV_STATUS pass.
+Found 256 $equiv cells in equiv:
+  Of those cells 0 are proven and 256 are unproven.
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$256: \data_out_gold [255] \data_out_gate [255]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$255: \data_out_gold [254] \data_out_gate [254]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$254: \data_out_gold [253] \data_out_gate [253]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$253: \data_out_gold [252] \data_out_gate [252]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$252: \data_out_gold [251] \data_out_gate [251]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$251: \data_out_gold [250] \data_out_gate [250]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$250: \data_out_gold [249] \data_out_gate [249]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$249: \data_out_gold [248] \data_out_gate [248]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$248: \data_out_gold [247] \data_out_gate [247]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$247: \data_out_gold [246] \data_out_gate [246]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$246: \data_out_gold [245] \data_out_gate [245]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$245: \data_out_gold [244] \data_out_gate [244]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$244: \data_out_gold [243] \data_out_gate [243]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$243: \data_out_gold [242] \data_out_gate [242]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$242: \data_out_gold [241] \data_out_gate [241]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$241: \data_out_gold [240] \data_out_gate [240]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$240: \data_out_gold [239] \data_out_gate [239]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$239: \data_out_gold [238] \data_out_gate [238]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$238: \data_out_gold [237] \data_out_gate [237]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$237: \data_out_gold [236] \data_out_gate [236]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$236: \data_out_gold [235] \data_out_gate [235]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$235: \data_out_gold [234] \data_out_gate [234]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$234: \data_out_gold [233] \data_out_gate [233]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$233: \data_out_gold [232] \data_out_gate [232]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$232: \data_out_gold [231] \data_out_gate [231]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$231: \data_out_gold [230] \data_out_gate [230]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$230: \data_out_gold [229] \data_out_gate [229]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$229: \data_out_gold [228] \data_out_gate [228]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$228: \data_out_gold [227] \data_out_gate [227]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$227: \data_out_gold [226] \data_out_gate [226]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$226: \data_out_gold [225] \data_out_gate [225]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$225: \data_out_gold [224] \data_out_gate [224]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$224: \data_out_gold [223] \data_out_gate [223]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$223: \data_out_gold [222] \data_out_gate [222]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$222: \data_out_gold [221] \data_out_gate [221]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$221: \data_out_gold [220] \data_out_gate [220]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$220: \data_out_gold [219] \data_out_gate [219]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$219: \data_out_gold [218] \data_out_gate [218]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$218: \data_out_gold [217] \data_out_gate [217]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$217: \data_out_gold [216] \data_out_gate [216]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$216: \data_out_gold [215] \data_out_gate [215]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$215: \data_out_gold [214] \data_out_gate [214]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$214: \data_out_gold [213] \data_out_gate [213]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$213: \data_out_gold [212] \data_out_gate [212]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$212: \data_out_gold [211] \data_out_gate [211]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$211: \data_out_gold [210] \data_out_gate [210]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$210: \data_out_gold [209] \data_out_gate [209]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$209: \data_out_gold [208] \data_out_gate [208]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$208: \data_out_gold [207] \data_out_gate [207]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$207: \data_out_gold [206] \data_out_gate [206]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$206: \data_out_gold [205] \data_out_gate [205]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$205: \data_out_gold [204] \data_out_gate [204]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$204: \data_out_gold [203] \data_out_gate [203]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$203: \data_out_gold [202] \data_out_gate [202]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$202: \data_out_gold [201] \data_out_gate [201]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$201: \data_out_gold [200] \data_out_gate [200]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$200: \data_out_gold [199] \data_out_gate [199]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$199: \data_out_gold [198] \data_out_gate [198]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$198: \data_out_gold [197] \data_out_gate [197]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$197: \data_out_gold [196] \data_out_gate [196]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$196: \data_out_gold [195] \data_out_gate [195]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$195: \data_out_gold [194] \data_out_gate [194]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$194: \data_out_gold [193] \data_out_gate [193]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$193: \data_out_gold [192] \data_out_gate [192]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$192: \data_out_gold [191] \data_out_gate [191]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$191: \data_out_gold [190] \data_out_gate [190]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$190: \data_out_gold [189] \data_out_gate [189]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$189: \data_out_gold [188] \data_out_gate [188]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$188: \data_out_gold [187] \data_out_gate [187]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$187: \data_out_gold [186] \data_out_gate [186]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$186: \data_out_gold [185] \data_out_gate [185]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$185: \data_out_gold [184] \data_out_gate [184]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$184: \data_out_gold [183] \data_out_gate [183]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$183: \data_out_gold [182] \data_out_gate [182]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$182: \data_out_gold [181] \data_out_gate [181]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$181: \data_out_gold [180] \data_out_gate [180]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$180: \data_out_gold [179] \data_out_gate [179]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$179: \data_out_gold [178] \data_out_gate [178]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$178: \data_out_gold [177] \data_out_gate [177]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$177: \data_out_gold [176] \data_out_gate [176]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$176: \data_out_gold [175] \data_out_gate [175]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$175: \data_out_gold [174] \data_out_gate [174]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$174: \data_out_gold [173] \data_out_gate [173]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$173: \data_out_gold [172] \data_out_gate [172]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$172: \data_out_gold [171] \data_out_gate [171]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$171: \data_out_gold [170] \data_out_gate [170]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$170: \data_out_gold [169] \data_out_gate [169]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$169: \data_out_gold [168] \data_out_gate [168]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$168: \data_out_gold [167] \data_out_gate [167]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$167: \data_out_gold [166] \data_out_gate [166]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$166: \data_out_gold [165] \data_out_gate [165]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$165: \data_out_gold [164] \data_out_gate [164]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$164: \data_out_gold [163] \data_out_gate [163]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$163: \data_out_gold [162] \data_out_gate [162]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$162: \data_out_gold [161] \data_out_gate [161]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$161: \data_out_gold [160] \data_out_gate [160]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$160: \data_out_gold [159] \data_out_gate [159]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$159: \data_out_gold [158] \data_out_gate [158]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$158: \data_out_gold [157] \data_out_gate [157]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$157: \data_out_gold [156] \data_out_gate [156]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$156: \data_out_gold [155] \data_out_gate [155]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$155: \data_out_gold [154] \data_out_gate [154]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$154: \data_out_gold [153] \data_out_gate [153]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$153: \data_out_gold [152] \data_out_gate [152]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$152: \data_out_gold [151] \data_out_gate [151]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$151: \data_out_gold [150] \data_out_gate [150]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$150: \data_out_gold [149] \data_out_gate [149]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$149: \data_out_gold [148] \data_out_gate [148]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$148: \data_out_gold [147] \data_out_gate [147]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$147: \data_out_gold [146] \data_out_gate [146]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$146: \data_out_gold [145] \data_out_gate [145]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$145: \data_out_gold [144] \data_out_gate [144]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$144: \data_out_gold [143] \data_out_gate [143]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$143: \data_out_gold [142] \data_out_gate [142]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$142: \data_out_gold [141] \data_out_gate [141]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$141: \data_out_gold [140] \data_out_gate [140]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$140: \data_out_gold [139] \data_out_gate [139]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$139: \data_out_gold [138] \data_out_gate [138]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$138: \data_out_gold [137] \data_out_gate [137]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$137: \data_out_gold [136] \data_out_gate [136]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$136: \data_out_gold [135] \data_out_gate [135]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$135: \data_out_gold [134] \data_out_gate [134]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$134: \data_out_gold [133] \data_out_gate [133]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$133: \data_out_gold [132] \data_out_gate [132]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$132: \data_out_gold [131] \data_out_gate [131]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$131: \data_out_gold [130] \data_out_gate [130]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$130: \data_out_gold [129] \data_out_gate [129]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$129: \data_out_gold [128] \data_out_gate [128]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$128: \data_out_gold [127] \data_out_gate [127]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$127: \data_out_gold [126] \data_out_gate [126]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$126: \data_out_gold [125] \data_out_gate [125]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$125: \data_out_gold [124] \data_out_gate [124]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$124: \data_out_gold [123] \data_out_gate [123]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$123: \data_out_gold [122] \data_out_gate [122]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$122: \data_out_gold [121] \data_out_gate [121]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$121: \data_out_gold [120] \data_out_gate [120]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$120: \data_out_gold [119] \data_out_gate [119]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$119: \data_out_gold [118] \data_out_gate [118]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$118: \data_out_gold [117] \data_out_gate [117]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$117: \data_out_gold [116] \data_out_gate [116]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$116: \data_out_gold [115] \data_out_gate [115]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$115: \data_out_gold [114] \data_out_gate [114]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$114: \data_out_gold [113] \data_out_gate [113]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$113: \data_out_gold [112] \data_out_gate [112]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$112: \data_out_gold [111] \data_out_gate [111]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$111: \data_out_gold [110] \data_out_gate [110]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$110: \data_out_gold [109] \data_out_gate [109]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$109: \data_out_gold [108] \data_out_gate [108]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$108: \data_out_gold [107] \data_out_gate [107]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$107: \data_out_gold [106] \data_out_gate [106]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$106: \data_out_gold [105] \data_out_gate [105]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$105: \data_out_gold [104] \data_out_gate [104]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$104: \data_out_gold [103] \data_out_gate [103]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$103: \data_out_gold [102] \data_out_gate [102]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$102: \data_out_gold [101] \data_out_gate [101]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$101: \data_out_gold [100] \data_out_gate [100]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$100: \data_out_gold [99] \data_out_gate [99]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$99: \data_out_gold [98] \data_out_gate [98]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$98: \data_out_gold [97] \data_out_gate [97]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$97: \data_out_gold [96] \data_out_gate [96]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$96: \data_out_gold [95] \data_out_gate [95]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$95: \data_out_gold [94] \data_out_gate [94]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$94: \data_out_gold [93] \data_out_gate [93]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$93: \data_out_gold [92] \data_out_gate [92]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$92: \data_out_gold [91] \data_out_gate [91]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$91: \data_out_gold [90] \data_out_gate [90]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$90: \data_out_gold [89] \data_out_gate [89]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$89: \data_out_gold [88] \data_out_gate [88]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$88: \data_out_gold [87] \data_out_gate [87]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$87: \data_out_gold [86] \data_out_gate [86]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$86: \data_out_gold [85] \data_out_gate [85]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$85: \data_out_gold [84] \data_out_gate [84]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$84: \data_out_gold [83] \data_out_gate [83]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$83: \data_out_gold [82] \data_out_gate [82]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$82: \data_out_gold [81] \data_out_gate [81]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$81: \data_out_gold [80] \data_out_gate [80]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$80: \data_out_gold [79] \data_out_gate [79]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$79: \data_out_gold [78] \data_out_gate [78]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$78: \data_out_gold [77] \data_out_gate [77]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$77: \data_out_gold [76] \data_out_gate [76]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$76: \data_out_gold [75] \data_out_gate [75]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$75: \data_out_gold [74] \data_out_gate [74]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$74: \data_out_gold [73] \data_out_gate [73]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$73: \data_out_gold [72] \data_out_gate [72]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$72: \data_out_gold [71] \data_out_gate [71]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$71: \data_out_gold [70] \data_out_gate [70]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$70: \data_out_gold [69] \data_out_gate [69]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$69: \data_out_gold [68] \data_out_gate [68]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$68: \data_out_gold [67] \data_out_gate [67]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$67: \data_out_gold [66] \data_out_gate [66]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$66: \data_out_gold [65] \data_out_gate [65]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$65: \data_out_gold [64] \data_out_gate [64]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$64: \data_out_gold [63] \data_out_gate [63]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$63: \data_out_gold [62] \data_out_gate [62]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$62: \data_out_gold [61] \data_out_gate [61]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$61: \data_out_gold [60] \data_out_gate [60]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$60: \data_out_gold [59] \data_out_gate [59]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$59: \data_out_gold [58] \data_out_gate [58]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$58: \data_out_gold [57] \data_out_gate [57]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$57: \data_out_gold [56] \data_out_gate [56]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$56: \data_out_gold [55] \data_out_gate [55]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$55: \data_out_gold [54] \data_out_gate [54]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$54: \data_out_gold [53] \data_out_gate [53]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$53: \data_out_gold [52] \data_out_gate [52]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$52: \data_out_gold [51] \data_out_gate [51]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$51: \data_out_gold [50] \data_out_gate [50]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$50: \data_out_gold [49] \data_out_gate [49]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$49: \data_out_gold [48] \data_out_gate [48]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$48: \data_out_gold [47] \data_out_gate [47]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$47: \data_out_gold [46] \data_out_gate [46]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$46: \data_out_gold [45] \data_out_gate [45]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$45: \data_out_gold [44] \data_out_gate [44]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$44: \data_out_gold [43] \data_out_gate [43]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$43: \data_out_gold [42] \data_out_gate [42]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$42: \data_out_gold [41] \data_out_gate [41]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$41: \data_out_gold [40] \data_out_gate [40]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$40: \data_out_gold [39] \data_out_gate [39]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$39: \data_out_gold [38] \data_out_gate [38]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$38: \data_out_gold [37] \data_out_gate [37]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$37: \data_out_gold [36] \data_out_gate [36]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$36: \data_out_gold [35] \data_out_gate [35]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$35: \data_out_gold [34] \data_out_gate [34]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$34: \data_out_gold [33] \data_out_gate [33]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$33: \data_out_gold [32] \data_out_gate [32]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$32: \data_out_gold [31] \data_out_gate [31]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$31: \data_out_gold [30] \data_out_gate [30]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$30: \data_out_gold [29] \data_out_gate [29]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$29: \data_out_gold [28] \data_out_gate [28]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$28: \data_out_gold [27] \data_out_gate [27]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$27: \data_out_gold [26] \data_out_gate [26]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$26: \data_out_gold [25] \data_out_gate [25]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$25: \data_out_gold [24] \data_out_gate [24]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$24: \data_out_gold [23] \data_out_gate [23]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$23: \data_out_gold [22] \data_out_gate [22]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_wires$22: \data_out_gold [21] \data_out_gate [21]
+  Unproven $equiv $auto$equiv_make.cc:257:find_same_ERROR: Found 256 unproven $equiv cells in 'equiv_status -assert'.

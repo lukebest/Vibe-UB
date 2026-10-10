@@ -85,11 +85,13 @@ def _ensure_pycircuit() -> None:
         ) from exc
 
 
-def _tie_off_rst(verilog: str, module: str) -> str:
-    """Drop the leaf rst port and tie the internal net to 0.
+def _isolate_rst_pyc(verilog: str, module: str) -> str:
+    """Keep leaf ``rst_pyc`` but do not reset the array or rdata.
 
-    ``m.out`` / pyc_reg require ``!pyc.reset``. PRODUCT has no reset:
-    array and rdata stay undefined until a defined write/read.
+    ``m.out`` / pyc_reg require ``!pyc.reset``. CODING_STYLE §2 / A-line
+    leaves expose sync active-high ``rst_pyc``; this primitive must not
+    clear storage (CODING_STYLE §10). Isolate the flops with a constant-0
+    rst while still sampling the port (avoids unused-input lint).
     """
     needle = f"module {module} ("
     start = verilog.find(needle)
@@ -99,18 +101,18 @@ def _tie_off_rst(verilog: str, module: str) -> str:
     if ports_end < 0:
         raise SystemExit(f"generated Verilog: no port-list end for {module}")
     ports = verilog[start:ports_end]
-    if "\n  input rst,\n" not in ports:
-        raise SystemExit(f"generated Verilog: expected `input rst` on {module}")
-    ports = ports.replace("\n  input rst,", "")
+    if "\n  input rst_pyc,\n" not in ports and "\n  input rst_pyc\n" not in ports:
+        raise SystemExit(f"generated Verilog: expected `input rst_pyc` on {module}")
+    body = verilog[ports_end:]
+    if ".rst(rst_pyc)" in body:
+        body = body.replace(".rst(rst_pyc)", ".rst(rst)")
     insert = (
         "\n"
-        "  // pyc_reg requires !pyc.reset; PRODUCT ties it off.\n"
-        "  // Array and rdata are not reset (undefined until a defined read).\n"
-        "  wire rst = 1'b0;\n"
+        "  // Leaf-standard sync reset (CODING_STYLE §2). Array and rdata\n"
+        "  // are not reset (undefined until a defined read).\n"
+        "  wire rst = rst_pyc & 1'b0;\n"
     )
-    return verilog[:start] + ports + verilog[ports_end : ports_end + 2] + insert + verilog[
-        ports_end + 2 :
-    ]
+    return verilog[:start] + ports + body[:2] + insert + body[2:]
 
 
 def _header(leaf: str, label: str, depth: int, width: int) -> str:
@@ -120,10 +122,11 @@ def _header(leaf: str, label: str, depth: int, width: int) -> str:
         f"// Regenerate: python3 scripts/emit_rtl.py\n"
         f"// PRODUCT (TEST_HOOKS=0). SPEC §10 lists no tb_* hooks — no HOOKS netlist.\n"
         f"// Variant {label}: DEPTH={depth} WIDTH={width} AW={aw}\n"
-        f"// Ports: clk, we, waddr[{aw}-1:0], wdata[{width}-1:0], "
+        f"// Ports: core_clk, rst_pyc, we, waddr[{aw}-1:0], wdata[{width}-1:0], "
         f"re, raddr[{aw}-1:0], rdata[{width}-1:0]\n"
         f"// 1R1W, registered rdata (1-cycle), same-address same-cycle read-old.\n"
-        f"// Array and rdata are not reset; OOR addresses are not truncated.\n"
+        f"// rst_pyc is the leaf-standard sync reset; array and rdata are not\n"
+        f"// cleared. OOR addresses are not truncated.\n"
         f"\n"
     )
 
@@ -178,7 +181,7 @@ def emit_variant(
         )
         raw = raw_v.read_text(encoding="utf-8")
 
-    raw = _tie_off_rst(raw, module)
+    raw = _isolate_rst_pyc(raw, module)
     label = module[len("ub_cmn_mem_1r1w_") :] if module.startswith("ub_cmn_mem_1r1w_") else module
     include = '`include "pyc_reg.v"\n\n'
     text = _header("ub_cmn_mem_1r1w", label, depth, width) + include + raw

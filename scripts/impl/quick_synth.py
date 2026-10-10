@@ -476,8 +476,13 @@ def synthesize_one(
     merged: dict[str, str] = {}
     notes: list[str] = []
     if top in PLACEHOLDER_PARAMS:
-        merged.update(PLACEHOLDER_PARAMS[top]["chparam"])
-        notes.append(PLACEHOLDER_PARAMS[top]["label"])
+        present = {}
+        for k, v in PLACEHOLDER_PARAMS[top]["chparam"].items():
+            if re.search(rf"\bparameter\b[^;]*\b{re.escape(k)}\b", text):
+                present[k] = v
+        if present:
+            merged.update(present)
+            notes.append(PLACEHOLDER_PARAMS[top]["label"])
     if chparam:
         merged.update(chparam)
     if extra_chparam:

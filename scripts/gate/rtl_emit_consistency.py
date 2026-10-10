@@ -30,8 +30,14 @@ from gatelib import (
     is_legacy_path,
     iter_rtl_sources,
     collect_placeholder_policy_findings,
+    cmn_mem_bits,
+    cmn_mem_is_large,
+    discover_rtl,
+    is_cmn_mem_module,
     is_placeholder_module,
+    large_cmn_mem_lib_files,
     load_hooks_ports,
+    read_cmn_mem_threshold_bits,
     looks_generated,
     parse_ports,
     print_tool_versions,
@@ -82,25 +88,40 @@ def write_hooks_wrapper(hooks_path: Path, module: str, dest: Path) -> list[str]:
     return tied
 
 
+def _lib_reads(lib_files: list[Path] | None) -> list[str]:
+    """Same blackbox copy on gold and gate (large ub_cmn_mem_1r1w)."""
+    out: list[str] = []
+    seen: set[Path] = set()
+    for path in lib_files or []:
+        rp = path.resolve()
+        if rp in seen:
+            continue
+        seen.add(rp)
+        flag = "-sv" if rp.suffix.lower() == ".sv" else ""
+        out.append(f"read_verilog -lib {flag} {rp}".replace("  ", " "))
+    return out
+
+
 def _yosys_equiv_script(
     product: Path,
     gold_top: str,
     gate_reads: list[str],
     gate_top: str,
+    lib_files: list[Path] | None = None,
 ) -> str:
-    """Yosys fallback used on design PR #12 when eqy is not on PATH.
-
-    Commands: equiv_make / equiv_simple / equiv_induct / equiv_status -assert.
-    """
+    """Yosys equiv_make / equiv_simple / equiv_induct / equiv_status -assert."""
+    libs = _lib_reads(lib_files)
     return "\n".join(
         [
             f"read_verilog -sv {product}",
+            *libs,
             f"hierarchy -check -top {gold_top}",
             "proc",
             "opt",
             "design -save gold",
             "design -reset",
             *gate_reads,
+            *libs,
             f"hierarchy -check -top {gate_top}",
             "proc",
             "opt",
@@ -121,6 +142,7 @@ def run_equiv(
     product: Path,
     hooks: Path,
     extra_ports: list[str] | None,
+    lib_files: list[Path] | None = None,
 ) -> Finding | None:
     """Prove PRODUCT≡HOOKS. Primary: Yosys equiv_*. eqy if available."""
     work = OUT_DIR / "eqy" / module
@@ -144,7 +166,10 @@ def run_equiv(
         tool = "yosys-equiv"
         ys = work / f"{module}_equiv.ys"
         ys.write_text(
-            _yosys_equiv_script(product, gold_top, gate_reads, gate_top) + "\n",
+            _yosys_equiv_script(
+                product, gold_top, gate_reads, gate_top, lib_files=lib_files
+            )
+            + "\n",
             encoding="utf-8",
         )
         print(
@@ -163,10 +188,12 @@ def run_equiv(
                     "",
                     "[gold]",
                     f"read_verilog -sv {product}",
+                    *_lib_reads(lib_files),
                     f"prep -top {gold_top}",
                     "",
                     "[gate]",
                     *gate_reads,
+                    *_lib_reads(lib_files),
                     f"prep -top {gate_top}",
                     "",
                 ]
@@ -299,6 +326,9 @@ def main() -> int:
             )
 
     table = load_hooks_ports()
+    disc = discover_rtl()
+    thresh = read_cmn_mem_threshold_bits()
+    print(f"equiv: ub_cmn_mem_1r1w blackbox threshold={thresh} bits")
     for leaf in discover_leaf_pairs():
         product = REPO_ROOT / leaf["product"]
         hooks = REPO_ROOT / leaf["hooks"]
@@ -337,7 +367,33 @@ def main() -> int:
             )
             continue
         extra = table.get(module)
-        hit = run_equiv(module, product, hooks, extra)
+        if is_cmn_mem_module(module) and cmn_mem_is_large(product, thresh=thresh):
+            bits = cmn_mem_bits(product)
+            print(
+                f"equiv skip full {module}: large ub_cmn_mem_1r1w "
+                f"({bits} bits > {thresh}); parents blackbox both sides"
+            )
+            findings.append(
+                Finding(
+                    check="emit",
+                    module=module,
+                    file=leaf["product"],
+                    rule="CMN_MEM_LARGE",
+                    message=(
+                        f"large variant ({bits} bits > {thresh}); "
+                        "full PRODUCT≡HOOKS skipped; parents -lib the same cell"
+                    ),
+                    bucket="report",
+                )
+            )
+            continue
+        lib_files = large_cmn_mem_lib_files(module, disc)
+        if lib_files:
+            print(
+                f"equiv {module}: -lib large ub_cmn_mem_1r1w "
+                f"{[rel(p) for p in lib_files]} (same copy both sides)"
+            )
+        hit = run_equiv(module, product, hooks, extra, lib_files=lib_files)
         if hit:
             findings.append(hit)
 

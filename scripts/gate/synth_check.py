@@ -13,10 +13,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from gatelib import (
     Finding,
     blackbox_lib_files,
+    cmn_mem_bits,
+    cmn_mem_is_large,
     discover_rtl,
     emit_report,
+    is_cmn_mem_module,
     is_placeholder_path,
+    large_cmn_mem_lib_files,
     print_tool_versions,
+    read_cmn_mem_threshold_bits,
     rel,
     run_cmd,
     shutil_which,
@@ -119,11 +124,19 @@ def combo_depth_findings(text: str, module: str, file: str) -> list[Finding]:
     ]
 
 
-def synth_module(module: str, file: Path, sources: list[Path], incdirs: list[Path]) -> tuple[list[Finding], str]:
+def synth_module(
+    module: str,
+    file: Path,
+    sources: list[Path],
+    incdirs: list[Path],
+    lib_extra: list[Path] | None = None,
+) -> tuple[list[Finding], str]:
     inc = yosys_inc_prefix(incdirs)
     reads: list[str] = []
     seen: set[Path] = set()
     lib_files = {p.resolve() for p in blackbox_lib_files()}
+    lib_files.update(p.resolve() for p in (lib_extra or []))
+    lib_files.discard(file.resolve())
     for p in [file, *sources]:
         if p.suffix.lower() not in {".v", ".sv"}:
             continue
@@ -200,8 +213,10 @@ def main() -> int:
     print(f"synth-check: {len(modules)} PRODUCT module(s) (HOOKS excluded)")
     findings: list[Finding] = []
     skip = stub_modules()
+    thresh = read_cmn_mem_threshold_bits()
     if skip:
         print(f"synth-check: blackbox.yml modules treated as -lib: {sorted(skip)}")
+    print(f"synth-check: ub_cmn_mem_1r1w blackbox threshold={thresh} bits")
     if not modules:
         print("synth-check: no PRODUCT modules; PASS")
         return emit_report("synth", [])
@@ -209,8 +224,36 @@ def main() -> int:
         if unit.module in skip:
             print(f"synth-check skip top {unit.module}: listed in blackbox.yml (used as -lib)")
             continue
+        if is_cmn_mem_module(unit.module) and cmn_mem_is_large(unit.file, thresh=thresh):
+            bits = cmn_mem_bits(unit.file)
+            print(
+                f"synth-check skip full synth {unit.module}: large ub_cmn_mem_1r1w "
+                f"variant ({bits} bits > {thresh}); parents blackbox this cell"
+            )
+            findings.append(
+                Finding(
+                    check="synth",
+                    module=unit.module,
+                    file=rel(unit.file),
+                    rule="CMN_MEM_LARGE",
+                    message=(
+                        f"large variant ({bits} bits > {thresh}); "
+                        "full synth skipped; parents use read_verilog -lib"
+                    ),
+                    bucket="report",
+                )
+            )
+            continue
         needed = module_closure(unit.module, disc) or [unit.file]
-        f, _ = synth_module(unit.module, unit.file, needed, disc["incdirs"])
+        extra_lib = large_cmn_mem_lib_files(unit.module, disc)
+        if extra_lib:
+            print(
+                f"synth-check {unit.module}: -lib large ub_cmn_mem_1r1w "
+                f"{[rel(p) for p in extra_lib]}"
+            )
+        f, _ = synth_module(
+            unit.module, unit.file, needed, disc["incdirs"], lib_extra=extra_lib
+        )
         findings.extend(f)
     return emit_report("synth", findings)
 

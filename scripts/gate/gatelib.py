@@ -27,6 +27,9 @@ HOOKS_PORTS_LIST = LISTS_DIR / "hooks_ports.yml"
 MIGRATE_LIST = LISTS_DIR / "pycircuit_migrate.txt"
 LEAK_ALLOW_LIST = LISTS_DIR / "leak_allow.yml"
 PLACEHOLDER_MARK = "PLACEHOLDER_SOURCE"
+CMN_MEM_CELL = "ub_cmn_mem_1r1w"
+DEFAULT_CMN_MEM_THRESH_BITS = 4096
+IMPL_QUICK_SYNTH_MD = REPO_ROOT / "docs" / "rules" / "impl_quick_synth.md"
 INVENTORY_CANDIDATES = (
     REPO_ROOT / "docs" / "arch" / "MODULE_INVENTORY.yml",
     REPO_ROOT / "docs" / "arch" / "MODULE_INVENTORY.yaml",
@@ -1205,6 +1208,190 @@ def is_leak_allowed(path: Path) -> bool:
         if rel_path == pat or fnmatch.fnmatch(rel_path, pat):
             return True
     return False
+
+
+def is_cmn_mem_module(name: str) -> bool:
+    return name == CMN_MEM_CELL or name.startswith(CMN_MEM_CELL + "_")
+
+
+_CMN_THRESH_CACHE: int | None = None
+
+
+def read_cmn_mem_threshold_bits() -> int:
+    """Threshold in bits. Read impl_quick_synth.md; default 4096 (4 kbit)."""
+    global _CMN_THRESH_CACHE
+    if _CMN_THRESH_CACHE is not None:
+        return _CMN_THRESH_CACHE
+    path = IMPL_QUICK_SYNTH_MD
+    if not path.is_file():
+        print(
+            f"NOTE: {rel(path)} missing; "
+            f"ub_cmn_mem_1r1w blackbox threshold={DEFAULT_CMN_MEM_THRESH_BITS} bits"
+        )
+        _CMN_THRESH_CACHE = DEFAULT_CMN_MEM_THRESH_BITS
+        return _CMN_THRESH_CACHE
+    text = path.read_text(encoding="utf-8", errors="replace")
+    m = re.search(
+        r"(?:threshold|blackbox|cmn_mem)[^\n]{0,60}?(\d+)\s*bits?",
+        text,
+        re.I,
+    )
+    if m:
+        _CMN_THRESH_CACHE = int(m.group(1))
+        return _CMN_THRESH_CACHE
+    m = re.search(r"(\d+(?:\.\d+)?)\s*kbit", text, re.I)
+    if m:
+        _CMN_THRESH_CACHE = int(float(m.group(1)) * 1024)
+        return _CMN_THRESH_CACHE
+    m = re.search(r"\b(2048|4096|8192|16384)\b", text)
+    if m:
+        _CMN_THRESH_CACHE = int(m.group(1))
+        return _CMN_THRESH_CACHE
+    print(
+        f"NOTE: {rel(path)} has no kbit/bits threshold; "
+        f"using {DEFAULT_CMN_MEM_THRESH_BITS}"
+    )
+    _CMN_THRESH_CACHE = DEFAULT_CMN_MEM_THRESH_BITS
+    return _CMN_THRESH_CACHE
+
+
+def _parse_int_lit(text: str) -> int | None:
+    text = text.strip().replace("_", "")
+    if re.fullmatch(r"\d+", text):
+        return int(text)
+    m = re.fullmatch(r"(\d+)'[dD](\d+)", text)
+    if m:
+        return int(m.group(2))
+    m = re.fullmatch(r"(\d+)'[hH]([0-9a-fA-F]+)", text)
+    if m:
+        return int(m.group(2), 16)
+    return None
+
+
+def parse_cmn_mem_dims(path: Path | None, extra: dict[str, Any] | None = None) -> tuple[int | None, int | None]:
+    """Return (depth, width) from file parameters, variant params, or name."""
+    depth = width = None
+    extra = extra or {}
+    for key, val in extra.items():
+        lk = str(key).lower()
+        if lk in {"depth", "words", "entries"} and isinstance(val, (int, str)):
+            parsed = _parse_int_lit(str(val))
+            if parsed is not None:
+                depth = parsed
+        if lk in {"width", "dw", "data_w"} and isinstance(val, (int, str)):
+            parsed = _parse_int_lit(str(val))
+            if parsed is not None:
+                width = parsed
+    if path and path.is_file():
+        text = strip_verilog_comments(path.read_text(encoding="utf-8", errors="replace"))
+        for name, dest in (("depth", "depth"), ("width", "width"), ("dw", "width")):
+            m = re.search(
+                rf"\b(?:parameter|localparam)\s+(?:integer\s+)?{name}\s*=\s*([^,;]+)",
+                text,
+                re.I,
+            )
+            if m:
+                parsed = _parse_int_lit(m.group(1))
+                if parsed is not None:
+                    if dest == "depth" and depth is None:
+                        depth = parsed
+                    if dest == "width" and width is None:
+                        width = parsed
+        # array:  reg [W-1:0] mem [0:D-1]
+        m = re.search(
+            r"\b(?:reg|logic)\s*\[\s*(\d+)\s*[-:]",
+            text,
+            re.I,
+        )
+        m2 = re.search(
+            r"\]\s*[A-Za-z_][A-Za-z0-9_]*\s*\[\s*(?:0\s*:\s*)?(\d+)",
+            text,
+        )
+        if width is None and m:
+            width = int(m.group(1)) + 1
+        if depth is None and m2:
+            depth = int(m2.group(1)) + (0 if "0:" in (m2.group(0) or "") else 0)
+            if "0:" in m2.group(0):
+                depth = int(m2.group(1)) + 1
+        # filename / module: _(\d+)x(\d+) or _d(\d+)_w(\d+)
+        stem = path.stem
+        m = re.search(r"_(\d+)x(\d+)$", stem, re.I)
+        if m:
+            depth = depth or int(m.group(1))
+            width = width or int(m.group(2))
+        m = re.search(r"_d(\d+)_w(\d+)", stem, re.I)
+        if m:
+            depth = depth or int(m.group(1))
+            width = width or int(m.group(2))
+    return depth, width
+
+
+def cmn_mem_bits(path: Path | None, extra: dict[str, Any] | None = None) -> int | None:
+    depth, width = parse_cmn_mem_dims(path, extra)
+    if depth is None or width is None:
+        return None
+    return depth * width
+
+
+def cmn_mem_is_large(path: Path | None, extra: dict[str, Any] | None = None, thresh: int | None = None) -> bool:
+    bits = cmn_mem_bits(path, extra)
+    if bits is None:
+        return False
+    return bits > (thresh if thresh is not None else read_cmn_mem_threshold_bits())
+
+
+def large_cmn_mem_lib_files(top: str, disc: dict[str, Any] | None = None) -> list[Path]:
+    """Mem files that parent synth/equiv must read with -lib (same copy both sides)."""
+    thresh = read_cmn_mem_threshold_bits()
+    disc = disc or discover_rtl()
+    defined: dict = disc.get("defined") or {}
+    files: list[Path] = []
+    seen: set[Path] = set()
+    # Walk the instance closure.
+    stack = [top]
+    visited: set[str] = set()
+    inst_map: dict[str, set[str]] = disc.get("instantiations") or {}
+    while stack:
+        name = stack.pop()
+        if name in visited:
+            continue
+        visited.add(name)
+        unit = defined.get(name)
+        if unit is None:
+            continue
+        if is_cmn_mem_module(name) and cmn_mem_is_large(unit.file, thresh=thresh):
+            rp = unit.file.resolve()
+            if rp not in seen:
+                seen.add(rp)
+                files.append(unit.file)
+            continue
+        # Instance-level overrides on this parent.
+        if unit.file.is_file() and not is_cmn_mem_module(name):
+            text = strip_verilog_comments(
+                unit.file.read_text(encoding="utf-8", errors="replace")
+            )
+            for m in re.finditer(
+                rf"\b({re.escape(CMN_MEM_CELL)}\w*)\s+(?:#\s*\((.*?)\)\s*)?"
+                rf"([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+                text,
+                re.S,
+            ):
+                cell, plist, _inst = m.group(1), m.group(2) or "", m.group(3)
+                params: dict[str, Any] = {}
+                for pm in re.finditer(
+                    r"\.(DEPTH|WIDTH|depth|width)\s*\(\s*([^)]+)\)", plist, re.I
+                ):
+                    params[pm.group(1)] = pm.group(2).strip()
+                cell_unit = defined.get(cell)
+                cell_path = cell_unit.file if cell_unit is not None else None
+                if cmn_mem_is_large(cell_path, params, thresh=thresh) and cell_path:
+                    rp = cell_path.resolve()
+                    if rp not in seen:
+                        seen.add(rp)
+                        files.append(cell_path)
+        for child in inst_map.get(name, set()):
+            stack.append(child)
+    return files
 
 
 def placeholder_mark_present(path: Path) -> bool:

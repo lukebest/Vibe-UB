@@ -96,7 +96,7 @@ def drive_gen(crc_q, word_q, done_q, start, valid_in, last, nxt, m: Circuit):
     #   crc_n  = (valid&&last) ? INIT : valid ? nxt : start ? INIT : crc
     #   word_n = (valid&&last) ? {2'b00, nxt} : crc_word
     #   done_n = valid&&last
-    # Always-assign (when=1) so leftover $dff D is this mux, not an
+    # when=1 assign so leftover $dff D is this mux, not an
     # enable-gated {nxt, INIT} plus implicit hold.
     init = u(CRC_W, INIT)
     eat_last = valid_in & last

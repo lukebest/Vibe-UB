@@ -10,6 +10,8 @@
 | 配套决定 | [PR #2](https://github.com/lukebest/Vibe-UB/pull/2) `docs/DECISIONS.md`（draft，未合）。本计划按 **D1–D16** 编号引用，不改写那些文件。 |
 | 设计规格 | **对齐 SPEC PR #4**（`docs/SPEC.md` / `docs/REGMAP.md` / `docs/CODING_STYLE.md`）。不引用任何 commit SHA。 |
 
+职责与流程见 docs/TEAM.md、docs/PROCESS.md。
+
 规范引用只写章节号（如 UB-PHY §3.2.5、UB-DL §4.6.1、SPEC §10、REGMAP TEST）和用自己的话概括的要点。不复制规范正文、表格、公式或寄存器位定义。与 SPEC 冲突处以 SPEC 为准；SPEC 自相矛盾处标「等 SPEC 澄清」，验证不选边。群结论已写入 PR #4 正文的，以文件为准，不标「待 SPEC 落实」。
 
 ---

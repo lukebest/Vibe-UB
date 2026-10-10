@@ -31,8 +31,11 @@ expect_fail() {
   local rc=$?
   set -e
   tail -n 30 "$log"
-  if [[ "$rc" -eq 0 ]] && ! grep -qE 'FAIL |not_equivalent|NOT EQUIVALENT' "$log"; then
+  if [[ "$rc" -eq 0 ]]; then
     echo "NEG_MISS $name passed (should fail)"
+    fail=$((fail + 1))
+  elif ! grep -qE 'NOT EQUIVALENT|Assert failed|SAT proof finished|unmatched|ports=FAIL|regpair=FAIL|INCONCLUSIVE\(state-encoding\)|未证完|scoreboard|MISMATCH|equiv_ref FAIL|FAIL |Error|AssertionError' "$log"; then
+    echo "NEG_MISS $name rc=$rc but no real compare conclusion"
     fail=$((fail + 1))
   else
     echo "NEG_OK $name rc=$rc"

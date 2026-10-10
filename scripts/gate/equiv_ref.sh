@@ -16,8 +16,12 @@ LEAF="${1:-}"
 NET="${2:-}"
 # Per-method wall time. Timeout of a method is unproven; try the next.
 EQUIV_TMO="${EQUIV_TMO:-90}"
-# Comma list: equiv,sat,abc,regpair  (default all, in that order)
+# Comma list: equiv,sat,abc,regpair,seq  (default first four, in that order)
 EQUIV_METHODS="${EQUIV_METHODS:-equiv,sat,abc,regpair}"
+# abc family: dsec, cec, both (default). cec skips sequential dsec.
+EQUIV_ABC_STAGE="${EQUIV_ABC_STAGE:-both}"
+# Uncut output-only BMC / tempinduct depth (seq method).
+EQUIV_SEQ_DEPTH="${EQUIV_SEQ_DEPTH:-16}"
 
 usage() {
   echo "usage: $0 <leaf> <netlist.v>" >&2
@@ -29,7 +33,9 @@ usage() {
   echo "  Always -I rtl/pyc_lib for pycc \`include \"pyc_reg.v\". If that dir is" >&2
   echo "  missing (main before #5/#21), fall back to -I rtl/common and WARN." >&2
   echo "  EQUIV_INC=dir[:dir] extra include dirs (after the repo primitive dir)." >&2
-  echo "  EQUIV_METHODS=equiv,sat,abc,regpair  families to try (default all)." >&2
+  echo "  EQUIV_METHODS=equiv,sat,abc,regpair,seq  families to try (default first four)." >&2
+  echo "  EQUIV_ABC_STAGE=dsec|cec|both  (default both)." >&2
+  echo "  EQUIV_SEQ_DEPTH=N  uncut output-only BMC/tempinduct (default 16)." >&2
   echo "  EQUIV_TMO=seconds per method (default 90). Timeout = unproven." >&2
   exit 2
 }
@@ -228,11 +234,27 @@ run_yosys() {
   return "$RC"
 }
 
+# Real compare FAIL (SAT CEX / proven nonequiv). Do not treat as "unproven".
+fail_if_cex() {
+  local method="$1"
+  local out="$2"
+  local line
+  if printf '%s\n' "$out" | grep -qiE 'time ?out|timed out'; then
+    return 0
+  fi
+  line="$(printf '%s\n' "$out" | grep -iE 'Assert failed|SAT proof finished - model found|SAT Model|NOT EQUIVALENT|Verification failed|proof did fail|was asserted|ERROR:.*[Nn]ot equivalent' | head -n 1 || true)"
+  if printf '%s\n' "$out" | grep -qiE 'Assert failed|SAT proof finished - model found|SAT Model found|NOT EQUIVALENT|Verification failed|proof did fail|was asserted'; then
+    echo "equiv_ref METHOD=${method}"
+    echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (${method}: ${line:-counterexample})"
+    exit 1
+  fi
+}
+
 abc_parse() {
   local log="$1"
   if grep -qE 'Networks are equivalent' "$log"; then
     echo equivalent
-  elif grep -qiE 'NOT EQUIVALENT|Verification failed' "$log"; then
+  elif grep -qiE 'NOT EQUIVALENT|Verification failed|was asserted|SATISFIABLE' "$log"; then
     echo not_equivalent
   else
     echo unproven
@@ -252,7 +274,7 @@ try_abc() {
   fi
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/equiv_ref_abc.XXXXXX")"
   tmo="$EQUIV_TMO"
-  echo "equiv_ref note: trying miter/write_aiger + ABC dsec|&cec (yosys-abc)"
+  echo "equiv_ref note: trying miter/write_aiger + ABC dsec|&cec (yosys-abc) stage=${EQUIV_ABC_STAGE}"
 
   local script_aig="${prep_gold}${prep_gate}
 design -load gold
@@ -280,41 +302,48 @@ write_aiger -symbols ${tmp}/gate.aig
     return 1
   fi
 
-  log="${tmp}/dsec.log"
-  set +e
-  timeout "$tmo" "$abc_bin" -c "dsec -T ${tmo} -v ${tmp}/gold.aig ${tmp}/gate.aig" \
-    >"$log" 2>&1
-  rc=$?
-  set -e
-  cat "$log"
-  if grep -q 'has no latches' "$log"; then
-    echo "equiv_ref note: no latches; running combinational cec"
-    log="${tmp}/cec_combo.log"
+  if [[ "$EQUIV_ABC_STAGE" != "cec" ]]; then
+    log="${tmp}/dsec.log"
     set +e
-    timeout "$tmo" "$abc_bin" -c "cec -T ${tmo} -v ${tmp}/gold.aig ${tmp}/gate.aig" \
+    timeout "$tmo" "$abc_bin" -c "dsec -T ${tmo} -v ${tmp}/gold.aig ${tmp}/gate.aig" \
       >"$log" 2>&1
     rc=$?
     set -e
     cat "$log"
+    if grep -q 'has no latches' "$log"; then
+      echo "equiv_ref note: no latches; running combinational cec"
+      log="${tmp}/cec_combo.log"
+      set +e
+      timeout "$tmo" "$abc_bin" -c "cec -T ${tmo} -v ${tmp}/gold.aig ${tmp}/gate.aig" \
+        >"$log" 2>&1
+      rc=$?
+      set -e
+      cat "$log"
+    fi
+    kind="$(abc_parse "$log")"
+    if [[ "$kind" == equivalent ]]; then
+      log_time "abc-dsec" "$t0" "equivalent"
+      rm -rf "$tmp"
+      pass_method "miter + write_aiger + ABC dsec (yosys-abc)"
+    fi
+    if [[ "$kind" == not_equivalent ]]; then
+      log_time "abc-dsec" "$t0" "not_equivalent"
+      rm -rf "$tmp"
+      echo "equiv_ref METHOD=abc-dsec" >&2
+      echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (ABC dsec: not equivalent)" >&2
+      exit 1
+    fi
+    if [[ "$rc" -eq 124 ]]; then
+      echo "equiv_ref note: ABC dsec timed out"
+      log_time "abc-dsec" "$t0" "timeout"
+    else
+      log_time "abc-dsec" "$t0" "unproven"
+    fi
   fi
-  kind="$(abc_parse "$log")"
-  if [[ "$kind" == equivalent ]]; then
-    log_time "abc-dsec" "$t0" "equivalent"
+
+  if [[ "$EQUIV_ABC_STAGE" == "dsec" ]]; then
     rm -rf "$tmp"
-    pass_method "miter + write_aiger + ABC dsec (yosys-abc)"
-  fi
-  if [[ "$kind" == not_equivalent ]]; then
-    log_time "abc-dsec" "$t0" "not_equivalent"
-    rm -rf "$tmp"
-    echo "equiv_ref METHOD=abc-dsec" >&2
-    echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (ABC dsec: not equivalent)" >&2
-    exit 1
-  fi
-  if [[ "$rc" -eq 124 ]]; then
-    echo "equiv_ref note: ABC dsec timed out"
-    log_time "abc-dsec" "$t0" "timeout"
-  else
-    log_time "abc-dsec" "$t0" "unproven"
+    return 1
   fi
 
   # Fallback: single-output miter AIGER + &cec -m (combo, or FFs already ports).
@@ -430,6 +459,7 @@ sat -verify -tempinduct -prove-asserts -set-init-zero -timeout $EQUIV_TMO
     log_time "miter+sat-tempinduct" "$t0" "equivalent"
     pass_method "miter -equiv -flatten -make_assert + sat -tempinduct -prove-asserts -set-init-zero"
   fi
+  fail_if_cex "sat-tempinduct" "${OUT:-}"
   if [[ "${RC:-1}" -eq 124 ]]; then
     log_time "miter+sat-tempinduct" "$t0" "timeout"
   else
@@ -452,6 +482,7 @@ sat -verify -tempinduct -prove-asserts -set-init-zero -timeout $EQUIV_TMO
     log_time "sat-tempinduct-paired-crc" "$t0" "equivalent"
     pass_method "equiv_add crc + miter -assert + sat -tempinduct -prove-asserts -set-init-zero"
   fi
+  fail_if_cex "sat-tempinduct-paired-crc" "${OUT:-}"
   if [[ "${RC:-1}" -eq 124 ]]; then
     log_time "sat-tempinduct-paired-crc" "$t0" "timeout"
   else
@@ -466,8 +497,10 @@ if has_method abc; then
 fi
 
 # 4) Auto register pairing (normalized Q names) + name-paired miter + reset.
-# Pairing / port-name-set / reset / prove must all hold. Unmatched / width
-# mismatch / leftover-PI name mismatch / reset mismatch / miter ⊭ is FAIL.
+# Pairing / port-name-set / reset mismatches are FAIL. Next-state (D) mismatch
+# with those three OK is INCONCLUSIVE(state-encoding): switch to uncut
+# output-only sequential proof. That proof must induct; BMC-only is 未证完.
+REGPAIR_INCONCLUSIVE=0
 try_regpair() {
   local t0 tmp abc_bin py extra=()
   t0="$(sec_now)"
@@ -523,6 +556,14 @@ write_rtlil ${tmp}/gate.il
     rm -rf "$tmp"
     pass_method "regpair + miter -equiv -make_assert + sat/ABC (name-paired; reset checked)"
   fi
+  if [[ "$prc" -eq 3 ]]; then
+    echo "equiv_ref REGPAIR regpair=INCONCLUSIVE(state-encoding)"
+    echo "equiv_ref note: next-state differs with same encoding interface; switching to uncut output seq"
+    log_time "regpair" "$t0" "inconclusive"
+    REGPAIR_INCONCLUSIVE=1
+    rm -rf "$tmp"
+    return 0
+  fi
   if [[ "$prc" -eq 124 ]]; then
     log_time "regpair" "$t0" "timeout"
     rm -rf "$tmp"
@@ -531,12 +572,112 @@ write_rtlil ${tmp}/gate.il
   log_time "regpair" "$t0" "not_equivalent"
   rm -rf "$tmp"
   echo "equiv_ref METHOD=regpair" >&2
-  echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (regpair: pairing/ports/reset/prove)" >&2
+  echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (regpair: pairing/ports/reset)" >&2
+  exit 1
+}
+
+# Uncut FFs. Miter asserts leaf outputs only. From reset. Induction must
+# converge to pass. BMC to N with no CEX is 未证完 and FAIL (never a pass).
+try_seq_out() {
+  local t0 tmp abc_bin tmo depth rst_at script_seq script_bmc log rc kind
+  t0="$(sec_now)"
+  tmo="$EQUIV_TMO"
+  depth="${EQUIV_SEQ_DEPTH:-16}"
+  abc_bin="$(command -v yosys-abc || true)"
+  rst_at=""
+  case "$LEAF" in
+    ub_dll_bcrc|ub_dll_bcrc_check) rst_at="-set-at 1 in_rst_pyc 1 -set-at 2 in_rst_pyc 1" ;;
+  esac
+  echo "equiv_ref note: uncut output-only seq from reset (induction required; BMC-only=未证完)"
+
+  # BMC first: a CEX is a real output FAIL. Clean BMC is not a pass.
+  t0="$(sec_now)"
+  script_bmc="${prep_gold}${prep_gate}${restore}
+miter -equiv -flatten -make_assert gold gate miter
+hierarchy -top miter
+sat -seq ${depth} -verify -prove-asserts -set-init-zero ${rst_at} -timeout ${tmo}
+"
+  echo "equiv_ref note: BMC depth=${depth} (CEX = FAIL; no CEX continues to induction)"
+  if run_yosys "$script_bmc" "$((tmo + 15))"; then
+    log_time "seq-bmc" "$t0" "no_cex"
+    echo "equiv_ref SEQ bmc_depth=${depth} result=no_cex"
+  else
+    fail_if_cex "seq-bmc" "${OUT:-}"
+    if [[ "${RC:-1}" -eq 124 ]]; then
+      log_time "seq-bmc" "$t0" "timeout"
+    else
+      log_time "seq-bmc" "$t0" "unproven"
+    fi
+  fi
+
+  t0="$(sec_now)"
+  script_seq="${prep_gold}${prep_gate}${restore}
+miter -equiv -flatten -make_assert gold gate miter
+hierarchy -top miter
+sat -verify -tempinduct -prove-asserts -set-init-zero ${rst_at} -timeout ${tmo}
+"
+  if run_yosys "$script_seq" "$((tmo + 15))"; then
+    log_time "seq-tempinduct" "$t0" "equivalent"
+    pass_method "uncut output miter + sat -tempinduct -prove-asserts (reset-init)"
+  fi
+  fail_if_cex "seq-tempinduct" "${OUT:-}"
+  if [[ "${RC:-1}" -eq 124 ]]; then
+    log_time "seq-tempinduct" "$t0" "timeout"
+  else
+    log_time "seq-tempinduct" "$t0" "unproven"
+  fi
+
+  if [[ -n "$abc_bin" ]]; then
+    tmp="$(mktemp -d "${TMPDIR:-/tmp}/equiv_ref_seq.XXXXXX")"
+    local script_aig="${prep_gold}${prep_gate}${restore}
+miter -equiv -flatten -make_assert gold gate miter
+hierarchy -top miter
+delete t:\$assert t:\$assume t:\$live t:\$fair
+techmap; opt; aigmap; opt
+write_aiger -symbols -miter ${tmp}/miter.aig
+"
+    t0="$(sec_now)"
+    set +e
+    run_yosys "$script_aig" "$tmo"
+    set -e
+    if [[ -s "${tmp}/miter.aig" ]]; then
+      for cmd in "pdr" "dprove"; do
+        log="${tmp}/${cmd}.log"
+        set +e
+        timeout "$tmo" "$abc_bin" -c "read ${tmp}/miter.aig; ${cmd}" >"$log" 2>&1
+        rc=$?
+        set -e
+        cat "$log"
+        kind="$(abc_parse "$log")"
+        if [[ "$kind" == equivalent ]]; then
+          log_time "seq-abc-${cmd}" "$t0" "equivalent"
+          rm -rf "$tmp"
+          pass_method "uncut output miter + ABC ${cmd}"
+        fi
+        if [[ "$kind" == not_equivalent ]]; then
+          log_time "seq-abc-${cmd}" "$t0" "not_equivalent"
+          rm -rf "$tmp"
+          echo "equiv_ref METHOD=seq-abc-${cmd}" >&2
+          echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (ABC ${cmd}: not equivalent)" >&2
+          exit 1
+        fi
+      done
+    fi
+    rm -rf "$tmp"
+  fi
+
+  echo "equiv_ref SEQ 未证完 (BMC ${depth} cycles, induction did not converge)"
+  echo "equiv_ref METHOD=seq-unproven" >&2
+  echo "equiv_ref FAIL ${LEAF} vs $(basename "$NET") (seq: 未证完 BMC=${depth})" >&2
   exit 1
 }
 
 if has_method regpair; then
   try_regpair || true
+fi
+
+if [[ "${REGPAIR_INCONCLUSIVE}" -eq 1 ]] || has_method seq; then
+  try_seq_out
 fi
 
 echo "equiv_ref METHOD=unproven" >&2

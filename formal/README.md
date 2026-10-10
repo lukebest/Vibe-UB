@@ -46,9 +46,15 @@ Affine next-state basis is not a recognized pass.
    `miter -equiv -flatten -make_assert` (name-matched) plus
    `sat -prove-asserts` or ABC on that single miter (`&cec -m` /
    `iprove` / `dprove`). Reset kind (sync / async / none), polarity,
-   and value must match per pair. Pairing, port names, reset, and the
-   proof must all hold. The log prints the pair table, PI/PO names,
-   the raw prove line, the method used, and the reset check.
+   and value must match per pair. Pairing, port names, and reset must
+   hold. `regpair` applies only when both sides share a state encoding.
+   If those three checks pass but next-state (`rp_d_*`) differs, the
+   script prints `regpair=INCONCLUSIVE(state-encoding)` and switches to
+   an uncut, reset-started, output-only sequential proof
+   (`sat -tempinduct -prove-asserts` or ABC `pdr`/`dprove`). That proof
+   must induct to pass; BMC to N with no CEX is `未证完` and FAIL.
+   The log prints the pair table, PI/PO names, the raw prove line,
+   the method used, and the reset check.
 
 The script prints `equiv_ref METHOD=...`, `equiv_ref TIME method=... sec=... result=...`,
 `equiv_ref abc=... yosys=... yosys_pkg=...`, and `gate_chparam=none|...`.

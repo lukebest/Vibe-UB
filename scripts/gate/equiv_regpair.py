@@ -220,11 +220,44 @@ def reset_port(mod: dict) -> tuple[str | None, int | None]:
     return None, None
 
 
-def eval_d_under_reset(rtlil: Path, top: str, d_names: list[str], rst: str, active: int) -> dict[str, int]:
-    if not d_names:
+def parse_eval_values(text: str, names: list[str]) -> dict[str, int]:
+    got: dict[str, int] = {}
+    for line in text.splitlines():
+        if "Eval result:" not in line:
+            continue
+        for name in names:
+            if name in got:
+                continue
+            if not (
+                f"\\{name}" in line
+                or f" {name} " in line
+                or line.endswith(name)
+                or f"{name} =" in line
+            ):
+                continue
+            m = re.search(r"=\s*(\d+)'h([0-9a-fA-F]+)", line)
+            if m:
+                got[name] = int(m.group(2), 16)
+                continue
+            m = re.search(r"=\s*(\d+)'b([01]+)", line)
+            if m:
+                got[name] = int(m.group(2), 2)
+                continue
+            m = re.search(r"=\s*(\d+)'([01]+)", line)
+            if m:
+                got[name] = int(m.group(2), 2)
+                continue
+            m = re.search(r"=\s*(\d+)\.?\s*$", line)
+            if m:
+                got[name] = int(m.group(1), 10)
+    return got
+
+
+def eval_signals(rtlil: Path, top: str, assigns: dict[str, int], show: list[str]) -> dict[str, int]:
+    if not show:
         return {}
-    sets = [f"-set {rst} {active}"]
-    shows = " ".join(f"-show {n}" for n in d_names)
+    sets = [f"-set {name} {val}" for name, val in assigns.items()]
+    shows = " ".join(f"-show {n}" for n in show)
     script = (
         f"read_rtlil {rtlil}\n"
         f"cd {top}\n"
@@ -237,25 +270,11 @@ def eval_d_under_reset(rtlil: Path, top: str, d_names: list[str], rst: str, acti
         stderr=subprocess.STDOUT,
         check=False,
     )
-    text = proc.stdout or ""
-    got: dict[str, int] = {}
-    for line in text.splitlines():
-        if "Eval result:" not in line:
-            continue
-        for name in d_names:
-            if f"\\{name}" in line or f" {name} " in line or line.endswith(name) or f"{name} =" in line:
-                m = re.search(r"=\s*(\d+)'h([0-9a-fA-F]+)", line)
-                if m:
-                    got[name] = int(m.group(2), 16)
-                    continue
-                m = re.search(r"=\s*(\d+)'([01]+)", line)
-                if m:
-                    got[name] = int(m.group(2), 2)
-                    continue
-                m = re.search(r"=\s*(\d+)\.?\s*$", line)
-                if m:
-                    got[name] = int(m.group(1), 10)
-    return got
+    return parse_eval_values(proc.stdout or "", show)
+
+
+def eval_d_under_reset(rtlil: Path, top: str, d_names: list[str], rst: str, active: int) -> dict[str, int]:
+    return eval_signals(rtlil, top, {rst: active}, d_names)
 
 
 def abc_kind(log: str) -> str:
@@ -664,7 +683,8 @@ def main() -> int:
         print("equiv_ref REGPAIR cec_line=skipped (pairing failed)")
         print("equiv_ref REGPAIR reset=skipped (pairing failed)")
         print("equiv_ref REGPAIR method=regpair result=pairing_fail")
-        return 1
+        print("equiv_ref REGPAIR regpair=FAIL(pairing)")
+        return 2
     print("equiv_ref REGPAIR pairing=PASS")
 
     rst_g, act_g = reset_port(gold_mod)
@@ -748,6 +768,7 @@ def main() -> int:
         print((gcut.stdout or "") + (tcut.stdout or ""))
         print("equiv_ref REGPAIR cec_line=cut failed")
         print("equiv_ref REGPAIR method=regpair result=unproven")
+        print("equiv_ref REGPAIR regpair=FAIL(cut)")
         return 1
 
     omit_po = (args.omit_po or "").strip()
@@ -761,6 +782,7 @@ def main() -> int:
             print(omitted.stdout or "")
             print(f"equiv_ref REGPAIR cec_line=omit-po {omit_po} failed")
             print("equiv_ref REGPAIR method=regpair result=unproven")
+            print("equiv_ref REGPAIR regpair=FAIL(omit)")
             return 1
         print(f"equiv_ref REGPAIR omit_po={omit_po} side={side}")
 
@@ -774,7 +796,8 @@ def main() -> int:
     if not ports_ok:
         print("equiv_ref REGPAIR cec_line=skipped (port name sets differ)")
         print("equiv_ref REGPAIR method=regpair result=ports_fail")
-        return 1
+        print("equiv_ref REGPAIR regpair=FAIL(ports)")
+        return 2
 
     po_names = sorted(set(gold_po) | set(gate_po))
     kind, used, line, wit = prove_miter(tmp, args.tmo, args.abc, po_names)
@@ -784,11 +807,19 @@ def main() -> int:
     print(f"equiv_ref REGPAIR prove_method={used}")
     print(f"equiv_ref REGPAIR method={used} result={kind}")
 
-    if kind != "equivalent":
-        return 1
     if not reset_ok:
-        return 1
-    return 0
+        print("equiv_ref REGPAIR regpair=FAIL(reset)")
+        return 2
+    if kind == "equivalent":
+        print("equiv_ref REGPAIR regpair=PASS")
+        return 0
+    if kind == "not_equivalent":
+        # Same registers / ports / reset, different next-state encoding.
+        # Do not judge RTL wrong and do not pass; caller switches method.
+        print("equiv_ref REGPAIR regpair=INCONCLUSIVE(state-encoding)")
+        return 3
+    print("equiv_ref REGPAIR regpair=FAIL(unproven)")
+    return 1
 
 
 

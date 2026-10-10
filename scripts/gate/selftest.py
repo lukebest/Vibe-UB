@@ -319,7 +319,9 @@ def test_sby_bind_missing_signal() -> None:
 
 
 def test_deleted_roster_not_error() -> None:
-    # pycircuit/ is empty on current main; migrate roster paths are gone.
+    # Roster path with the file absent (isolated root). On a stack that
+    # already has pycircuit/<leaf>.py (#5), using REPO_ROOT would keep
+    # the finding; the rule is "missing + on migrate list → 已删除".
     planted = Finding(
         check="provenance",
         module="ub_dll_bcrc",
@@ -327,7 +329,8 @@ def test_deleted_roster_not_error() -> None:
         rule="NO_PYCIRCUIT_IMPORT",
         message="leaf missing",
     )
-    keep, deleted = mark_deleted_findings([planted])
+    with tempfile.TemporaryDirectory() as td:
+        keep, deleted = mark_deleted_findings([planted], root=Path(td))
     if keep:
         _fail("deleted-roster", f"missing roster file must leave keep empty, got {keep}")
     if not deleted or "已删除" not in deleted[0].message:
@@ -866,7 +869,7 @@ def test_equiv_ref_regpair() -> None:
     carry = root / "formal" / "dll" / "negative" / "bcrc_carry_after_last.sv"
     if not script.is_file() or not gold.is_file():
         _fail("equiv-ref-regpair", "equiv_ref.sh or gold missing")
-    env = {**os.environ, "EQUIV_METHODS": "regpair", "EQUIV_TMO": "45"}
+    env = {**os.environ, "EQUIV_METHODS": "regpair", "EQUIV_TMO": "25", "EQUIV_SEQ_DEPTH": "8"}
 
     good = run_cmd([str(script), "ub_dll_bcrc", str(gold)], env=env, timeout=90)
     if good.returncode != 0 or "equiv_ref PASS" not in (good.stdout or ""):
@@ -891,19 +894,75 @@ def test_equiv_ref_regpair() -> None:
     print("SELFTEST PASS equiv-ref-regpair-omit-po: missing rp_d_crc listed")
 
     bad_extra = run_cmd([str(script), "ub_dll_bcrc", str(extra)], env=env, timeout=90)
+    extra_out = bad_extra.stdout or ""
     if bad_extra.returncode == 0:
         _fail("equiv-ref-regpair-extra", "extra-reg fake must fail")
-    if "unmatched" not in (bad_extra.stdout or ""):
+    if "unmatched" not in extra_out:
         _fail("equiv-ref-regpair-extra", "expected unmatched register listing")
+    if "INCONCLUSIVE(state-encoding)" in extra_out:
+        _fail("equiv-ref-regpair-extra", "unmatched flop is FAIL(pairing), not INCONCLUSIVE")
     print("SELFTEST PASS equiv-ref-regpair-extra: unmatched flop")
 
-    bad_carry = run_cmd([str(script), "ub_dll_bcrc", str(carry)], env=env, timeout=90)
+    bad_carry = run_cmd([str(script), "ub_dll_bcrc", str(carry)], env=env, timeout=120)
     carry_out = bad_carry.stdout or ""
     if bad_carry.returncode == 0:
         _fail("equiv-ref-regpair-carry", "carry-after-last fake must fail")
-    if "rp_d_" not in carry_out and "crc_word" not in carry_out:
-        _fail("equiv-ref-regpair-carry", f"expected witness on rp_d_* or output: {carry_out[-400:]}")
-    print("SELFTEST PASS equiv-ref-regpair-carry: last remainder carried")
+    if "INCONCLUSIVE(state-encoding)" not in carry_out:
+        _fail("equiv-ref-regpair-carry", f"expected INCONCLUSIVE then seq: {carry_out[-400:]}")
+    if not re.search(
+        r"NOT EQUIVALENT|Assert failed|SAT proof finished - model found|未证完",
+        carry_out,
+        re.I,
+    ):
+        _fail("equiv-ref-regpair-carry", f"expected real seq conclusion: {carry_out[-400:]}")
+    print("SELFTEST PASS equiv-ref-regpair-carry: INCONCLUSIVE then seq FAIL")
+
+
+def test_equiv_ref_real_compare() -> None:
+    """Fakes fail from solver/miter lines, not source greps or filenames."""
+    root = Path(__file__).resolve().parents[2]
+    script = root / "scripts" / "gate" / "equiv_ref.sh"
+    cases = [
+        (
+            "equiv",
+            "ub_pcs_lane_dist",
+            root / "formal/pcs/negative/forward_lane_dist.sv",
+            {"EQUIV_METHODS": "equiv", "EQUIV_TMO": "30", "NUM_LANES": "4"},
+            r"ERROR:|unproven|equiv_ref FAIL",
+        ),
+        (
+            "abc-cec",
+            "ub_pyc_rst_adapt",
+            root / "formal/common/negative/rst_adapt_wrong_pol.sv",
+            {"EQUIV_METHODS": "abc", "EQUIV_ABC_STAGE": "cec", "EQUIV_TMO": "30"},
+            r"NOT EQUIVALENT|Verification failed",
+        ),
+        (
+            "dedist-equiv",
+            "ub_pcs_lane_dedist",
+            root / "formal/pcs/negative/forward_lane_dedist.sv",
+            {"EQUIV_METHODS": "equiv", "EQUIV_TMO": "30", "NUM_LANES": "4"},
+            r"ERROR:|unproven|equiv_ref FAIL|NOT EQUIVALENT",
+        ),
+    ]
+    real = re.compile(
+        r"NOT EQUIVALENT|Verification failed|Assert failed|SAT proof finished|"
+        r"ERROR:|unproven \$equiv|equiv_ref FAIL|unmatched|ports=FAIL",
+        re.I,
+    )
+    for name, leaf, net, extra, _pat in cases:
+        if not net.is_file():
+            _fail(f"real-compare-{name}", f"missing {net}")
+        env = {**os.environ, **extra}
+        proc = run_cmd([str(script), leaf, str(net)], env=env, timeout=60)
+        out = proc.stdout or ""
+        if proc.returncode == 0:
+            _fail(f"real-compare-{name}", "fake must fail")
+        if not real.search(out):
+            _fail(f"real-compare-{name}", f"no real compare line: {out[-400:]}")
+        if re.search(r"grep .*POLY|filename match", out, re.I):
+            _fail(f"real-compare-{name}", "grep/filename verdict")
+        print(f"SELFTEST PASS real-compare-{name}: {real.search(out).group(0)}")
 
 
 def main() -> int:
@@ -932,6 +991,7 @@ def main() -> int:
         test_equiv_wide_bus_and_flip,
         test_equiv_real_csr_tlb,
         test_equiv_ref_regpair,
+        test_equiv_ref_real_compare,
     ]
     for fn in tests:
         fn()

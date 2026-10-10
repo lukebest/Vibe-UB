@@ -298,32 +298,32 @@ endmodule
     return path
 
 
-def test_parse_d64w64m16_tag(tmp_path: Path):
+def test_parse_m_suffix_tag(tmp_path: Path):
     path = _write_xia_leaf(
-        tmp_path / f"{LEAF}_d64w64m16.v", f"{LEAF}_d64w64m16", 6, 64, wmask_n=4
+        tmp_path / f"{LEAF}_d32w32m8.v", f"{LEAF}_d32w32m8", 5, 32, wmask_n=4
     )
     var = parse_variant_file(path, netlist="product")
     assert var is not None
-    assert (var.depth, var.width, var.wmask_w, var.nseg) == (64, 64, 16, 4)
-    assert var.tag == "d64w64m16"
+    assert (var.depth, var.width, var.wmask_w, var.nseg) == (32, 32, 8, 4)
+    assert var.tag == "d32w32m8"
     assert "wmask" in var.ports
     assert var.extras.get("wmask_width") == 4
     require_variant_ports(var)
 
 
-def test_parse_d512w512m64_tag(tmp_path: Path):
+def test_parse_m_suffix_nseg8(tmp_path: Path):
     path = _write_xia_leaf(
-        tmp_path / f"{LEAF}_d512w512m64.v", f"{LEAF}_d512w512m64", 9, 512, wmask_n=8
+        tmp_path / f"{LEAF}_d16w64m8.v", f"{LEAF}_d16w64m8", 4, 64, wmask_n=8
     )
     var = parse_variant_file(path, netlist="product")
     assert var is not None
-    assert (var.depth, var.width, var.wmask_w, var.nseg) == (512, 512, 64, 8)
+    assert (var.depth, var.width, var.wmask_w, var.nseg) == (16, 64, 8, 8)
     require_variant_ports(var)
 
 
 def test_nseg_gt1_missing_wmask_errors(tmp_path: Path):
     path = _write_xia_leaf(
-        tmp_path / f"{LEAF}_d64w64m16.v", f"{LEAF}_d64w64m16", 6, 64
+        tmp_path / f"{LEAF}_d32w32m8.v", f"{LEAF}_d32w32m8", 5, 32
     )
     var = parse_variant_file(path, netlist="product")
     assert var is not None and var.nseg == 4
@@ -337,7 +337,7 @@ def test_nseg_gt1_missing_wmask_errors(tmp_path: Path):
 
 def test_nseg_gt1_wrong_wmask_width_errors(tmp_path: Path):
     path = _write_xia_leaf(
-        tmp_path / f"{LEAF}_d64w64m16.v", f"{LEAF}_d64w64m16", 6, 64, wmask_n=8
+        tmp_path / f"{LEAF}_d32w32m8.v", f"{LEAF}_d32w32m8", 5, 32, wmask_n=8
     )
     var = parse_variant_file(path, netlist="product")
     assert var is not None
@@ -377,13 +377,13 @@ def test_check_wmask_port_direct():
 
 
 def test_emit_wrapper_wmask_when_nseg_gt1(tmp_path: Path):
-    dest = tmp_path / "wrap_m16.sv"
+    dest = tmp_path / "wrap_m8.sv"
     emit_wrapper(
         dest,
-        dut_module=f"{LEAF}_d64w64m16",
-        depth=64,
-        width=64,
-        wmask_w=16,
+        dut_module=f"{LEAF}_d32w32m8",
+        depth=32,
+        width=32,
+        wmask_w=8,
         assert_no_uninit_read=True,
         tb_check=True,
     )
@@ -392,7 +392,17 @@ def test_emit_wrapper_wmask_when_nseg_gt1(tmp_path: Path):
     assert ".wmask (wmask)" in text
     assert ".wmask    (wmask)" in text
     assert ".WMASK_W(WMASK_W)" in text
-    assert "localparam integer WMASK_W = 16" in text
-    assert f"{LEAF}_d64w64m16 #(" not in text
+    assert "localparam integer WMASK_W = 8" in text
+    assert f"{LEAF}_d32w32m8 #(" not in text
     assert "rst_n" not in text
     assert "rst_pyc" not in text
+
+
+def test_smoke_threshold_is_array_bits_not_a_name_list():
+    from tb.cmn.sequences import SMOKE_ARRAY_BITS, is_smoke_variant
+
+    assert SMOKE_ARRAY_BITS == 4096
+    assert is_smoke_variant(64, 64) is False
+    assert is_smoke_variant(65, 64) is True
+    assert is_smoke_variant(128, 64) is True
+    assert is_smoke_variant(5, 8) is False

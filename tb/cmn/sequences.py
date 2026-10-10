@@ -51,8 +51,13 @@ WMASK_CASES: tuple[str, ...] = (
 WMASK_NEG_CASES: tuple[str, ...] = ("wmask_partial_uninit",)
 SMOKE_CASES: tuple[str, ...] = ("random", "wmask_single", "conflict")
 SMOKE_RANDOM_N = 8
-FULL_WMASK_TAGS = frozenset({"d64w64m16"})
-SMOKE_WMASK_TAGS = frozenset({"d512w512m64"})
+# Array bits (DEPTH*WIDTH) above this use a short smoke plan. Not a variant list.
+SMOKE_ARRAY_BITS = 4096
+
+
+def is_smoke_variant(depth: int, width: int) -> bool:
+    """Large arrays: short random + a few directed cases. Discovered, not listed."""
+    return int(depth) * int(width) > SMOKE_ARRAY_BITS
 
 
 def addr_bits(depth: int) -> int:

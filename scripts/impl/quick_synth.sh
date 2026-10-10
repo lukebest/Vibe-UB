@@ -26,13 +26,15 @@ Usage: scripts/impl/quick_synth.sh [--ref GIT_REF | --work-tree DIR] [options]
   --baseline-report FILE    prior markdown report for QoR compare
   --baseline-map NEW=OLD    map a §2.2 tagged leaf to a legacy module[:VARIANT]
   --sram-bit-threshold N    blackbox mem instances with depth×width > N bits (default 4096)
-  --self-check              parser / mapping checks only (no synth)
+  --incdir DIR              extra Yosys -I (repeatable; default is rtl/pyc_lib)
+  --self-check              parser / mapping / include-read checks (no design synth)
   --help                    this text
 
 Env:
   SKY130_HD_LIB           path to sky130_fd_sc_hd__tt_025C_1v80.lib
   SKY130_HD_LIB_COMMIT    OpenROAD-flow-scripts commit used to fetch liberty
   QS_SRAM_BIT_THRESHOLD   default for --sram-bit-threshold
+  QS_INCDIRS              extra Yosys -I dirs (colon / comma / space separated)
   YOSYS / STA             tool binaries (default: yosys, sta)
 
 Default clock: core_clk at F_CORE from docs/SPEC.md (§4.1 / §9, ≈80.57 MHz).
@@ -53,6 +55,7 @@ BASELINE_JSON=""
 BASELINE_REPORT=""
 BASELINE_MAPS=()
 SRAM_THRESH=""
+INCDIRS=()
 SELF_CHECK=0
 
 while [[ $# -gt 0 ]]; do
@@ -67,6 +70,7 @@ while [[ $# -gt 0 ]]; do
     --baseline-report) BASELINE_REPORT="${2:-}"; shift 2 ;;
     --baseline-map) BASELINE_MAPS+=("${2:-}"); shift 2 ;;
     --sram-bit-threshold) SRAM_THRESH="${2:-}"; shift 2 ;;
+    --incdir) INCDIRS+=("${2:-}"); shift 2 ;;
     --self-check) SELF_CHECK=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown arg: $1" >&2; usage >&2; exit 2 ;;
@@ -154,6 +158,9 @@ done
 if [[ -n "$SRAM_THRESH" ]]; then
   py+=(--sram-bit-threshold "$SRAM_THRESH")
 fi
+for d in "${INCDIRS[@]+"${INCDIRS[@]}"}"; do
+  py+=(--incdir "$d")
+done
 py+=(--liberty "$SKY130_HD_LIB")
 
 exec "${py[@]}"

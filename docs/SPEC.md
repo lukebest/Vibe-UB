@@ -125,10 +125,15 @@ PMA 模型在仿真里实例化，与 PCS 的边界是 M1 的 **PHY 数字/模�
 | 对象 | 约定 |
 | --- | --- |
 | 模块名与文件名 | `<leaf>_<tag>`。例：`ub_pcs_lane_dist_x4` / `ub_pcs_lane_dist_x8` |
-| 产品网表 | `rtl/<blk>/<leaf>_<tag>.v` |
-| 钩子网表 | 同名，放 `rtl/<blk>/hooks/`（§11） |
+| 产品网表 | `rtl/<blk>/<leaf>_<tag>.v`（超阈值变体见下，**不**提交 `.v`） |
+| 钩子网表 | 同名，放 `rtl/<blk>/hooks/`（§11；超阈值同样不提交 `.v`） |
+| pycc 运行库原语 | 只放 `rtl/pyc_lib/`（见下） |
 
 用占位值生成的网表（例如扰码抽头 / 种子仍待定，见 §13）tag 后缀 `_placeholder`，供 lint / TB 使用；PRODUCT 只收录已闭合参数的变体。是否提交占位变体由 PM 定。
+
+**pycc 运行库原语目录（已定）：** pyCircuit 运行时发出、而非叶子生成的 `pyc_*` 模块（如 `pyc_reg.v`）只放 **`rtl/pyc_lib/`**。内容从根目录 [`TOOLCHAIN.lock`](../TOOLCHAIN.lock) 钉死的 pyCircuit 版本 **原样拷贝，不得改**。其它 `rtl/<layer>/` 与 `hooks/` **不得**再放 `pyc_*` 原语文件；各层 filelist 一律引用 `rtl/pyc_lib/`。凡 `` `include `` 运行库文件的网表，lint / 综合 / 门禁用 `-I rtl/pyc_lib` 读。门禁（与钉死版本逐字节相同；别处出现 `pyc_*` 则拒绝）细则见 [verif_gate.md](rules/verif_gate.md)（**验证**所有）。
+
+**超阈值变体不提交网表（PM 已定；口径对齐验证门禁）：** [impl_quick_synth.md](rules/impl_quick_synth.md) 黑盒阈值（默认 `depth × width` **4096** bit）以上的生成变体，**不**把 `.v` 提交进库。每层一份 `rtl/<layer>/manifest.yml`，**每个**超阈值变体一条。字段：变体名、参数、pycc 版本、PRODUCT 网表 sha256、HOOKS 网表 sha256。门禁按根目录 [`TOOLCHAIN.lock`](../TOOLCHAIN.lock) 安装 pycc，经 `scripts/emit_rtl.py` 再生，核 sha256 与端口，并核 PRODUCT 与 HOOKS **除模块名外字节相同**。把超阈值变体当成 `.v` 提交则 **拒绝**；manifest 条目再生失败则 **拒绝**。规则细则见 [verif_gate.md](rules/verif_gate.md)（**验证**所有）。其余生成 `.v` 仍提交。见 §11 (f)。
 
 ### 2.3 PMA 模型边界
 
@@ -885,6 +890,8 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 **(d) 形式等价门禁。** 规范工具是 Yosys **`equiv`**（版本见 `TOOLCHAIN.lock`）。eqy 在可安装后可作为可选补充，**不**替代 `equiv` 门禁。只比较 **PRODUCT 已有的端口**；`tb_<inst>_obs_*` 仅 HOOKS 存在，**不参加**比较。HOOKS 侧 `tb_test_mode=0`，全部 `tb_*` 钩子**输入**接低（含 `tb_inj_*` 接到复位不介入值、§10 点名存储的 `tb_<inst>_bd_*` 与 `tb_<inst>_bd_vld_*`）。两者必须等价；不等价则 **阻断交付**。TEST 窗在这两种条件下都是「已映射、读 0、写忽略、`csr_err=0`」，因此不破坏等价。
 
 **(e) 覆盖率 waiver。** 钩子 mux 不另开 waiver（见 (b)）。信用下溢（`CRD_UF` 计数与 irq 分支）在正确设计中不可达，须 **具名覆盖率 waiver**（§13.4）。
+
+**(f) 超阈值网表不入库（PM；对齐验证）。** [impl_quick_synth.md](rules/impl_quick_synth.md) 黑盒阈值以上的变体 **不**提交 `.v`。每层 `rtl/<layer>/manifest.yml`，每变体一条：变体名、参数、pycc 版本、PRODUCT sha256、HOOKS sha256。门禁按 `TOOLCHAIN.lock` 安装 pycc，经 `scripts/emit_rtl.py` 再生，核 sha256 与端口；PRODUCT 与 HOOKS **除模块名外字节相同**。超阈值 `.v` 入库 **拒绝**；manifest 再生失败 **拒绝**。细则见 [verif_gate.md](rules/verif_gate.md)。其余生成 `.v` 仍入库，并走 (d)。见 §2.2。
 
 ---
 

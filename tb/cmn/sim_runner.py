@@ -112,7 +112,7 @@ def _build_and_test(
 
 
 def _require_formal_bind_ports() -> None:
-    """TB wrapper binds if_props with core_clk + rst_n. Error if formal lags."""
+    """TB wrapper binds if_props with core_clk and no reset."""
     if not FORMAL_PROPS.is_file():
         raise LeafPortError(
             f"formal bind requested but {FORMAL_PROPS} is missing"

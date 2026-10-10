@@ -2,7 +2,7 @@
 
 The product leaf is instantiated with no parameter overrides (SPEC §2.2).
 ``ub_cmn_mem_1r1w_if_props`` is connected the same way as ``formal/cmn``
-(``core_clk`` / ``rst_n`` / we / waddr / wdata / re / raddr / rdata;
+(``core_clk`` / we / waddr / wdata / re / raddr / rdata; no reset;
 f_addr / f_written open). ASSERT_NO_UNINIT_READ lives on that bind, not
 on the leaf. Array and rdata are not reset.
 """
@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from model.ub_cmn_mem_1r1w import clog2
-from tb.cmn.ports import CLK_PORT, RST_PORT
+from tb.cmn.ports import CLK_PORT
 
 TOPLEVEL = "ub_cmn_mem_1r1w_tb"
 
@@ -31,13 +31,12 @@ def emit_wrapper(
     text = (
         f"""// Generated TB wrapper. Not product RTL. Do not hand-edit.
 // SPEC §2.2: leaf `{dut_module}` is a fixed netlist (no Verilog parameter).
-// Clock/reset: {CLK_PORT} / {RST_PORT} (Xia; existing rtl/ leaves use rst_n).
+// Clock: {CLK_PORT}. No reset port (Xia / CODING_STYLE §10).
 // formal/cmn bind: ub_cmn_mem_1r1w_if_props (ASSERT_NO_UNINIT_READ on the bind).
 `timescale 1ns / 1ps
 
 module {TOPLEVEL} (
   input  wire             {CLK_PORT},
-  input  wire             {RST_PORT},
   input  wire             we,
   input  wire [{aw}-1:0]  waddr,
   input  wire [{int(width)}-1:0] wdata,
@@ -53,7 +52,6 @@ module {TOPLEVEL} (
 
   {dut_module} u_dut (
     .{CLK_PORT} ({CLK_PORT}),
-    .{RST_PORT}    ({RST_PORT}),
     .we    (we),
     .waddr (waddr),
     .wdata (wdata),
@@ -64,7 +62,7 @@ module {TOPLEVEL} (
 
   generate
     if (TB_CHECK) begin : g_formal_bind
-      // Same port list as formal/cmn (Xia: core_clk + rst_n).
+      // Same port list as formal/cmn (Xia: core_clk, no reset).
       wire [AW-1:0] f_addr;
       wire          f_written;
       ub_cmn_mem_1r1w_if_props #(
@@ -74,7 +72,6 @@ module {TOPLEVEL} (
         .ASSERT_NO_UNINIT_READ(ASSERT_NO_UNINIT_READ)
       ) u_props (
         .{CLK_PORT} ({CLK_PORT}),
-        .{RST_PORT}    ({RST_PORT}),
         .we       (we),
         .waddr    (waddr),
         .wdata    (wdata),

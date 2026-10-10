@@ -10,7 +10,7 @@ from cocotb.triggers import NextTimeStep, ReadOnly, RisingEdge
 
 from tb.cmn.coverage import Mem1r1wCoverage
 from tb.cmn.driver import Mem1r1wDriver
-from tb.cmn.ports import CLK_PORT, RST_PORT
+from tb.cmn.ports import CLK_PORT
 from tb.cmn.scoreboard import Mem1r1wScoreboard
 from tb.cmn.sequences import expected_violation, make_sequence
 
@@ -32,13 +32,13 @@ def _sample_int(sig):
 
 
 def _require_ports(dut) -> None:
-    needed = (CLK_PORT, RST_PORT, "we", "waddr", "wdata", "re", "raddr", "rdata")
+    needed = (CLK_PORT, "we", "waddr", "wdata", "re", "raddr", "rdata")
     missing = [n for n in needed if not hasattr(dut, n)]
     if missing:
         have = [p for p in dir(dut) if not p.startswith("_")]
         raise AssertionError(
             "DUT/wrapper missing contract ports "
-            f"{missing}; expected clock '{CLK_PORT}' reset '{RST_PORT}'; have={have}"
+            f"{missing}; expected clock '{CLK_PORT}' and no reset; have={have}"
         )
 
 
@@ -64,14 +64,11 @@ async def test_ub_cmn_mem_1r1w(dut):
     coverage = Mem1r1wCoverage()
     clk = getattr(dut, CLK_PORT)
     driver.idle(dut)
-    driver.apply_reset(dut, asserted=True)
     scoreboard.ref.reset_written()
 
     cocotb.start_soon(Clock(clk, 10, units="ns").start())
     for _ in range(2):
         await RisingEdge(clk)
-    driver.apply_reset(dut, asserted=False)
-    await RisingEdge(clk)
 
     cycles = make_sequence(case, depth, width, seed, assert_no_uninit_read=anur)
     want = expected_violation(case, anur)

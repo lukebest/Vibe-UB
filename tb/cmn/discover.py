@@ -21,7 +21,6 @@ from pathlib import Path
 from model.ub_cmn_mem_1r1w import clog2
 from tb.cmn.ports import (
     CLK_PORT,
-    RST_PORT,
     check_leaf_ports,
     parse_module_ports,
 )
@@ -71,12 +70,8 @@ class MemVariant:
     def clk_port(self) -> str | None:
         if CLK_PORT in self.ports:
             return CLK_PORT
-        return None
-
-    @property
-    def rst_port(self) -> str | None:
-        if RST_PORT in self.ports:
-            return RST_PORT
+        if "clk" in self.ports:
+            return "clk"
         return None
 
     @property
@@ -383,5 +378,5 @@ def rtl_sim_skip_reason(
 
 
 def require_variant_ports(variant: MemVariant) -> None:
-    """Error if the netlist clock/reset/data ports are not the Xia contract."""
+    """Error if the netlist is not ``core_clk`` + data ports and no reset."""
     check_leaf_ports(variant.ports, module=variant.module)

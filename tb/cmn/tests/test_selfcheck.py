@@ -12,7 +12,7 @@ from tb.cmn.driver import Mem1r1wDriver
 from tb.cmn.handle import AddrAliasFakeHandle, BitSwapFakeHandle, FakeMemHandle
 from tb.cmn.items import MemCycle
 from tb.cmn.run_cycle import run_cycles, step_fake
-from tb.cmn.ports import CLK_PORT, RST_PORT
+from tb.cmn.ports import CLK_PORT
 from tb.cmn.scoreboard import Mem1r1wScoreboard
 from tb.cmn.sequences import (
     NEGATIVE_CASES,
@@ -320,13 +320,13 @@ def test_driver_records_exact_ports():
     )
     assert handle.trace == [(1, 3, 0xA5A5, 0, 0), (0, 0, 0, 1, 3)]
     assert hasattr(handle, CLK_PORT)
-    assert hasattr(handle, RST_PORT)
-    assert not hasattr(handle, "clk") or CLK_PORT == "clk"
-    assert int(handle.rst_n.value) == 1
+    assert not hasattr(handle, "clk")
+    assert not hasattr(handle, "rst_n")
+    assert not hasattr(handle, "rst_pyc")
 
 
 def test_tb_reset_undefines_array_not_rdata():
-    """rst_n marks the array undefined; the rdata register is not cleared."""
+    """Model reset_written marks the array undefined; rdata is not cleared."""
     handle = FakeMemHandle(4, 8, assert_no_uninit_read=False)
     sb = Mem1r1wScoreboard(4, 8, assert_no_uninit_read=False)
     driver = Mem1r1wDriver()
@@ -335,9 +335,8 @@ def test_tb_reset_undefines_array_not_rdata():
     step_fake(handle, sb, driver, cov, MemCycle(re=1, raddr=0))
     assert sb.ref.rdata == 0x55
     compares = sb.n_compare
-    handle.apply_reset()
+    handle.undefine_array()
     sb.ref.reset_written()
-    assert handle.rst_n.value == 1
     assert sb.ref.rdata == 0x55
     assert sb.is_defined is True
     skips = sb.n_skip

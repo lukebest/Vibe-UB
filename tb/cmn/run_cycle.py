@@ -68,10 +68,9 @@ def run_cycles(
     )
     driver = Mem1r1wDriver()
     cov = coverage if coverage is not None else Mem1r1wCoverage()
-    # rst_n: array and rdata are not reset; content is undefined after reset.
-    handle.apply_reset()
+    # No DUT reset port. Array starts undefined (model reset_written).
+    handle.undefine_array()
     scoreboard.ref.reset_written()
-    driver.apply_reset(handle, asserted=False)
     saw = False
     last = len(cycles) - 1
     for i, cycle in enumerate(cycles):

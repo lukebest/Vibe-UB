@@ -14,9 +14,10 @@ from tb.cmn.discover import (
 )
 from tb.cmn.harness.emit_wrapper import TOPLEVEL, emit_wrapper
 from tb.cmn.ports import (
+    CLK_MISMATCH_ZH,
     CLK_PORT,
-    RST_PORT,
     LeafPortError,
+    RST_FORBIDDEN_ZH,
     check_leaf_ports,
     parse_module_ports,
 )
@@ -135,18 +136,17 @@ def test_emit_wrapper_bakes_constants_no_dut_parameter(tmp_path: Path):
     assert "ub_cmn_mem_1r1w_if_props" in text
     assert ".ASSERT_NO_UNINIT_READ(ASSERT_NO_UNINIT_READ)" in text
     assert f"input  wire             {CLK_PORT}" in text
-    assert f"input  wire             {RST_PORT}" in text
     assert f".{CLK_PORT} ({CLK_PORT})" in text
-    assert f".{RST_PORT}" in text
+    assert "rst_n" not in text
+    assert "rst_pyc" not in text
     assert f"input  wire             clk\n" not in text
     assert ".clk   (clk)" not in text
 
 
-def test_parse_module_ports_core_clk_rst_n():
+def test_parse_module_ports_core_clk_no_reset():
     text = """
 module ub_cmn_mem_1r1w_d5w8 (
   input core_clk,
-  input rst_n,
   input we,
   input [2:0] waddr,
   input [7:0] wdata,
@@ -159,7 +159,6 @@ endmodule
     ports = parse_module_ports(text, "ub_cmn_mem_1r1w_d5w8")
     assert ports == (
         "core_clk",
-        "rst_n",
         "we",
         "waddr",
         "wdata",
@@ -170,18 +169,52 @@ endmodule
     check_leaf_ports(ports, module="ub_cmn_mem_1r1w_d5w8")
 
 
-def test_check_leaf_ports_rejects_legacy_clk_without_reset():
+def test_check_leaf_ports_rejects_legacy_clk():
     ports = ("clk", "we", "waddr", "wdata", "re", "raddr", "rdata")
     try:
         check_leaf_ports(ports, module="ub_cmn_mem_1r1w_d5w8")
     except LeafPortError as exc:
         msg = str(exc)
-        assert "core_clk" in msg
-        assert "rst_n" in msg
+        assert CLK_MISMATCH_ZH in msg
         assert "clk" in msg
         assert "silently" in msg
     else:
-        raise AssertionError("expected LeafPortError for legacy clk / no rst_n")
+        raise AssertionError("expected LeafPortError for legacy clk")
+
+
+def test_check_leaf_ports_rejects_any_reset():
+    ports = (
+        "core_clk",
+        "rst_pyc",
+        "we",
+        "waddr",
+        "wdata",
+        "re",
+        "raddr",
+        "rdata",
+    )
+    try:
+        check_leaf_ports(ports, module="ub_cmn_mem_1r1w_d5w8")
+    except LeafPortError as exc:
+        assert RST_FORBIDDEN_ZH in str(exc)
+        assert "rst_pyc" in str(exc)
+    else:
+        raise AssertionError("expected LeafPortError for unexpected reset port")
+
+
+def test_current_product_clk_is_reported_not_remapped():
+    """Design-B leaf still emits clk. TB must fail with the Xia clock name."""
+    found = discover_by_netlist("product")
+    for var in found:
+        if "clk" in var.ports and CLK_PORT not in var.ports:
+            try:
+                require_variant_ports(var)
+            except LeafPortError as exc:
+                assert CLK_MISMATCH_ZH in str(exc)
+            else:
+                raise AssertionError(
+                    f"{var.module} has clk but port check stayed silent"
+                )
 
 
 def test_repo_product_netlist_ports_are_parsed():
@@ -194,6 +227,6 @@ def test_repo_product_netlist_ports_are_parsed():
         assert var.ports, f"{var.module} ANSI port list was empty"
         try:
             require_variant_ports(var)
-            print(f"  port check OK ({CLK_PORT}/{RST_PORT})", flush=True)
+            print(f"  port check OK ({CLK_PORT}, no reset)", flush=True)
         except LeafPortError as exc:
             print(f"  port check FAIL (sim will error, no silent remap): {exc}", flush=True)

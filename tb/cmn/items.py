@@ -8,7 +8,7 @@ from random import Random
 
 @dataclass
 class MemCycle:
-    """One ``core_clk`` of ``we/waddr/wdata`` + ``re/raddr``. Reset is ``rst_n``."""
+    """One ``core_clk`` of ``we/waddr/wdata`` + ``re/raddr``. No reset port."""
 
     we: int = 0
     waddr: int = 0

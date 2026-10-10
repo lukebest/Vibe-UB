@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generator + SPEC §6.3 / §6.4 transfer self-check (not a verification TB).
 
-Proves emit() runs, PRODUCT has no hooks / no reserved encodings, and a
+Proves emit() runs, PRODUCT has no hooks / no reserved encodings, HOOKS
+adds only gated ``tb_test_mode`` (SPEC §10 lists no inj/obs), and a
 cycle-accurate Python model of the two SMs walks every SPEC transfer.
 """
 
@@ -12,11 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-if str(HERE) not in sys.path:
-    sys.path.insert(0, str(HERE))
+PYC = HERE.parent
+if str(PYC) not in sys.path:
+    sys.path.insert(0, str(PYC))
 
-import ub_dll_retry_ack_sm as ack
-import ub_dll_retry_req_sm as req
+from dll import ub_dll_retry_ack_sm as ack  # noqa: E402
+from dll import ub_dll_retry_req_sm as req  # noqa: E402
 
 ST_N, ST_Q, ST_W, ST_R, ST_E = (
     req.ST_NORMAL,
@@ -178,7 +180,7 @@ def _ports_block(text: str) -> str:
     return text.split("module", 1)[1].split(");", 1)[0]
 
 
-def _static_leaf(path: Path, module: str, *, reserved_needles: tuple[str, ...]) -> str:
+def _static_common(path: Path, module: str, *, reserved_needles: tuple[str, ...]) -> str:
     text = path.read_text(encoding="utf-8")
     assert "module " in text
     assert "`ifdef" not in text
@@ -188,8 +190,6 @@ def _static_leaf(path: Path, module: str, *, reserved_needles: tuple[str, ...]) 
     assert "or negedge" not in text
     mod = text.split("module ", 1)[1].split("(", 1)[0].split("#", 1)[0].strip()
     assert path.stem == mod == module, f"DECLFILENAME {path.name} vs {mod}"
-    for token in ("tb_test_mode", "tb_inj_", "tb_obs_"):
-        assert token not in text
     for needle in reserved_needles:
         for line in text.splitlines():
             if "st_n" in line:
@@ -197,22 +197,45 @@ def _static_leaf(path: Path, module: str, *, reserved_needles: tuple[str, ...]) 
     return text
 
 
-def main() -> int:
-    req_v = req.generate()
-    ack_v = ack.generate()
-    req_txt = _static_leaf(
-        req_v,
-        "ub_dll_retry_req_sm",
-        reserved_needles=("3'd5", "3'd6", "3'd7", "3'b101", "3'b110", "3'b111"),
-    )
-    ack_txt = _static_leaf(
-        ack_v,
-        "ub_dll_retry_ack_sm",
-        reserved_needles=("2'd2", "2'd3", "2'b10", "2'b11"),
-    )
+def _decl_lines(text: str) -> list[str]:
+    return [
+        line
+        for line in text.splitlines()
+        if line.lstrip().startswith(("input", "output", "assign", "wire"))
+    ]
 
-    hooks = HERE / "hooks"
-    assert not hooks.exists(), "SPEC §10 lists no hooks; do not emit hooks/"
+
+def _static_product(path: Path, module: str, *, reserved_needles: tuple[str, ...]) -> str:
+    text = _static_common(path, module, reserved_needles=reserved_needles)
+    for token in ("tb_test_mode", "tb_inj_", "tb_obs_"):
+        assert all(token not in line for line in _decl_lines(text)), token
+    return text
+
+
+def _static_hooks(path: Path, module: str, *, reserved_needles: tuple[str, ...]) -> str:
+    text = _static_common(path, module, reserved_needles=reserved_needles)
+    decls = _decl_lines(text)
+    assert any("tb_test_mode" in line for line in decls)
+    for token in ("tb_inj_", "tb_obs_"):
+        assert all(token not in line for line in decls), token
+    return text
+
+
+def main() -> int:
+    req_prod, req_hooks = req.generate()
+    ack_prod, ack_hooks = ack.generate()
+    req_needles = ("3'd5", "3'd6", "3'd7", "3'b101", "3'b110", "3'b111")
+    ack_needles = ("2'd2", "2'd3", "2'b10", "2'b11")
+
+    req_txt = _static_product(req_prod, "ub_dll_retry_req_sm", reserved_needles=req_needles)
+    ack_txt = _static_product(ack_prod, "ub_dll_retry_ack_sm", reserved_needles=ack_needles)
+    _static_hooks(req_hooks, "ub_dll_retry_req_sm", reserved_needles=req_needles)
+    _static_hooks(ack_hooks, "ub_dll_retry_ack_sm", reserved_needles=ack_needles)
+
+    assert req_hooks == req.HOOKS_V
+    assert ack_hooks == ack.HOOKS_V
+    assert req_hooks.parent.name == "hooks"
+    assert ack_hooks.parent.name == "hooks"
 
     req_ports = _ports_block(req_txt)
     for name in (
@@ -234,6 +257,7 @@ def main() -> int:
     # Do not silently grow Switch-only pins (D9 names that SPEC does not give).
     for banned in ("device_rst", "send_cnt", "wr_ptr", "rd_ptr", "rst_n"):
         assert banned not in req_ports, banned
+    assert "tb_test_mode" not in req_ports
 
     ack_ports = _ports_block(ack_txt)
     for name in (
@@ -248,6 +272,7 @@ def main() -> int:
         assert name in ack_ports, name
     for banned in ("device_rst", "wr_ptr", "rcv_ptr", "rd_ptr", "send_cnt"):
         assert banned not in ack_ports, banned
+    assert "tb_test_mode" not in ack_ports
 
     # --- SPEC §6.3 transfers ---
     s = ReqS()
@@ -350,8 +375,9 @@ def main() -> int:
             assert n.st in (ACK_N, ACK_A), n.st
 
     print(
-        "selfcheck ok: PRODUCT "
-        f"{req_v.name} + {ack_v.name}, DECLFILENAME, no hooks, "
+        "selfcheck ok: PRODUCT + HOOKS "
+        f"{req_prod.name} / {ack_prod.name}, DECLFILENAME, "
+        "HOOKS tb_test_mode only (no §10 inj/obs), "
         "SPEC §6.3 / §6.4 transfers, reserved encodings never produced"
     )
     return 0

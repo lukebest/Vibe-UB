@@ -96,20 +96,24 @@ for f in "${GOLD_FILES[@]}"; do
 done
 gate_read="read_verilog -sv ${NET}; "
 
-# Gold first, rename away from the leaf name, then read the gate.
+# Stash gold, then gate. A second read_verilog would drop the renamed gold.
 SCRIPT="
 ${gold_read}
 ${gold_ch}
 hierarchy -check -top ${LEAF}
 rename -top gold
 proc; flatten; opt
+design -stash gold
 
 ${gate_read}
 ${gate_ch}
 hierarchy -check -top ${GATE_TOP}
 rename -top gate
 proc; flatten; opt
+design -stash gate
 
+design -copy-from gold -as gold gold
+design -copy-from gate -as gate gate
 equiv_make gold gate equiv
 equiv_simple equiv
 equiv_induct equiv

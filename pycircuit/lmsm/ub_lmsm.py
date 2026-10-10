@@ -5,18 +5,19 @@ Source of truth for this leaf. Business registers are ``pyc_reg``
 ``TEST_HOOKS`` is expanded here at Python generation time (SPEC §11);
 the generated Verilog has no ``ifdef TEST_HOOKS``.
 
-Regenerate both netlists:
+Source lives under ``pycircuit/lmsm/`` (PR #5 layout: pyCircuit in
+``pycircuit/<layer>/``, generated ``.v`` only under ``rtl/<layer>/``).
+Temporary emit until ``scripts/emit_rtl.py`` lands via PR #5:
 
-    python3 rtl/lmsm/ub_lmsm.py
+    python3 pycircuit/lmsm/emit.py
 
-SPEC §2.2 / CODING_STYLE §5 place generated RTL in ``rtl/lmsm/``
-(not PR #5 ``rtl/gen/``, which exists to avoid overwriting D10
-legacy under ``rtl/pcs`` / ``rtl/dll``). Both netlists keep the
-filename ``ub_lmsm.v`` so it matches the module (Verilator
-DECLFILENAME / CODING_STYLE §5 one-module-one-file):
+SPEC §2.2 / CODING_STYLE §5:
 
     PRODUCT (TEST_HOOKS=0) → ``rtl/lmsm/ub_lmsm.v``
     HOOKS   (TEST_HOOKS=1) → ``rtl/lmsm/hooks/ub_lmsm.v``
+
+Filename equals the module (Verilator ``DECLFILENAME``). Do not put the
+repo root on ``PYTHONPATH`` (toolchain package is also named pycircuit).
 
 Module name ``ub_lmsm`` = ``ub_<层>_<功能>`` (CODING_STYLE §5 / SPEC §2.2).
 
@@ -119,8 +120,9 @@ LANE_ID_NULL = 2
 # LANE_ID_RESERVED = 3  — LMSM must never drive this.
 
 HERE = Path(__file__).resolve().parent
-PRODUCT_V = HERE / "ub_lmsm.v"
-HOOKS_V = HERE / "hooks" / "ub_lmsm.v"
+REPO = HERE.parents[1]
+PRODUCT_V = REPO / "rtl" / "lmsm" / "ub_lmsm.v"
+HOOKS_V = REPO / "rtl" / "lmsm" / "hooks" / "ub_lmsm.v"
 
 
 def _header(test_hooks: int) -> str:

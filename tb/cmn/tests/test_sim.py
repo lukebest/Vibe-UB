@@ -26,7 +26,22 @@ def _require_sim(netlist: str):
             f"No {netlist} ub_cmn_mem_1r1w variants under rtl/cmn/ "
             "(SPEC §2.2). design-B has not landed the leaf."
         )
-    return variants
+    ready = []
+    for var in variants:
+        if "wmask" in var.ports:
+            print(
+                f"SKIP {var.module}: has wmask; WMASK_W segmented-write "
+                "model has not landed — not this TB round",
+                flush=True,
+            )
+            continue
+        ready.append(var)
+    if not ready:
+        pytest.skip(
+            "All discovered variants have wmask; waiting for the "
+            "segmented-write model before this TB drives them."
+        )
+    return ready
 
 
 @pytest.mark.sim

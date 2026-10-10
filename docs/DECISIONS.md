@@ -33,7 +33,7 @@ D12 Coverage acceptance = line + functional, 100% counting named waivers; toggle
 
 D13 TB never forces internal signals; stimulus/error injection via ports or explicit test hooks only.
 
-D14 PHY / SerDes / DLL / process parameters: Xia proposes defaults, pending Luke's approval.
+D14 PHY / SerDes / DLL / process parameters: confirmed by Luke on 2026-10-09. RTT = 2 µs. ASIC scope = digital PCS + DLL only; PMA is a behavioral model (not in ASIC). ASIC process node unspecified (open item).
 
 D15 Spec full text removed from the public repo (this PR); git history rewrite NOT done — pending Luke.
 

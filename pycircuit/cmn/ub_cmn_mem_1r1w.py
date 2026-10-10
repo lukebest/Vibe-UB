@@ -42,9 +42,9 @@ from pycircuit import Circuit, module, u
 # A larger C-line tag (e.g. d512w512m64) can be re-added later via a
 # manifest-only flow; WMASK_W support in build() stays.
 VARIANTS = {
-    "d5w8": {"DEPTH": 5, "WIDTH": 8, "WMASK_W": 8},
-    "d8w16": {"DEPTH": 8, "WIDTH": 16, "WMASK_W": 16},
-    "d64w64m16": {"DEPTH": 64, "WIDTH": 64, "WMASK_W": 16},
+    "d5w8": {"depth": 5, "width": 8, "wmask_w": 8},
+    "d8w16": {"depth": 8, "width": 16, "wmask_w": 16},
+    "d64w64m16": {"depth": 64, "width": 64, "wmask_w": 16},
 }
 
 LEAF = "ub_cmn_mem_1r1w"

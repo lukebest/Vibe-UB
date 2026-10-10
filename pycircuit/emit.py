@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Emit PRODUCT + HOOKS Verilog.
 
-Migrated STEP 1 leaves go through pycircuit.compile + pycc.
+Migrated STEP 1 leaves go through compile() + pycc --emit=verilog --logic-depth=64.
 Scrambler / descrambler stay on the leftover f-string emitters (STEP 2).
 
   PRODUCT  TEST_HOOKS=0  → rtl/<block>/<module>.v
@@ -18,7 +18,9 @@ pycircuit).
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
+import site
 import subprocess
 import sys
 from pathlib import Path
@@ -27,6 +29,15 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 RTL = REPO / "rtl"
 
+os.environ.setdefault(
+    "PYC_TOOLCHAIN_ROOT",
+    "/tmp/pyCircuit/.pycircuit_out/toolchain/install",
+)
+_root = Path(os.environ["PYC_TOOLCHAIN_ROOT"])
+os.environ["PATH"] = f"{_root / 'bin'}:{os.environ.get('PATH', '')}"
+_venv = Path(os.environ.get("UB_PYC_VENV", "/tmp/venv"))
+for _site in _venv.glob("lib/python*/site-packages"):
+    site.addsitedir(str(_site))
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
@@ -93,6 +104,14 @@ def emit_all(out_root: Path = RTL) -> list[Path]:
     for leaf in registered():
         written.extend(write_leaf(leaf, out_root))
     return written
+
+
+def generate():
+    """PR #5 registration: PHY/DLL STEP 1 variant tables → PRODUCT + HOOKS.
+
+    Same contract as pycircuit/csr/ub_csr_regs.py generate() (PR #11).
+    """
+    return emit_all()
 
 
 def try_pycc() -> str:

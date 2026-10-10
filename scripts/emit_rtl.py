@@ -1,73 +1,62 @@
 #!/usr/bin/env python3
-"""Emit PRODUCT + HOOKS for every registered leaf.
+"""Emit committed Verilog under rtl/ from pycircuit/<layer>/ leaves.
 
-    python3 scripts/emit_rtl.py
+CSR: compile() + pycc --emit=verilog --logic-depth=64 for every variants: tag
+(PRODUCT → rtl/csr/ub_csr_<tag>.v, HOOKS → rtl/csr/hooks/ub_csr_<tag>.v).
+This is the path `python3 scripts/gen_regmap.py --check` byte-compares, and
+the same entry the gate (PR #14) rtl-emit / provenance regen will invoke.
 
-Re-execs the pyCircuit venv so `import pycircuit` is the toolchain
-package (pycircuit-hisi) and local leaves load from pycircuit/.
-
-Layout (SPEC §2.2 / CODING_STYLE §5):
-
-    PRODUCT  rtl/<block>/<leaf>[_<tag>].v
-    HOOKS    rtl/<block>/hooks/<leaf>[_<tag>].v
-
-STEP 1 leaves (rst_adapt, lane _x4/_x8, BCRC gen/check) are compiled
-with pycircuit + pycc. Scrambler / descrambler stay on leftover
-f-string emitters until STEP 2.
-
-Whitelist ``rtl/common/ub_rst_sync.sv`` is handwritten and is not
-copied into ``hooks/`` (CODING_STYLE §3).
+PHY/DLL (PR #5): same flags; register leaves + variant tables in
+pycircuit/emit.py generate() (PRODUCT → rtl/<block>/, HOOKS → rtl/<block>/hooks/).
 """
 
 from __future__ import annotations
 
-import os
+import runpy
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[1]
-VENV_PY = Path(os.environ.get("UB_PYC_VENV", "/tmp/venv")) / "bin" / "python"
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _reexec_venv() -> None:
-    if not VENV_PY.is_file():
-        return
-    if Path(sys.executable).resolve() == VENV_PY.resolve():
-        return
-    os.execv(str(VENV_PY), [str(VENV_PY), *sys.argv])
+def emit_csr() -> list[Path]:
+    ns = runpy.run_path(str(REPO_ROOT / "pycircuit" / "csr" / "ub_csr_regs.py"))
+    written = ns["generate"]()
+    return [Path(p) for p in written]
 
 
-_reexec_venv()
+def emit_phy_dll() -> list[Path]:
+    ns = runpy.run_path(str(REPO_ROOT / "pycircuit" / "emit.py"))
+    written = ns["generate"]()
+    return [Path(p) for p in written]
 
-os.environ.setdefault(
-    "PYC_TOOLCHAIN_ROOT",
-    "/tmp/pyCircuit/.pycircuit_out/toolchain/install",
-)
-_root = Path(os.environ["PYC_TOOLCHAIN_ROOT"])
-os.environ["PATH"] = f"{_root / 'bin'}:{os.environ.get('PATH', '')}"
 
-PYC = REPO / "pycircuit"
-if str(PYC) not in sys.path:
-    sys.path.insert(0, str(PYC))
-
-from emit import emit_all, register_batch1, try_pycc  # noqa: E402
-from lib.registry import register  # noqa: E402, F401
+# Framework owned by PR #11. Each PR appends one generate() entry.
+GENERATORS = [
+    emit_csr,      # PR #11
+    emit_phy_dll,  # PR #5
+]
 
 
 def main() -> int:
-    import argparse
-
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--out", type=Path, default=REPO / "rtl")
-    args = parser.parse_args()
-    register_batch1()
-    paths = emit_all(args.out)
-    print(try_pycc())
-    for p in paths:
+    paths: list[Path] = []
+    for emit in GENERATORS:
+        script = {
+            emit_csr: REPO_ROOT / "pycircuit" / "csr" / "ub_csr_regs.py",
+            emit_phy_dll: REPO_ROOT / "pycircuit" / "emit.py",
+        }[emit]
+        if not script.is_file():
+            continue
+        chunk = emit()
+        paths.extend(chunk)
+        if emit is emit_csr and len(chunk) != 8:
+            print(f"error: expected 8 CSR netlists, wrote {len(chunk)}", file=sys.stderr)
+            return 1
+    for path in paths:
         try:
-            print(f"wrote {p.relative_to(REPO)}")
+            print(f"wrote {path.relative_to(REPO_ROOT)}")
         except ValueError:
-            print(f"wrote {p}")
+            print(f"wrote {path}")
     return 0
 
 

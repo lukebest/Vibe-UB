@@ -27,11 +27,14 @@ lock_get() {
 PIN="$(lock_get commit)"
 GIT_URL="$(lock_get repo)"
 RELEASE="$(lock_get release)"
-LLVM_VER="$(lock_get llvm)"
-CMAKE_VER="$(lock_get cmake)"
-NINJA_VER="$(lock_get ninja)"
+LLVM_VER="$(lock_get llvm_lock)"
+MLIR_VER="$(lock_get mlir_lock)"
 if [[ -z "${PIN}" || -z "${GIT_URL}" ]]; then
   echo "setup_pycircuit.sh: missing repo/commit in ${LOCK} [pycircuit]" >&2
+  exit 1
+fi
+if [[ -z "${LLVM_VER}" || -z "${MLIR_VER}" ]]; then
+  echo "setup_pycircuit.sh: missing llvm_lock/mlir_lock in ${LOCK} [pycircuit]" >&2
   exit 1
 fi
 
@@ -39,7 +42,7 @@ SRC="${PYCIRCUIT_SRC:-/tmp/pyCircuit}"
 VENV="${UB_PYC_VENV:-/tmp/venv}"
 
 echo "TOOLCHAIN.lock [pycircuit]: ${RELEASE} ${GIT_URL} @ ${PIN}"
-echo "LLVM/MLIR ${LLVM_VER}; cmake ${CMAKE_VER}; ninja ${NINJA_VER}"
+echo "LLVM ${LLVM_VER} / MLIR ${MLIR_VER}"
 
 if [[ ! -d "${SRC}/.git" ]]; then
   git clone "${GIT_URL}" "${SRC}"

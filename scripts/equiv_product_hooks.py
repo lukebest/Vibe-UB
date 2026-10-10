@@ -113,9 +113,13 @@ def _write_tied_wrapper(
     return dest
 
 
+def _incdir() -> str:
+    return f"-I {REPO / 'rtl' / 'common'} "
+
+
 def _extra_v(name: str) -> str:
     if name.startswith("ub_dll_bcrc"):
-        return str(REPO / "rtl/common/pyc_reg.v") + " "
+        return _incdir()
     return ""
 
 

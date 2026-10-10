@@ -22,7 +22,9 @@ Layout (SPEC §2.2 / CODING_STYLE §5):
 SPEC §10 lists **no** hook ports on these leaves, so HOOKS is
 port-identical to PRODUCT. Xia: no unused `tb_test_mode`.
 
-STEP 1 uses the real pyCircuit API + `pycc`. STEP 2 pending:
+STEP 1 uses the real pyCircuit API + `compile()` +
+`pycc --emit=verilog --logic-depth=64` (same invocation as PR #11).
+STEP 2 pending:
 `ub_pcs_scrambler` / `ub_pcs_descrambler` leftover f-string emitters
 (files untouched). Their OPEN items (SPEC §13) still have no product
 default; lint/synth pass `pycircuit/lib/elab_open.py` tokens.

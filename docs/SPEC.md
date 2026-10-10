@@ -110,7 +110,12 @@ PMA 模型在仿真里实例化，与 PCS 的边界是 M1 的 **PHY 数字/模�
 
 ### 2.2 模块职责
 
-**路径规则（已定）：** pyCircuit 源在 `pycircuit/<layer>/`。`rtl/` **只**放生成的 `.v`：PRODUCT 在 `rtl/<layer>/`，HOOKS 在 `rtl/<layer>/hooks/`。生成入口 `scripts/emit_rtl.py`（见 §11）。手写旧网表按 D10 迁 `legacy/`，不是源路径。
+**路径规则（已定）：** pyCircuit 源在 `pycircuit/<layer>/`。生成入口 `scripts/emit_rtl.py`（见 §11）。`rtl/` 只放两类文件：
+
+1. **生成网表**（`.v`）：PRODUCT 在 `rtl/<layer>/`，HOOKS 在 `rtl/<layer>/hooks/`。
+2. **门禁手写 SV 白名单**上的文件（见 §11 (f)）。首条：`ub_rst_sync.sv`（§4.2 复位同步器）。未列名的手写文件不得出现在 `rtl/`。
+
+手写旧网表按 D10 迁 `legacy/`，不是源路径。
 
 | 模块 | 源 / 生成后 | 职责 |
 | --- | --- | --- |
@@ -119,6 +124,7 @@ PMA 模型在仿真里实例化，与 PCS 的边界是 M1 的 **PHY 数字/模�
 | `ub_dll` | `pycircuit/dll/` → `rtl/dll/`、`rtl/dll/hooks/` | DLL 状态机、组包/拆包、VL、信用、重传、BCRC（子块见 §2.6） |
 | `ub_pcs` | `pycircuit/pcs/` → `rtl/pcs/`、`rtl/pcs/hooks/` | FEC、扰码、8-bit 符号分发、AMCTL、deskew（子块见 §2.4） |
 | `ub_lmsm` | `pycircuit/lmsm/` → `rtl/lmsm/`、`rtl/lmsm/hooks/` | LMSM 及与 PMA 模型的训练握手 |
+| `ub_rst_sync` | 手写 `ub_rst_sync.sv`（白名单，§11 (f)） | §4.2 复位同步器。不做 emit / HOOKS / eqy |
 | `ub_pma_model` | 不进产品 `rtl/`（路径 **待定**） | Gray（仅 PAM4）、预编码、串并、探测/电气空闲的行为 |
 
 现有 `rtl/pcs/ub_pcs_lmsm.v` 骨架不代表规范 LMSM，M1 以 §6.1 为准重写。
@@ -931,7 +937,9 @@ Retry 深度下界公式见 UB-DL §4.7.3.2（含 FEC 120/128 与 RTT）。M1 25
 
 pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Verilog，而不是在 Verilog 里用 `ifdef` 再分叉一次。统一入口：`scripts/emit_rtl.py`。编码与门控约定见 §10、[CODING_STYLE.md](CODING_STYLE.md)。路径见 §2.2。
 
-**每个叶子都出两套网表：** `TEST_HOOKS=0` → PRODUCT（`rtl/<layer>/`）；`TEST_HOOKS=1` → HOOKS（`rtl/<layer>/hooks/`）。§10 **没有**列出钩子的叶子仍须发出 HOOKS 网表，功能与 PRODUCT **相同**（无 `tb_*` mux，或 mux 被生成期消掉）。eqy **对每个叶子**跑：HOOKS 侧 `tb_test_mode=0`，全部钩子输入（若该叶有）接低 / 复位不介入值。无钩子叶子的两套网表应对等价。
+**下列「两套网表 / eqy」规则只适用于 pyCircuit 生成叶子。**
+
+每个 **生成叶子** 都出两套网表：`TEST_HOOKS=0` → PRODUCT（`rtl/<layer>/`）；`TEST_HOOKS=1` → HOOKS（`rtl/<layer>/hooks/`）。§10 **没有**列出钩子的生成叶子仍须发出 HOOKS 网表，功能与 PRODUCT **相同**（无 `tb_*` mux，或 mux 被生成期消掉）。eqy **对每个生成叶子**跑：HOOKS 侧 `tb_test_mode=0`，全部钩子输入（若该叶有）接低 / 复位不介入值。无钩子生成叶子的两套网表应对等价。
 
 | 网表 | 生成参数 | 用途 |
 | --- | --- | --- |
@@ -942,13 +950,21 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 
 **(a) 实现只用 PRODUCT。** lint / CDC / 综合 / P&R / FPGA 的签字网表是 `TEST_HOOKS=0`。`TEST_HOOKS=1` 也必须过 lint 与 CDC，但永不进入实现。
 
-**(b) 回归与覆盖率跑 HOOKS。** 在 `TEST_HOOKS=1` 网上跑，且 **两种** `tb_test_mode` 都要覆盖：`tb_test_mode=0` 与 `tb_test_mode=1`。行覆盖率分母是 `TEST_HOOKS=1` 网表（含钩子 mux 代码）；钩子代码 **不另开 waiver**。无钩子叶子的 HOOKS 网表仍参加门禁。
+**(b) 回归与覆盖率跑 HOOKS。** 在 `TEST_HOOKS=1` 网上跑，且 **两种** `tb_test_mode` 都要覆盖：`tb_test_mode=0` 与 `tb_test_mode=1`。行覆盖率分母是 `TEST_HOOKS=1` 网表（含钩子 mux 代码）；钩子代码 **不另开 waiver**。无钩子 **生成叶子** 的 HOOKS 网表仍参加门禁。
 
 **(c) PRODUCT 烟测。** `TEST_HOOKS=0` 网表跑一套与钩子无关的 smoke 子集（证明无钩子端口时功能闭环）。
 
-**(d) 形式等价门禁。** 用 Yosys eqy 或同等开源工具，**每个叶子**各比一次：`TEST_HOOKS=0` 对比 `TEST_HOOKS=1`，且后者 `tb_test_mode=0`、全部钩子输入接低（不介入）。两者必须等价；不等价则 **阻断交付**。TEST 窗在这两种条件下都是「已映射、读 0、写忽略、`csr_err=0`」，因此不破坏等价。
+**(d) 形式等价门禁。** 用 Yosys eqy 或同等开源工具，**每个 pyCircuit 生成叶子**各比一次：`TEST_HOOKS=0` 对比 `TEST_HOOKS=1`，且后者 `tb_test_mode=0`、全部钩子输入接低（不介入）。两者必须等价；不等价则 **阻断交付**。TEST 窗在这两种条件下都是「已映射、读 0、写忽略、`csr_err=0`」，因此不破坏等价。白名单手写文件 **不**参加 eqy（见 (f)）。
 
 **(e) 覆盖率 waiver。** 钩子 mux 不另开 waiver（见 (b)）。信用下溢（`CRD_UF` 计数与 irq 分支）在正确设计中不可达，须 **具名覆盖率 waiver**（§13.1）。
+
+**(f) 手写 SV 白名单。** 手写 SystemVerilog **只**允许出现在门禁的手写 SV 白名单上。名单由验证维护，与 `waivers/` 并列；每条写 **路径、理由、守门人批准**。`rtl/` 下未列名的手写文件一律拒绝。
+
+| 路径 | 理由 | 守门 |
+| --- | --- | --- |
+| `ub_rst_sync.sv` | §4.2 / §4.3 复位同步器（异步置位、同步释放）。D6 白名单原语 | 首条；验证列入 |
+
+白名单文件：**跳过** emit 一致性、HOOKS 网表、eqy。仍须过 **lint、综合检查、CDC/RDC**；门禁把它认作合法复位同步器，不是违规异步复位。`ub_pyc_rst_adapt` 由 pyCircuit 生成（或退化为连线），不进本名单。
 
 ---
 

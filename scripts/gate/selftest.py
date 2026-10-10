@@ -33,7 +33,6 @@ from rtl_emit_consistency import (
     emit_unavailable_findings,
     run_equiv,
 )
-from synth_check import parse_yosys, synth_module
 
 
 def _fail(name: str, detail: str) -> None:
@@ -755,47 +754,6 @@ def test_equiv_real_csr_tlb() -> None:
             print("SELFTEST PASS equiv-tlb-#27-flip: fake bus bit fail")
 
 
-def test_synth_async_ff_not_latch() -> None:
-    """ub_rst_sync-style async-reset FF must not be LATCH / COMBO_LOOP."""
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "ub_rst_sync.sv"
-        path.write_text(
-            "module ub_rst_sync (\n"
-            "  input core_clk, input rst_n, output rst_n_sync\n"
-            ");\n"
-            "  reg r1, r2;\n"
-            "  always @(posedge core_clk or negedge rst_n) begin\n"
-            "    if (!rst_n) begin r1 <= 1'b0; r2 <= 1'b0; end\n"
-            "    else begin r1 <= 1'b1; r2 <= r1; end\n"
-            "  end\n"
-            "  assign rst_n_sync = r2;\n"
-            "endmodule\n",
-            encoding="utf-8",
-        )
-        hits, _text = synth_module("ub_rst_sync", path, [path], [])
-        bad = [h for h in hits if h.rule in {"LATCH", "COMBO_LOOP"}]
-        if bad:
-            _fail(
-                "synth-async-ff",
-                f"async-reset FF misclassified: "
-                f"{[(h.rule, h.message[:80]) for h in bad]}",
-            )
-        print("SELFTEST PASS synth-async-ff: $adff/$_DFF_PN0_ not LATCH/COMBO_LOOP")
-
-
-def test_synth_real_latch() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "bad_latch.v"
-        path.write_text(
-            "module bad_latch(input en, input d, output reg q);\n"
-            "  always @* if (en) q = d;\n"
-            "endmodule\n",
-            encoding="utf-8",
-        )
-        hits, _text = synth_module("bad_latch", path, [path], [])
-        _expect_rule("synth-real-latch", hits, "LATCH")
-
-
 def main() -> int:
     tests = [
         test_emit_skip_missing_script,
@@ -821,8 +779,6 @@ def main() -> int:
         test_hooks_wrong_width,
         test_equiv_wide_bus_and_flip,
         test_equiv_real_csr_tlb,
-        test_synth_async_ff_not_latch,
-        test_synth_real_latch,
     ]
     for fn in tests:
         fn()

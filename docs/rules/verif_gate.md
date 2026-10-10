@@ -166,9 +166,9 @@ PRODUCT 与 HOOKS 两套网表（SPEC §11）只要落在上述目录，都会�
 | ID | 规则 | 来源 | 日期 |
 | --- | --- | --- | --- |
 | GATE-SYN-001 | Yosys 对每个 PRODUCT 模块 `synth -noabc` | PROCESS §2；CODING_STYLE §1 | 2026-10-10 |
-| GATE-SYN-002 | 不得出现真 latch（`stat` 的 `$dlatch` / `$adlatch` / `$dlatchsr` / `$_DLATCH*`，或 `Latch inferred`）。`$adff` / `$dffsr` / `$_DFF_PN0_`（`always @(posedge clk or negedge rst_n)`）是异步复位 FF，不算 LATCH。不按模块名豁免 `ub_rst_sync` | 综合结构；#16 | 2026-10-10 |
+| GATE-SYN-002 | 不得出现 `$dlatch` / `$adlatch` / `$dlatchsr` | 综合结构 | 2026-10-10 |
 | GATE-SYN-003 | 不得出现多驱动 | 综合结构 | 2026-10-10 |
-| GATE-SYN-004 | 不得出现组合环（`Warning: found logic loop` / `Found an SCC` / `Found N SCCs` 且 N≥1）。`Executing SCC pass (detecting logic loops)` 横幅不算 | 综合结构；#16 | 2026-10-10 |
+| GATE-SYN-004 | 不得出现组合环（Yosys `scc` / loop 报告） | 综合结构 | 2026-10-10 |
 | GATE-SYN-005 | 打印 `stat`；**不做**面积 / 时序 / QoR 对比 | TEAM §1；实现侧 quick_synth | 2026-10-10 |
 | GATE-SYN-006 | `ltp -noff` 报告每个叶子最大组合逻辑级数（**只数逻辑门**）；只报告。与实现快速综合对照时用 #31 已合入的 `logic depth` 列（等于 `--no-buffer` 级数；`depth incl. buf` 是含缓冲级数）；slack / 面积用带缓冲器版本 | PM | 2026-10-10 |
 | GATE-SYN-007 | `blackbox.yml` 模块用 `read_verilog -lib` | §1.2 | 2026-10-10 |

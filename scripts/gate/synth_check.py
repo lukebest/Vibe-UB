@@ -43,9 +43,9 @@ def is_product(path: Path) -> bool:
     return not (parts & HOOKS_DIR_PARTS)
 
 
-# Handwritten-list async-reset FFs (ub_rst_sync / $adff family). Not latches.
+# Async-reset FF cell types. Latch exemption only — never skip the line.
 _ASYNC_FF_CELL = re.compile(
-    r"\$(?:adff|adffe|dffsr|dffsre)\b|\$_DFF_(?:PN|NP)|_DFFSR_",
+    r"\$(?:adff|adffe|aldff|aldffe|dffsr|dffsre)\b|\$_DFF_(?:PN|NP)|_DFFSR_",
     re.I,
 )
 # Real latches only. Do not match $adff / select-command text / $_DFF_PN0_.
@@ -62,13 +62,23 @@ _COMBO_LOOP_HIT = re.compile(
     re.I,
 )
 _MULTI_DRIVE = re.compile(r"multiple conflicting drivers|multiple drivers", re.I)
+# Sequential / memory / latch cells excluded from the SCC graph so a Q→D
+# cycle through $adff/$dff is not reported as a combinational loop.
+_SCC_SEQ_TYPES = (
+    "t:$dff t:$dffe t:$adff t:$adffe t:$aldff t:$aldffe "
+    "t:$dffsr t:$dffsre t:$sdff t:$sdffe t:$sdffce t:$ff "
+    "t:$dlatch t:$adlatch t:$dlatchsr "
+    "t:$mem t:$mem_v2 t:$memrd t:$memwr t:$meminit t:$meminit_v2 "
+    "t:$_DFF* t:$_SDFF* t:$_DLATCH* t:$_FF*"
+)
 
 
 def parse_yosys(text: str, module: str, file: str) -> list[Finding]:
-    """Parse Yosys synth-check log. Async-reset FFs are not LATCH / COMBO_LOOP.
+    """Parse Yosys synth-check log.
 
-    Handwritten.yml cells ($adff / $adffe / $dffsr, mapped $_DFF_PN0_) stay
-    flops. Classify by cell type — do not skip the whole module. Ignore the
+    Async-reset FFs ($adff / $adffe / $dffsr and mapped $_DFF_PN*) are not
+    latches. That exemption applies only to LATCH: do not `continue` the
+    line, so MULTI_DRIVE and COMBO_LOOP still fire. Ignore the
     `select -list t:$dlatch …` command echo and the
     `Executing SCC pass (detecting logic loops)` banner.
     """
@@ -76,10 +86,9 @@ def parse_yosys(text: str, module: str, file: str) -> list[Finding]:
     latch_cells: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
-        if _ASYNC_FF_CELL.search(stripped) and not _LATCH_STAT.match(line):
-            continue
         if _LATCH_STAT.match(line) or _LATCH_INFERRED.match(stripped):
-            latch_cells.append(stripped)
+            if not _ASYNC_FF_CELL.search(stripped):
+                latch_cells.append(stripped)
         if _MULTI_DRIVE.search(line):
             findings.append(
                 Finding(
@@ -189,7 +198,11 @@ def synth_module(
             "opt_clean",
             "select -list t:$dlatch t:$adlatch t:$dlatchsr",
             "check",
-            "scc",
+            # Combo-only SCC: invert sequential/memory/latch cells so the
+            # graph keeps wires + combo cells. Yosys 0.33 `scc` default
+            # walks all internal non-memory cells, including $adff/$dff.
+            f"select -set _gate_seq {_SCC_SEQ_TYPES}",
+            "scc @_gate_seq %n",
             # -noabc: structural pass/fail only. QoR ABC mapping is not a gate
             # (implementation owns scripts/impl/quick_synth.sh).
             f"synth -top {module} -noabc",

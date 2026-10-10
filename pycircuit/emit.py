@@ -34,7 +34,7 @@ LEAVES: list[dict] = [
         "name": "ub_mem_inv",
         "layer": "mem",
         "source": "mem/ub_mem_inv.py",
-        "hooks": False,
+        "hooks": True,  # gate: every leaf has PRODUCT + HOOKS (no tb_* here)
         "variants": [{"label": ""}],
     },
 ]
@@ -129,14 +129,15 @@ def _header(leaf: str, hooks: int) -> str:
     )
 
 
-def _write_pyc_reg(out_root: Path, pyc_reg: Path) -> Path:
-    # SPEC §2.2 / CODING_STYLE: runtime pyc_* live only in rtl/pyc_lib/.
+def _write_pyc_reg(out_root: Path, pyc_reg: Path) -> Path | None:
+    # PR #21 owns rtl/pyc_lib/pyc_reg.v. Do not write it into the repo tree
+    # from this PR (identical bytes would still collide on merge). Regen
+    # checks pass --out <tmpdir> and get a local copy there.
+    if out_root.resolve() == RTL.resolve():
+        return None
     dest = out_root / "pyc_lib" / "pyc_reg.v"
     dest.parent.mkdir(parents=True, exist_ok=True)
-    text = pyc_reg.read_text(encoding="utf-8")
-    if not text.endswith("\n"):
-        text += "\n"
-    dest.write_text(text, encoding="utf-8")
+    dest.write_bytes(pyc_reg.read_bytes())
     return dest
 
 
@@ -196,7 +197,10 @@ def emit_all(out_root: Path = RTL) -> list[Path]:
         os.sys.path.insert(0, str(HERE))
     pycc = _find_pycc()
     pyc_reg = _find_pyc_reg(pycc)
-    written: list[Path] = [_write_pyc_reg(out_root, pyc_reg)]
+    written: list[Path] = []
+    pyc_copy = _write_pyc_reg(out_root, pyc_reg)
+    if pyc_copy is not None:
+        written.append(pyc_copy)
     for leaf in LEAVES:
         source = HERE / leaf["source"]
         for var in leaf["variants"]:

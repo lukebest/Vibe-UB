@@ -3,7 +3,8 @@
 // Byte 0 = data_in[7:0]; each byte MSB first. Last flit: CRC bytes 0..15 only.
 // Pack {1'b0, ERROR_FLAG, crc[29:0]}; TX ERROR_FLAG hardwired 0.
 // Bit-serial loop (not an XOR matrix). 1-cycle to crc_word / done.
-// start is a re-init strobe and does not absorb this beat (SPEC §2.6 stream).
+// Xia §2.6: start&&valid same cycle absorbs from INIT (model eat).
+// start&&!valid: load INIT, no data. A new start abandons a non-last block.
 // Do not copy pycircuit/ or rtl/.
 `timescale 1ns / 1ps
 
@@ -46,15 +47,14 @@ module ub_dll_bcrc (
     end
   endfunction
 
-  wire [29:0] nxt = crc30_absorb(crc, data_in, last);
-  // Named next-state (basis / pairing). Same mux as the registers.
+  // start re-seeds INIT; a same-cycle valid_in flit is folded from that seed.
+  wire [29:0] seed = start ? INIT : crc;
+  wire [29:0] nxt  = crc30_absorb(seed, data_in, last);
   wire [29:0] crc_n  = rst_pyc ? INIT :
-                       (start ? INIT :
-                        (valid_in ? nxt : crc));
+                       (valid_in ? nxt : (start ? INIT : crc));
   wire [31:0] word_n = rst_pyc ? 32'b0 :
-                       ((valid_in && last && !start) ? {2'b00, nxt} : crc_word);
-  wire        done_n = rst_pyc ? 1'b0 :
-                       (valid_in && last && !start);
+                       ((valid_in && last) ? {2'b00, nxt} : crc_word);
+  wire        done_n = rst_pyc ? 1'b0 : (valid_in && last);
 
   always @(posedge core_clk) begin
     crc      <= crc_n;

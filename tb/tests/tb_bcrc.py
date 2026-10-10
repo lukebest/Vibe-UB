@@ -30,6 +30,14 @@ class BcrcLeafTest(LeafUvmTest):
         self.dut.rst_n.value = 1
         await RisingEdge(self.dut.core_clk)
 
+    async def _beat(self, *, start: int = 0, valid: int = 0, last: int = 0, data: int = 0) -> None:
+        self.dut.start.value = start
+        self.dut.valid_in.value = valid
+        self.dut.last.value = last
+        self.dut.data_in.value = data
+        await RisingEdge(self.dut.core_clk)
+        await wait_ps(1)
+
     async def _feed(self, flits: list[int]) -> tuple[int, int]:
         self.dut.start.value = 1
         self.dut.valid_in.value = 0
@@ -57,6 +65,10 @@ class BcrcLeafTest(LeafUvmTest):
         await self.case_random()
         await self.case_tx_flag0()
         await self.case_start_reinit()
+        await self.case_xia_start_valid()
+        await self.case_xia_start_valid_last()
+        await self.case_xia_start_only()
+        await self.case_xia_start_mid_restart()
 
     async def case_reset_quiet(self) -> None:
         name = "reset_quiet"
@@ -173,6 +185,95 @@ class BcrcLeafTest(LeafUvmTest):
             self.check(1, done, "reinit done")
             self.check(exp, word, "reinit crc_word")
             sample_bcrc("start_reinit", 1, self.hooks)
+            self.rec.pass_(name, TP)
+        except Exception as exc:
+            self.rec.fail(name, TP, str(exc))
+            raise
+
+    async def case_xia_start_valid(self) -> None:
+        """Xia §2.6: start&&valid same cycle folds that flit from INIT."""
+        name = "xia_start_valid"
+        try:
+            from tb.vibe_uvm.golden import bcrc as BM
+
+            first = BM.bytes_to_flit(list(range(20)))
+            second = payload_flit([0x5A] * 16)
+            raw = [first, second]
+            attached = attach(raw)
+            model = BM.UbDllBcrc()
+            model.start()
+            model.eat(attached[0], last=False)
+            exp30 = model.eat(attached[1], last=True)
+            await self._beat(start=1, valid=1, last=0, data=attached[0])
+            await self._beat(start=0, valid=1, last=1, data=attached[1])
+            self.check(1, as_int(self.dut.done, "done"), "xia start+valid done")
+            self.check(pack_word(exp30, 0, 0), as_int(self.dut.crc_word, "crc_word"),
+                       "xia start+valid crc_word")
+            sample_bcrc("xia_start_valid", 2, self.hooks)
+            self.rec.pass_(name, TP)
+        except Exception as exc:
+            self.rec.fail(name, TP, str(exc))
+            raise
+
+    async def case_xia_start_valid_last(self) -> None:
+        """Xia §2.6: start&&valid&&last = model eat(flit, last=True)."""
+        name = "xia_start_valid_last"
+        try:
+            from tb.vibe_uvm.golden import bcrc as BM
+
+            raw = [payload_flit(list(range(16)))]
+            attached = attach(raw)
+            exp30 = BM.UbDllBcrc().eat(attached[0], last=True)
+            await self._beat(start=1, valid=1, last=1, data=attached[0])
+            self.check(1, as_int(self.dut.done, "done"), "xia svl done")
+            self.check(pack_word(exp30, 0, 0), as_int(self.dut.crc_word, "crc_word"),
+                       "xia svl crc_word")
+            sample_bcrc("xia_start_valid_last", 1, self.hooks)
+            self.rec.pass_(name, TP)
+        except Exception as exc:
+            self.rec.fail(name, TP, str(exc))
+            raise
+
+    async def case_xia_start_only(self) -> None:
+        """Xia §2.6: start&&!valid loads INIT and ignores data_in."""
+        name = "xia_start_only"
+        try:
+            from tb.vibe_uvm.golden import bcrc as BM
+
+            attached = attach([payload_flit([0x11] * 16)])
+            model = BM.UbDllBcrc()
+            model.start()
+            exp30 = model.eat(attached[0], last=True)
+            await self._beat(start=1, valid=0, last=0, data=(1 << 160) - 1)
+            await self._beat(start=0, valid=1, last=1, data=attached[0])
+            self.check(1, as_int(self.dut.done, "done"), "xia start-only done")
+            self.check(pack_word(exp30, 0, 0), as_int(self.dut.crc_word, "crc_word"),
+                       "xia start-only crc_word")
+            sample_bcrc("xia_start_only", 1, self.hooks)
+            self.rec.pass_(name, TP)
+        except Exception as exc:
+            self.rec.fail(name, TP, str(exc))
+            raise
+
+    async def case_xia_start_mid_restart(self) -> None:
+        """Xia §2.6: start after a non-last block reseeds INIT."""
+        name = "xia_start_mid_restart"
+        try:
+            from tb.vibe_uvm.golden import bcrc as BM
+
+            partial = BM.bytes_to_flit(list(range(20)))
+            restart = attach([payload_flit([0x22] * 16)])
+            model = BM.UbDllBcrc()
+            model.start()
+            model.eat(partial, last=False)
+            model.start()
+            exp30 = model.eat(restart[0], last=True)
+            await self._beat(start=1, valid=1, last=0, data=partial)
+            await self._beat(start=1, valid=1, last=1, data=restart[0])
+            self.check(1, as_int(self.dut.done, "done"), "xia mid-start done")
+            self.check(pack_word(exp30, 0, 0), as_int(self.dut.crc_word, "crc_word"),
+                       "xia mid-start crc_word")
+            sample_bcrc("xia_start_mid_restart", 1, self.hooks)
             self.rec.pass_(name, TP)
         except Exception as exc:
             self.rec.fail(name, TP, str(exc))

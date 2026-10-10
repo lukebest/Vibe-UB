@@ -1,5 +1,6 @@
-// Negative fixture only: SPEC CRC30 (Xia start&&valid absorbs from INIT)
-// with crc_word[0] inverted. Used to prove scripts/gate/equiv_ref.sh ≠ 0.
+// Negative fixture only: start&&valid same cycle drops the flit
+// (load INIT, do not absorb). Xia §2.6 / model eat() fold that flit from INIT.
+// Used to prove tb/ and scripts/gate/equiv_ref.sh return non-zero.
 // Not a reference. Not product RTL.
 `timescale 1ns / 1ps
 
@@ -42,24 +43,24 @@ module ub_dll_bcrc (
     end
   endfunction
 
-  wire [29:0] seed = start ? INIT : crc;
-  wire [29:0] nxt  = crc30_absorb(seed, data_in, last);
+  // Deliberately wrong vs Xia: start wins, this beat is not folded.
+  wire [29:0] nxt = crc30_absorb(crc, data_in, last);
 
   always @(posedge core_clk) begin
     if (rst_pyc) begin
       crc      <= INIT;
       crc_word <= 32'b0;
       done     <= 1'b0;
+    end else if (start) begin
+      crc  <= INIT;
+      done <= 1'b0;
     end else if (valid_in) begin
       crc  <= nxt;
       done <= 1'b0;
       if (last) begin
-        crc_word <= {1'b0, 1'b0, nxt} ^ 32'h1;
+        crc_word <= {1'b0, 1'b0, nxt};
         done     <= 1'b1;
       end
-    end else if (start) begin
-      crc  <= INIT;
-      done <= 1'b0;
     end else begin
       done <= 1'b0;
     end

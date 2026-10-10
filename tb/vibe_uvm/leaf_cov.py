@@ -39,7 +39,9 @@ def sample_lane(n: int, kind: str, hooks: int) -> None:
 
 @CoverPoint("tp.bcrc.kind", xf=lambda kind, n_flit, hooks: kind,
             bins=["dir0", "dir1", "dir_inc", "onehot", "rand", "two_flit",
-                  "tx_flag0", "rst_quiet", "start_reinit"])
+                  "tx_flag0", "rst_quiet", "start_reinit",
+                  "xia_start_valid", "xia_start_valid_last",
+                  "xia_start_only", "xia_start_mid_restart"])
 @CoverPoint("tp.bcrc.n_flit", xf=lambda kind, n_flit, hooks: n_flit, bins=[1, 2, 3])
 @CoverPoint("tp.bcrc.hooks", xf=lambda kind, n_flit, hooks: hooks, bins=[0, 1])
 @CoverCross("tp.bcrc.kind_x_nflit", items=["tp.bcrc.kind", "tp.bcrc.n_flit"])

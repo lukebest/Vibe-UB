@@ -32,6 +32,17 @@ BMC-only pass):
 
 The script prints `equiv_ref METHOD=...` and `gate_chparam=none|...`.
 
+Xia §2.6 BCRC `start`/`valid_in` (do not edit `tb/models`):
+
+| Beat | Remainder |
+| --- | --- |
+| `start && valid_in` | `update(INIT, flit)` (MSB-first); last also emits `crc_word` next cycle |
+| `start && valid_in && last` | `eat(flit, last=True)` — 16 data bytes, not the trailing BCRC word |
+| `start && !valid_in` | load INIT, ignore `data_in` |
+| `start` after a non-last block | abandon the partial remainder, reseed INIT |
+
+Negative fixtures under `formal/dll/negative/` and `formal/pcs/negative/` must FAIL both the leaf TB (where applicable) and `equiv_ref.sh`. `bcrc_drop_start_flit.sv` loads INIT on `start` and drops a same-cycle flit.
+
 | Leaf | Path | SPEC |
 | --- | --- | --- |
 | `ub_pcs_lane_dist` | `formal/pcs/ref/` | §2.3 / §2.4 `Lane<j,i>=CA<(NSYM-1)-i*N-j>` |

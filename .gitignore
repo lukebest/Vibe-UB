@@ -3,3 +3,19 @@ venv
 *.pdf
 __pycache__/
 *.pyc
+*.py[cod]
+
+# TB / cocotb / pytest (do not commit sim or coverage dumps)
+.pytest_cache/
+.coverage
+htmlcov/
+sim_build/
+coverage.dat
+results.xml
+*.vcd
+*.fst
+*.vvp
+tb/reports/regress/**
+tb/reports/cov_func/**
+tb/reports/cov_line/**
+!tb/reports/**/.gitkeep

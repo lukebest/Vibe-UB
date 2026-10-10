@@ -7,6 +7,8 @@
 | 总线 | [SPEC.md](SPEC.md) §3.2.3：32-bit 整字，无 `csr_wstrb`；16-bit 字节地址，4 字节对齐；读固定 1 拍；未映射读 0/`csr_err=1`，写忽略/`csr_err=1` |
 | 字节序 | 小端；位 0 为 LSB |
 
+职责与流程见 [TEAM.md](TEAM.md)、[PROCESS.md](PROCESS.md)。
+
 **引用约定：** 不抄录规范字段说明、表或复位表。App. D / Init Block 只给 **节号**。实现对照官方规范展开位域。本表足够生成头文件与 Python 寄存器模型。
 
 **机器可读列：** `offset_hex,reg_name,field_name,hi,lo,access,reset_hex,description,spec_ref`

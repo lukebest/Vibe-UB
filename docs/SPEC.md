@@ -131,6 +131,16 @@ PMA 模型在仿真里实例化，与 PCS 的边界是 M1 的 **PHY 数字/模�
 
 用占位值生成的网表（例如扰码抽头 / 种子仍待定，见 §13）tag 后缀 `_placeholder`，供 lint / TB 使用；PRODUCT 只收录已闭合参数的变体。是否提交占位变体由 PM 定。
 
+**pyCircuit 源码目录与导入（已定）：**
+
+- 叶子源文件放 `pycircuit/<层>/<leaf>.py`；门禁只扫 `pycircuit/<层>/*.py` 发现叶子，跳过 `lib/` 和 `__init__.py`。
+- 同层 helper 放 `pycircuit/<层>/lib/`，不出网表；仍受 pyCircuit 来源检查里禁止拼接 Verilog 文本的静态扫描约束。
+- 导入根为 `pycircuit/`：叶子写 `from <层>.lib import ...`；门禁、`scripts/emit_rtl.py`、tb 统一把 `pycircuit/` 放在 `PYTHONPATH` 最前面。
+- 工具按脚本路径调用。`sys.path` 只前置 `pycircuit/`；仓库根目录不进入 `sys.path`（仓库内 `pycircuit/` 目录与 pyCircuit 库同名）。
+- 门禁细节以 [verif_gate.md](rules/verif_gate.md)（守门人门禁小 PR #33）为准。
+
+结论由架构 Xia 与守门人验证于 2026-10-10 共同定。
+
 **pycc 运行库原语目录（已定）：** pyCircuit 运行时发出、而非叶子生成的 `pyc_*` 模块（如 `pyc_reg.v`）只放 **`rtl/pyc_lib/`**。内容从根目录 [`TOOLCHAIN.lock`](../TOOLCHAIN.lock) 钉死的 pyCircuit 版本 **原样拷贝，不得改**。其它 `rtl/<layer>/` 与 `hooks/` **不得**再放 `pyc_*` 原语文件；各层 filelist 一律引用 `rtl/pyc_lib/`。凡 `` `include `` 运行库文件的网表，lint / 综合 / 门禁用 `-I rtl/pyc_lib` 读。门禁（与钉死版本逐字节相同；别处出现 `pyc_*` 则拒绝）细则见 [verif_gate.md](rules/verif_gate.md)（**验证**所有）。
 
 **超阈值变体不提交网表（PM 已定；口径对齐验证门禁）：** [impl_quick_synth.md](rules/impl_quick_synth.md) 黑盒阈值（默认 `depth × width` **4096** bit）以上的生成变体，**不**把 `.v` 提交进库。每层一份 `rtl/<layer>/manifest.yml`，**每个**超阈值变体一条。字段：变体名、参数、pycc 版本、PRODUCT 网表 sha256、HOOKS 网表 sha256。门禁按根目录 [`TOOLCHAIN.lock`](../TOOLCHAIN.lock) 安装 pycc，经 `scripts/emit_rtl.py` 再生，核 sha256 与端口，并核 PRODUCT 与 HOOKS **除模块名外字节相同**。把超阈值变体当成 `.v` 提交则 **拒绝**；manifest 条目再生失败则 **拒绝**。规则细则见 [verif_gate.md](rules/verif_gate.md)（**验证**所有）。其余生成 `.v` 仍提交。见 §11 (f)。

@@ -24,6 +24,7 @@
 
 ### Changed
 
+- SPEC §2.2：pyCircuit 源码目录与导入（已定）——叶子 `pycircuit/<层>/<leaf>.py`，门禁只扫该层 `*.py`（跳过 `lib/` 与 `__init__.py`）；同层 helper 在 `pycircuit/<层>/lib/` 不出网表；导入根 `pycircuit/`（`from <层>.lib import ...`），门禁 / `emit_rtl.py` / tb 把 `pycircuit/` 置于 `PYTHONPATH` 最前；仓库根目录不进 `sys.path`；工具按脚本路径调用。门禁细则见 `docs/rules/verif_gate.md`（PR #33）。架构 Xia 与守门人验证 2026-10-10 共同定。
 - `scripts/impl/quick_synth.*` + `docs/rules/impl_quick_synth.md` v0.5：每叶子拆两列深度——`logic depth` 不计 `buf_*`/`clkbuf_*`/`qs_fbuf_*`（与 `--no-buffer`、COMBO_DEPTH、日后 pycc `--logic-depth` 同口径）；`depth incl. buf` 为含缓冲级数。slack/area 仍来自缓冲后网表。
 - `scripts/impl/quick_synth.*` + `docs/rules/impl_quick_synth.md` v0.4：abc 映射后默认插确定性 Sky130 `buf_4`/`buf_8` 扇出树（max fanout 16；`--no-buffer` / `--max-fanout`；每叶子报 max fanout）。OpenROAD `repair_design` 未作为本 proxy 路径（VM 无 OpenROAD、且无 floorplan）。`sta -version` 探测版本，避免 `sta -no_init -exit` 无脚本挂起。
 - `docs/rules/verif_gate.md` v0.4：后门命名 `tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`（HOOKS only，§10 登记，eqy 拉低）；`ub_cmn_mem_1r1w` 时钟口 `core_clk`；存储变体 `d<DEPTH>w<WIDTH>[m<WMASK_W>]`；regmap `variants:`（PR #11 格式）`product_` 的 `SCR_PLACEHOLDER` 必须为 0，`=1` 非 PRODUCT 只 lint/TB，`NUM_VL`/`NUM_LANES` 与变体名一致。GATE-TB-SB-001：分段比对按段计次数。

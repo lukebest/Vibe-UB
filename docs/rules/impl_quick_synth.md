@@ -47,7 +47,7 @@
    - 大 SRAM 用 `read_verilog -lib` 作黑盒。
    - `synth -top <m> -flatten`。
    - `dfflibmap` + `abc -liberty` 映到 Sky130 hd tt。
-   - **高扇出缓冲（默认开）**：abc 映射之后、STA 之前，对非时钟 / 非复位网插 `sky130_fd_sc_hd__buf_4` / `buf_8` 树，使每个驱动点扇出 ≤ **16**（`--max-fanout`）。OpenROAD 若在 PATH 里可用 `repair_design`，本脚本仍走确定性 Yosys 树（proxy 无 floorplan；OpenROAD 未装）。`--no-buffer` 关掉，便于对照。每叶子报告 **max fanout**（缓冲后；notes 里带 before→after 与插入 buf 数）。
+   - **高扇出缓冲（默认开）**：abc 映射之后、STA 之前，对非时钟 / 非复位**数据**网插 `sky130_fd_sc_hd__buf_4` / `buf_8` 树，使每个数据驱动点扇出 ≤ **16**（`--max-fanout`）。时钟口不插（STA 用 ideal clock）。OpenROAD 未装、且 `repair_design` 要 floorplan，本 proxy 走确定性 Yosys 树。`--no-buffer` 关掉，便于对照。每叶子 **max fanout** 列是缓冲后的数据网峰值；notes 带 before→after、buf 数、以及未缓冲的 clock fanout。
    - `stat -liberty`：mapped **cell 数**、**面积 um²**、**flop 数**（`df*` / `edf*` / `sdf*`）。黑盒 SRAM 实例从 cell 数里扣掉。缓冲后的 buf 计入 cell / 面积。
    - 另记 `hierarchy; proc; opt; stat` 的 generic cell 数，便于和设计侧 Yosys `proc; opt; stat` 对拍。
    - `ltp`：与工艺无关的最长拓扑路径长度（sanity）。

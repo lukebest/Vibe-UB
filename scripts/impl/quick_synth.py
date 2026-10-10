@@ -1308,6 +1308,20 @@ def synthesize_one(
                 f"fanout buffer off (--no-buffer); "
                 f"max fanout {fanout_rep['max_fanout_before']}"
             )
+        modrep = (fanout_rep.get("modules") or {}).get(top)
+        if isinstance(modrep, dict):
+            for k in (
+                "max_fanout_before",
+                "max_fanout_after",
+                "max_fanout_clock",
+                "n_bufs",
+                "n_nets_buffered",
+            ):
+                if k in modrep:
+                    fanout_rep[k] = modrep[k]
+        clk_fo = fanout_rep.get("max_fanout_clock")
+        if clk_fo:
+            notes.append(f"clock fanout {clk_fo} (unbuffered; ideal clock)")
         (outdir / "fanout_report.json").write_text(
             json.dumps(fanout_rep, indent=2) + "\n", encoding="utf-8"
         )
@@ -1784,9 +1798,10 @@ def self_check() -> int:
     expect(t1 == t2 and r1 == r2, "buffer_module is deterministic")
     clk_mod = _toy(20, clk=True)
     rclk = buffer_module(clk_mod, 16)
+    expect(rclk["n_bufs"] == 0, f"clock net not buffered {rclk}")
     expect(
-        rclk["n_bufs"] == 0 and rclk["max_fanout_after"] >= 20,
-        f"clock net not buffered {rclk}",
+        int(rclk.get("max_fanout_clock") or 0) >= 20,
+        f"clock fanout still high {rclk}",
     )
     if shutil.which("yosys"):
         with tempfile.TemporaryDirectory() as td:

@@ -166,14 +166,22 @@ def analyze_module(mod: dict[str, Any]) -> dict[int, dict[str, Any]]:
     return info
 
 
-def max_fanout(mod: dict[str, Any], *, include_skipped: bool = True) -> int:
+def _fanout_peaks(info: dict[int, dict[str, Any]]) -> dict[str, int]:
+    all_v = [r["fanout"] for r in info.values()]
+    data_v = [r["fanout"] for r in info.values() if not r["skip_reason"]]
+    clk_v = [r["fanout"] for r in info.values() if r["skip_reason"] == "clock"]
+    return {
+        "max_fanout_all": max(all_v, default=0),
+        "max_fanout_data": max(data_v, default=0),
+        "max_fanout_clock": max(clk_v, default=0),
+    }
+
+
+def max_fanout(mod: dict[str, Any], *, include_skipped: bool = False) -> int:
+    """Default: data nets only (clock / reset skipped)."""
     info = analyze_module(mod)
-    vals = [
-        r["fanout"]
-        for r in info.values()
-        if include_skipped or not r["skip_reason"]
-    ]
-    return max(vals, default=0)
+    peaks = _fanout_peaks(info)
+    return peaks["max_fanout_all"] if include_skipped else peaks["max_fanout_data"]
 
 
 def _set_sink_bit(
@@ -272,7 +280,8 @@ def buffer_module(
 ) -> dict[str, Any]:
     """Insert trees in place. Return a report dict."""
     info = analyze_module(mod)
-    before = max((r["fanout"] for r in info.values()), default=0)
+    before_peaks = _fanout_peaks(info)
+    before = before_peaks["max_fanout_data"]
     bits_state = _all_int_bits(mod)
     next_bit = (max(bits_state) + 1) if bits_state else 2
 
@@ -313,19 +322,13 @@ def buffer_module(
             n_nets += 1
 
     after_info = analyze_module(mod)
-    after = max((r["fanout"] for r in after_info.values()), default=0)
-    after_data = max(
-        (
-            r["fanout"]
-            for r in after_info.values()
-            if not r["skip_reason"]
-        ),
-        default=0,
-    )
+    after_peaks = _fanout_peaks(after_info)
     return {
         "max_fanout_before": before,
-        "max_fanout_after": after,
-        "max_fanout_after_data": after_data,
+        "max_fanout_after": after_peaks["max_fanout_data"],
+        "max_fanout_after_data": after_peaks["max_fanout_data"],
+        "max_fanout_clock": after_peaks["max_fanout_clock"],
+        "max_fanout_all": after_peaks["max_fanout_all"],
         "n_nets_buffered": n_nets,
         "n_bufs": n_bufs,
         "max_fanout_limit": max_fanout_limit,
@@ -339,6 +342,7 @@ def buffer_design(
     reports = {}
     worst_before = 0
     worst_after = 0
+    worst_clk = 0
     n_bufs = 0
     n_nets = 0
     for name, mod in (data.get("modules") or {}).items():
@@ -346,11 +350,13 @@ def buffer_design(
         reports[name] = rep
         worst_before = max(worst_before, int(rep["max_fanout_before"]))
         worst_after = max(worst_after, int(rep["max_fanout_after"]))
+        worst_clk = max(worst_clk, int(rep.get("max_fanout_clock") or 0))
         n_bufs += int(rep["n_bufs"])
         n_nets += int(rep["n_nets_buffered"])
     summary = {
         "max_fanout_before": worst_before,
         "max_fanout_after": worst_after,
+        "max_fanout_clock": worst_clk,
         "n_nets_buffered": n_nets,
         "n_bufs": n_bufs,
         "max_fanout_limit": max_fanout_limit,
@@ -362,14 +368,23 @@ def buffer_design(
 
 def analyze_design(data: dict[str, Any]) -> dict[str, Any]:
     worst = 0
+    worst_clk = 0
     mods = {}
     for name, mod in (data.get("modules") or {}).items():
-        fo = max_fanout(mod)
-        mods[name] = {"max_fanout": fo}
-        worst = max(worst, fo)
+        info = analyze_module(mod)
+        peaks = _fanout_peaks(info)
+        mods[name] = {
+            "max_fanout": peaks["max_fanout_data"],
+            "max_fanout_before": peaks["max_fanout_data"],
+            "max_fanout_after": peaks["max_fanout_data"],
+            "max_fanout_clock": peaks["max_fanout_clock"],
+        }
+        worst = max(worst, peaks["max_fanout_data"])
+        worst_clk = max(worst_clk, peaks["max_fanout_clock"])
     return {
         "max_fanout_before": worst,
         "max_fanout_after": worst,
+        "max_fanout_clock": worst_clk,
         "n_nets_buffered": 0,
         "n_bufs": 0,
         "method": "none",

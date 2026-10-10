@@ -896,11 +896,11 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 
 **(c) PRODUCT 烟测。** `TEST_HOOKS=0` 网表跑一套与钩子无关的 smoke 子集（证明无钩子端口时功能闭环）。
 
-**(d) 形式等价门禁。** 规范工具是 Yosys **`equiv`**（版本见 `TOOLCHAIN.lock`）。eqy 在可安装后可作为可选补充，**不**替代 `equiv` 门禁。只比较 **PRODUCT 已有的端口**；`tb_<inst>_obs_*` 仅 HOOKS 存在，**不参加**比较。HOOKS 侧 `tb_test_mode=0`，全部 `tb_*` 钩子**输入**接低（含 `tb_inj_*` 接到复位不介入值、§10 点名存储的 `tb_<inst>_bd_*` 与 `tb_<inst>_bd_vld_*`）。两者必须等价；不等价则 **阻断交付**。TEST 窗在这两种条件下都是「已映射、读 0、写忽略、`csr_err=0`」，因此不破坏等价。
+**(d) 形式等价门禁。** 必须完整证明等价。比对对象：PRODUCT 对 HOOKS（按 PRODUCT 已有端口）；迁移版对公式参考实现。认可方法、假网表要求和报告写法以 [verif_gate.md](rules/verif_gate.md) 的 GATE-EQY-004 为准。只比较 **PRODUCT 已有的端口**；`tb_<inst>_obs_*` 仅 HOOKS 存在，**不参加**比较。HOOKS 侧 `tb_test_mode=0`，全部 `tb_*` 钩子**输入**接低（含 `tb_inj_*` 接到复位不介入值、§10 点名存储的 `tb_<inst>_bd_*` 与 `tb_<inst>_bd_vld_*`）。两者必须等价；不等价则 **阻断交付**。TEST 窗在这两种条件下都是「已映射、读 0、写忽略、`csr_err=0`」，因此不破坏等价。
 
 **(e) 覆盖率 waiver。** 钩子 mux 不另开 waiver（见 (b)）。信用下溢（`CRD_UF` 计数与 irq 分支）在正确设计中不可达，须 **具名覆盖率 waiver**（§13.4）。
 
-**(f) 端口一致性（Xia 裁定）。** §10 未列钩子的叶子：HOOKS 网表端口必须与 PRODUCT 完全一致，不加 `tb_test_mode`。§10 列了钩子的模块（如 `ub_lmsm`）：HOOKS 端口 = PRODUCT 端口 + §10 所列 `tb_*` + `tb_test_mode`。门禁按模块表核对，失败即拦。eqy：无钩子叶子按端口一一对应；有钩子模块把额外输入拉低、`tb_test_mode=0` 后再比对（与 (d) 一致）。
+**(f) 端口一致性（Xia 裁定）。** §10 未列钩子的叶子：HOOKS 网表端口必须与 PRODUCT 完全一致，不加 `tb_test_mode`。§10 列了钩子的模块（如 `ub_lmsm`）：HOOKS 端口 = PRODUCT 端口 + §10 所列 `tb_*` + `tb_test_mode`。门禁按模块表核对，失败即拦。等价比对：无钩子叶子按端口一一对应；有钩子模块把额外输入拉低、`tb_test_mode=0` 后再比对（与 (d) 一致）。
 
 **(g) 超阈值网表不入库（PM；对齐验证）。** [impl_quick_synth.md](rules/impl_quick_synth.md) 黑盒阈值以上的变体 **不**提交 `.v`。每层 `rtl/<layer>/manifest.yml`，每变体一条：变体名、参数、pycc 版本、PRODUCT sha256、HOOKS sha256。门禁按 `TOOLCHAIN.lock` 安装 pycc，经 `scripts/emit_rtl.py` 再生，核 sha256 与端口；PRODUCT 与 HOOKS **除模块名外字节相同**。超阈值 `.v` 入库 **拒绝**；manifest 再生失败 **拒绝**。细则见 [verif_gate.md](rules/verif_gate.md)。其余生成 `.v` 仍入库，并走 (d)。见 §2.2。
 

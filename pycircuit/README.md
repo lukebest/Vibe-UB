@@ -1,7 +1,7 @@
 # pyCircuit sources (M1 leaf batch 1)
 
 Product RTL except whitelist `ub_rst_sync` is generated from this tree.
-Pin: [`TOOLCHAIN.lock`](TOOLCHAIN.lock) (`lukebest/pyCircuit` @ `43cc5918`, pyc4.0 / pycc LLVM 19.1.1).
+Pin: root [`TOOLCHAIN.lock`](../TOOLCHAIN.lock) `[pycircuit]` (`lukebest/pyCircuit` @ `43cc5918`, pyc4.0 / pycc LLVM 19.1.1).
 
 ```bash
 bash scripts/setup_pycircuit.sh   # once per machine

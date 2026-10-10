@@ -1,14 +1,48 @@
 #!/usr/bin/env bash
-# Install pinned pyCircuit pyc4.0 + pycc (LLVM 19) for M1 leaf emit.
+# Install pinned pyCircuit pyc4.0 + pycc from the root TOOLCHAIN.lock [pycircuit] section.
 # Proven by spike cursor/spike-pycircuit-toolchain @ 6c48cb7.
 set -euo pipefail
 
-PIN=43cc5918e3d09ecc0c814cabef6c1384cb9980ae
+HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO="$(cd -- "${HERE}/.." && pwd)"
+LOCK="${REPO}/TOOLCHAIN.lock"
+
+lock_get() {
+  local key="$1"
+  awk -F= -v key="${key}" '
+    BEGIN { sect = 0 }
+    /^[[:space:]]*\[pycircuit\]/ { sect = 1; next }
+    /^[[:space:]]*\[/ { sect = 0; next }
+    sect && $1 ~ "^[[:space:]]*" key "[[:space:]]*$" {
+      val = $0
+      sub(/^[^=]*=[[:space:]]*/, "", val)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
+      gsub(/^"|"$/, "", val)
+      print val
+      exit
+    }
+  ' "${LOCK}"
+}
+
+PIN="$(lock_get commit)"
+GIT_URL="$(lock_get repo)"
+RELEASE="$(lock_get release)"
+LLVM_VER="$(lock_get llvm)"
+CMAKE_VER="$(lock_get cmake)"
+NINJA_VER="$(lock_get ninja)"
+if [[ -z "${PIN}" || -z "${GIT_URL}" ]]; then
+  echo "setup_pycircuit.sh: missing repo/commit in ${LOCK} [pycircuit]" >&2
+  exit 1
+fi
+
 SRC="${PYCIRCUIT_SRC:-/tmp/pyCircuit}"
 VENV="${UB_PYC_VENV:-/tmp/venv}"
 
+echo "TOOLCHAIN.lock [pycircuit]: ${RELEASE} ${GIT_URL} @ ${PIN}"
+echo "LLVM/MLIR ${LLVM_VER}; cmake ${CMAKE_VER}; ninja ${NINJA_VER}"
+
 if [[ ! -d "${SRC}/.git" ]]; then
-  git clone https://github.com/lukebest/pyCircuit.git "${SRC}"
+  git clone "${GIT_URL}" "${SRC}"
 fi
 git -C "${SRC}" fetch --depth 1 origin "${PIN}" || true
 git -C "${SRC}" checkout "${PIN}"
@@ -28,4 +62,6 @@ export PATH="${PYC_TOOLCHAIN_ROOT}/bin:${PATH}"
 echo "pycc: $(command -v pycc)"
 pycc --version || true
 echo "llvm: $(llvm-config-19 --version)"
+echo "cmake: $(cmake --version | head -1)"
+echo "ninja: $(ninja --version)"
 echo "frontend: $("${VENV}/bin/python" -c 'import pycircuit; print(pycircuit.__file__)')"

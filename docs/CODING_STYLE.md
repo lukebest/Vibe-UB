@@ -9,6 +9,7 @@
 ## 1. 生成与网表
 
 - 源码是 Python（pyCircuit）。提交的产品 `.v` 必须能从当前 Python **再现**。**例外（PM；对齐验证）：** 超过 [impl_quick_synth.md](rules/impl_quick_synth.md) 黑盒阈值（默认 4096 bit）的变体 **不**提交 `.v`。每层 `rtl/<layer>/manifest.yml`，每变体一条：变体名、参数、pycc 版本、PRODUCT sha256、HOOKS sha256。门禁按 `TOOLCHAIN.lock` 安装 pycc，经 `scripts/emit_rtl.py` 再生，核 sha256 与端口；PRODUCT 与 HOOKS 除模块名外字节相同。超阈值 `.v` 入库 **拒绝**；manifest 再生失败 **拒绝**。细则见 [verif_gate.md](rules/verif_gate.md)。其余生成 `.v` 仍提交。见 SPEC §2.2、§11 (f)。
+- pycc 运行库原语（如 `pyc_reg.v`，以及运行时发出、而非叶子生成的任何 `pyc_*`）只放 **`rtl/pyc_lib/`**，从 `TOOLCHAIN.lock` 钉死的 pyCircuit 版本原样拷贝，**不得改**。其它 `rtl/<layer>/` 与 `hooks/` **不得**含 `pyc_*` 原语文件；各层 filelist 引用 `rtl/pyc_lib/`。`` `include `` 运行库文件时，lint / 综合 / 门禁用 `-I rtl/pyc_lib`。门禁（与钉死版本逐字节相同；别处出现 `pyc_*` 则拒绝）见 [verif_gate.md](rules/verif_gate.md)（验证所有）。见 SPEC §2.2。
 - `TEST_HOOKS` 在 **Python 生成期** 展开，产出两套 Verilog。规则见 [SPEC.md](SPEC.md) **§11**，此处不重复例外：
   - **PRODUCT**（`TEST_HOOKS=0`）：无 `tb_*` 端口；lint / CDC / 综合 / 实现 / FPGA **只认这一套**。
   - **HOOKS**（`TEST_HOOKS=1`）：须过 lint 与 CDC，**不得**实现。回归与行覆盖率在此网上跑（`tb_test_mode` 为 0 与 1）；覆盖率分母含钩子 mux，钩子代码不另开 waiver。
@@ -64,7 +65,7 @@
 | 对象 | 约定 |
 | --- | --- |
 | 模块 / Python 生成单元 | `ub_<层>_<功能>`，小写+下划线。例：`ub_dll`、`ub_pcs`、`ub_lmsm`、`ub_csr`。公共存储原语：`ub_cmn_mem_1r1w`（§10） |
-| 一个模块一个文件 | 生成后放 `rtl/`（按层分子目录：`rtl/dll/`、`rtl/pcs/`、`rtl/lmsm/`、`rtl/csr/`） |
+| 一个模块一个文件 | 叶子生成后放 `rtl/`（按层分子目录：`rtl/dll/`、`rtl/pcs/`、`rtl/lmsm/`、`rtl/csr/`）。运行库 `pyc_*` 只放 `rtl/pyc_lib/`，见 §1 / SPEC §2.2 |
 | 时钟 | `core_clk`（M1 唯一时钟） |
 | 复位 | 顶层 `rst_n`（低有效，异步置位）；`rst_n_sync`；业务 `rst_pyc`（`pyc_reg` 原生极性，见 SPEC §4.2） |
 | 数据流 | `valid` / `ready`；源到宿前缀如 `dll2pcs_*`、`pcs2dll_*` |

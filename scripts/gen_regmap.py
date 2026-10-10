@@ -691,11 +691,11 @@ def emit_gen_init() -> str:
 # ---------------------------------------------------------------------------
 
 # Official generated paths (docs/regmap/README.md).
+# pyCircuit source lives under pycircuit/<layer>/. rtl/ is generated Verilog
+# only, written by scripts/emit_rtl.py (PR #5; not on main yet — follow-up).
 OUTPUT_PATHS = (
     "docs/REGMAP.md",
-    "rtl/csr/ub_csr_regs.py",
-    "rtl/csr/ub_csr.v",
-    "rtl/csr/hooks/ub_csr.v",
+    "pycircuit/csr/ub_csr_regs.py",
     "tb/ral/ub_regmodel.py",
     "sw/include/ub_regs.h",
     "sw/hal/ub_regs_access.h",
@@ -704,27 +704,17 @@ OUTPUT_PATHS = (
 )
 
 COMPANION_PATHS = (
-    "rtl/csr/__init__.py",
+    "pycircuit/csr/__init__.py",
     "tb/ral/__init__.py",
     "model/__init__.py",
 )
 
 
-def emit_csr_verilog(data: dict[str, Any], test_hooks: bool) -> str:
-    ns: dict[str, Any] = {
-        "__file__": str(REPO_ROOT / "rtl" / "csr" / "ub_csr_regs.py"),
-    }
-    exec(compile(emit_ub_csr_regs(data), "<ub_csr_regs>", "exec"), ns)
-    return ns["emit_verilog"](test_hooks)
-
-
 def render_all(data: dict[str, Any]) -> dict[str, str]:
     return {
         "docs/REGMAP.md": emit_regmap_md(data),
-        "rtl/csr/ub_csr_regs.py": emit_ub_csr_regs(data),
-        "rtl/csr/__init__.py": emit_csr_init(),
-        "rtl/csr/ub_csr.v": emit_csr_verilog(data, False),
-        "rtl/csr/hooks/ub_csr.v": emit_csr_verilog(data, True),
+        "pycircuit/csr/ub_csr_regs.py": emit_ub_csr_regs(data),
+        "pycircuit/csr/__init__.py": emit_csr_init(),
         "tb/ral/ub_regmodel.py": emit_ral(data),
         "tb/ral/__init__.py": emit_gen_init(),
         "model/regs.py": emit_py_constants(data),

@@ -32,24 +32,41 @@ pytest scripts/tests
 | Path | Role |
 | --- | --- |
 | `docs/REGMAP.md` | Human table (header: `GENERATED — edit docs/regmap/regmap.yaml`) |
-| `rtl/csr/ub_csr_regs.py` | pyCircuit CSR leaf (`ub_csr`); SPEC §2.2 |
-| `rtl/csr/ub_csr.v` | PRODUCT netlist (`TEST_HOOKS=0`) |
-| `rtl/csr/hooks/ub_csr.v` | HOOKS netlist (`TEST_HOOKS=1`) |
+| `pycircuit/csr/ub_csr_regs.py` | pyCircuit CSR leaf (`ub_csr`); SPEC §2.2 |
 | `tb/ral/ub_regmodel.py` | uvm-python register model |
 | `sw/include/ub_regs.h` | Firmware address / mask / shift macros + inline field accessors |
 | `sw/hal/ub_regs_access.h` | HAL declarations |
 | `sw/hal/ub_regs_access.c` | HAL register access layer |
 | `model/regs.py` | Python constants shared by verification |
 
-RAL lives at `tb/ral/ub_regmodel.py` (PR #6 `tb/` is on main). `gen/tb_ral/` is removed.
+Directory convention (PM): pyCircuit sources live in `pycircuit/<layer>/`.
+`scripts/emit_rtl.py` (design PR #5) writes generated Verilog into `rtl/` only.
+`rtl/` must not hold Python sources.
 
-Generator: `python3` + PyYAML only. Product `.v` is reproduced by `emit_verilog`
-(same style as PR #7 `ub_lmsm.py`). `elaborate(0)` / `elaborate(1)` call
-`pycircuit.compile()` when the frontend is installed.
+RAL lives at `tb/ral/ub_regmodel.py`. `gen/tb_ral/` is removed.
+
+Generator: `python3` + PyYAML only. `emit_verilog(False/True)` is the PRODUCT /
+HOOKS netlist text. `elaborate(0)` / `elaborate(1)` call `pycircuit.compile()`
+when the frontend is installed.
+
+### Verilog emit (follow-up — PR #5 not on main)
+
+PR #5 is **not on main**. This PR does **not** hand-write or commit `rtl/csr/*.v`.
+When `scripts/emit_rtl.py` / `pycircuit/emit.py` land, register `ub_csr`:
+
+```python
+from csr.ub_csr_regs import emit_verilog as emit_csr
+# PRODUCT → rtl/csr/ub_csr.v
+# HOOKS   → rtl/csr/hooks/ub_csr.v
+("csr", "ub_csr", emit_csr),  # plus a HOOKS emit of emit_verilog(True)
+```
+
+Until then: `python3 pycircuit/csr/ub_csr_regs.py` can write those paths locally
+for lint; do not commit the `.v`.
 
 ## YAML-driven CSR semantics
 
-`rtl/csr/ub_csr_regs.py` walks YAML attributes (not per-register handwritten logic):
+`pycircuit/csr/ub_csr_regs.py` walks YAML attributes (not per-register handwritten logic):
 
 | Attribute | Behavior |
 | --- | --- |
@@ -91,12 +108,12 @@ Do not put that fanout inside `ub_csr_regs.py`.
 
 ## pyCircuit / uvm-python assumptions
 
-- In-repo pyc4.0 style (PR #7 `ub_lmsm.py`): Python emits Verilog; `pyc_reg` =
-  sync flop on `core_clk` / `rst_pyc`. `elaborate(0/1)` uses
+- In-repo pyc4.0 style: Python under `pycircuit/<layer>/` emits Verilog into
+  `rtl/`. `pyc_reg` = sync flop on `core_clk` / `rst_pyc`. `elaborate(0/1)` uses
   `from pycircuit import Circuit, compile, module, u` (`lukebest/pyCircuit`
   @ `43cc5918`, see `pycircuit/TOOLCHAIN.lock`). `compile()` produces frontend
-  MLIR. `pycc` (Circuit→Verilog, LLVM 19) is **not** required to regenerate
-  PRODUCT `.v`. Lint: `make -C rtl/csr lint`.
+  MLIR. `pycc` (Circuit→Verilog, LLVM 19) is **not** required. Do not put the
+  repo root on `PYTHONPATH` (shadows the toolchain package named `pycircuit`).
 - uvm-python RAL: `UVMReg` / `UVMRegField.configure(parent, size, lsb_pos, access,
   volatile, reset, has_reset, is_rand, individually_accessible)` from
   `lukebest/uvm-python`. The generated model imports uvm-python when present and

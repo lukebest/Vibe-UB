@@ -134,7 +134,7 @@ def test_global_rules():
 def test_csr_yaml_driven_ports_and_hooks_split():
     from gen_csr import emit_ub_csr_regs
 
-    ns: dict = {"__file__": str(SCRIPT_DIR.parent / "rtl" / "csr" / "ub_csr_regs.py")}
+    ns: dict = {"__file__": str(SCRIPT_DIR.parent / "pycircuit" / "csr" / "ub_csr_regs.py")}
     exec(compile(emit_ub_csr_regs(load_regmap()), "<ub_csr_regs>", "exec"), ns)
     v0 = ns["emit_verilog"](False)
     v1 = ns["emit_verilog"](True)
@@ -160,6 +160,6 @@ def test_ral_lives_under_tb_ral():
     from gen_regmap import OUTPUT_PATHS
 
     assert "tb/ral/ub_regmodel.py" in OUTPUT_PATHS
+    assert "pycircuit/csr/ub_csr_regs.py" in OUTPUT_PATHS
     assert "gen/tb_ral/ub_regmodel.py" not in OUTPUT_PATHS
-    assert "rtl/csr/ub_csr.v" in OUTPUT_PATHS
-    assert "rtl/csr/hooks/ub_csr.v" in OUTPUT_PATHS
+    assert "rtl/csr/ub_csr_regs.py" not in OUTPUT_PATHS

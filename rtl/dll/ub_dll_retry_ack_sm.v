@@ -3,7 +3,7 @@
 // Registers: pyc_reg semantics (sync, rst_pyc active-high, core_clk).
 // SPEC: §2.6, §3.2.3, §4.2, §6.4, §9, §10, §11.
 // PORT_RST 16-cycle pulse: ub_csr; this leaf sees port_rst as sync clear.
-// SPEC §10 lists no tb_* hooks for this leaf — PRODUCT has no tb_* ports.
+// SPEC §10 lists no hooks — HOOKS ports == PRODUCT (no tb_test_mode).
 
 module ub_dll_retry_ack_sm (
   input  wire                    core_clk,
@@ -32,6 +32,7 @@ module ub_dll_retry_ack_sm (
 
   // Combined sync reset: rst_pyc (entity) or port_rst (CSR PORT_RST).
   // SPEC §6.4: reset → NORMAL.
+  // Xia: no tb_test_mode — SPEC §10 lists no hooks for this leaf.
   wire rst_eff = rst_pyc | port_rst;
 
   // pyc_reg: st, sub.

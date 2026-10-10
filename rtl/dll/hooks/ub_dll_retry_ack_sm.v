@@ -3,8 +3,7 @@
 // Registers: pyc_reg semantics (sync, rst_pyc active-high, core_clk).
 // SPEC: §2.6, §3.2.3, §4.2, §6.4, §9, §10, §11.
 // PORT_RST 16-cycle pulse: ub_csr; this leaf sees port_rst as sync clear.
-// SPEC §10 lists no tb_inj_*/tb_obs_* for this leaf.
-// HOOKS adds only gated tb_test_mode (CODING_STYLE); never intervenes.
+// SPEC §10 lists no hooks — HOOKS ports == PRODUCT (no tb_test_mode).
 
 module ub_dll_retry_ack_sm (
   input  wire                    core_clk,
@@ -18,11 +17,7 @@ module ub_dll_retry_ack_sm (
   input  wire                    replay_done,
 
   // REGMAP STATUS.RETRY_ACK_ST[14:13] (SPEC §6.4). Never 2–3.
-  output wire [1:0]              retry_ack_st,
-
-  // TEST_HOOKS=1 only. SPEC §10 lists no inj/obs for RETRY_ACK_SM.
-  // CODING_STYLE: gated tb_test_mode port. PRODUCT has no tb_* ports.
-  input  wire                    tb_test_mode
+  output wire [1:0]              retry_ack_st
 );
 
   // ------------------------------------------------------------------
@@ -37,9 +32,8 @@ module ub_dll_retry_ack_sm (
 
   // Combined sync reset: rst_pyc (entity) or port_rst (CSR PORT_RST).
   // SPEC §6.4: reset → NORMAL.
-  // tb_test_mode is gated (CODING_STYLE) and folded & 1'b0 so it never
-  // intervenes — no §10 inj/obs on this leaf; eqy vs PRODUCT holds.
-  wire rst_eff = rst_pyc | port_rst | (tb_test_mode & 1'b0);
+  // Xia: no tb_test_mode — SPEC §10 lists no hooks for this leaf.
+  wire rst_eff = rst_pyc | port_rst;
 
   // pyc_reg: st, sub.
   reg [1:0] st;

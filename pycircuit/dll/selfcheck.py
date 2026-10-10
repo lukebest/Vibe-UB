@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Generator + SPEC §6.3 / §6.4 transfer self-check (not a verification TB).
 
-Proves emit() runs, PRODUCT has no hooks / no reserved encodings, HOOKS
-adds only gated ``tb_test_mode`` (SPEC §10 lists no inj/obs), and a
-cycle-accurate Python model of the two SMs walks every SPEC transfer.
+Proves emit() runs, PRODUCT and HOOKS have the same ports (Xia: no
+``tb_test_mode`` when SPEC §10 lists no hooks), no reserved encodings,
+and a cycle-accurate Python model of the two SMs walks every SPEC transfer.
 """
 
 from __future__ import annotations
@@ -205,6 +205,15 @@ def _decl_lines(text: str) -> list[str]:
     ]
 
 
+def _port_names(text: str) -> list[str]:
+    names: list[str] = []
+    for line in _ports_block(text).splitlines():
+        s = line.strip()
+        if s.startswith(("input", "output")):
+            names.append(s.rstrip(",").split()[-1])
+    return names
+
+
 def _static_product(path: Path, module: str, *, reserved_needles: tuple[str, ...]) -> str:
     text = _static_common(path, module, reserved_needles=reserved_needles)
     for token in ("tb_test_mode", "tb_inj_", "tb_obs_"):
@@ -213,12 +222,8 @@ def _static_product(path: Path, module: str, *, reserved_needles: tuple[str, ...
 
 
 def _static_hooks(path: Path, module: str, *, reserved_needles: tuple[str, ...]) -> str:
-    text = _static_common(path, module, reserved_needles=reserved_needles)
-    decls = _decl_lines(text)
-    assert any("tb_test_mode" in line for line in decls)
-    for token in ("tb_inj_", "tb_obs_"):
-        assert all(token not in line for line in decls), token
-    return text
+    """HOOKS for a no-§10 leaf: same ports as PRODUCT, no tb_*."""
+    return _static_product(path, module, reserved_needles=reserved_needles)
 
 
 def main() -> int:
@@ -229,8 +234,12 @@ def main() -> int:
 
     req_txt = _static_product(req_prod, "ub_dll_retry_req_sm", reserved_needles=req_needles)
     ack_txt = _static_product(ack_prod, "ub_dll_retry_ack_sm", reserved_needles=ack_needles)
-    _static_hooks(req_hooks, "ub_dll_retry_req_sm", reserved_needles=req_needles)
-    _static_hooks(ack_hooks, "ub_dll_retry_ack_sm", reserved_needles=ack_needles)
+    req_hooks_txt = _static_hooks(req_hooks, "ub_dll_retry_req_sm", reserved_needles=req_needles)
+    ack_hooks_txt = _static_hooks(ack_hooks, "ub_dll_retry_ack_sm", reserved_needles=ack_needles)
+    assert _port_names(req_txt) == _port_names(req_hooks_txt)
+    assert _port_names(ack_txt) == _port_names(ack_hooks_txt)
+    assert "tb_test_mode" not in _port_names(req_txt)
+    assert "tb_test_mode" not in _port_names(ack_txt)
 
     assert req_hooks == req.HOOKS_V
     assert ack_hooks == ack.HOOKS_V
@@ -377,7 +386,7 @@ def main() -> int:
     print(
         "selfcheck ok: PRODUCT + HOOKS "
         f"{req_prod.name} / {ack_prod.name}, DECLFILENAME, "
-        "HOOKS tb_test_mode only (no §10 inj/obs), "
+        "HOOKS ports == PRODUCT (no tb_test_mode; Xia / no §10 hooks), "
         "SPEC §6.3 / §6.4 transfers, reserved encodings never produced"
     )
     return 0

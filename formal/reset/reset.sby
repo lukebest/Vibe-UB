@@ -1,0 +1,24 @@
+[tasks]
+bmc
+cover
+
+[options]
+depth 20
+
+[options bmc]
+mode bmc
+
+[options cover]
+mode cover
+
+[engines]
+smtbmc z3
+
+[script]
+read -formal ub_rst_if_props.sv
+read -formal ub_rst_harness.sv
+prep -top ub_rst_harness
+
+[files]
+ub_rst_if_props.sv
+ub_rst_harness.sv

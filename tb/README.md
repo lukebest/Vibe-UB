@@ -13,13 +13,13 @@ tb/
   README.md                 this file
   requirements.txt          exact Python pins
   Makefile                  dual-netlist entry (TEST_HOOKS=0 and 1)
-  pytest.ini                golden-model unit tests
-  models/                   Python golden (no RTL)
-    ub_pcs_scrambler.py     PRBS23; taps and LID→seed required (SPEC §13)
-    ub_pcs_lane_dist.py     UB-PHY §3.2.2.3 / §3.2.5 / SPEC §3.3
-    ub_dll_bcrc.py          CRC30 per SPEC §2.6
-    config.py               remaining §13 knobs
-    tests/                  pytest
+  pytest.ini                golden-model unit tests (also collects ../model/tests)
+  models/                   shim re-export of top-level model/ (architecture-owned)
+    ub_pcs_scrambler.py     → model.ub_pcs_scrambler
+    ub_pcs_lane_dist.py     → model.ub_pcs_lane_dist
+    ub_dll_bcrc.py          → model.ub_dll_bcrc
+    config.py               → model.config
+    tests/                  pytest (unchanged imports via shim)
   vibe_uvm/                 uvm-python skeleton (named so it does not shadow the `uvm` package)
     ub_csr_map.py           REGMAP offsets (CNT_CLR 0x0224, APPD 0x1E00/0x1F00)
     clk_rst.py              core_clk ≈ 80.57 MHz; rst_n async assert / sync deassert
@@ -76,6 +76,10 @@ tb/scripts/run_selfcheck.sh
 Icarus does not produce line coverage.
 
 ## Golden models
+
+Canonical package is top-level [`model/`](../model/) (architecture, TEAM §2).
+`tb/models/` re-exports the same objects so existing imports keep working.
+Scoreboards should prefer `from model import …` going forward.
 
 | Model | Spec | SPEC | Status |
 | --- | --- | --- | --- |

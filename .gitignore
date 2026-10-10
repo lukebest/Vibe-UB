@@ -18,3 +18,8 @@ tb/reports/regress/**
 tb/reports/cov_func/**
 tb/reports/cov_line/**
 !tb/reports/**/.gitkeep
+
+# SymbiYosys workdirs (formal/<iface>/<job>_{bmc,cover,prove}/)
+formal/**/*_bmc/
+formal/**/*_cover/
+formal/**/*_prove/

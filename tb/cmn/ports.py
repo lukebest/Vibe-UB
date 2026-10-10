@@ -23,7 +23,9 @@ _RST_LIKE = ("rst_n", "rst_pyc", "rst_n_sync", "rst", "reset", "reset_n")
 _COMMENT_BLOCK = re.compile(r"/\*.*?\*/", re.DOTALL)
 _COMMENT_LINE = re.compile(r"//.*?$", re.MULTILINE)
 _MODULE_PORTS = re.compile(
-    r"\bmodule\s+(?P<name>\w+)\s*\((?P<body>.*?)\)\s*;",
+    r"\bmodule\s+(?P<name>\w+)"
+    r"(?:\s*#\s*\(.*?\))?"
+    r"\s*\((?P<body>.*?)\)\s*;",
     re.DOTALL,
 )
 _PORT_DECL = re.compile(

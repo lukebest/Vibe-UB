@@ -143,6 +143,31 @@ def test_emit_wrapper_bakes_constants_no_dut_parameter(tmp_path: Path):
     assert ".clk   (clk)" not in text
 
 
+def test_parse_parameterized_formal_if_props():
+    text = """
+module ub_cmn_mem_1r1w_if_props #(
+  parameter DEPTH = 5,
+  parameter WIDTH = 8
+) (
+  input  wire             core_clk,
+  input  wire             we,
+  input  wire [AW-1:0]    waddr,
+  input  wire [WIDTH-1:0] wdata,
+  input  wire             re,
+  input  wire [AW-1:0]    raddr,
+  input  wire [WIDTH-1:0] rdata,
+  output wire [AW-1:0]    f_addr,
+  output wire             f_written
+);
+endmodule
+"""
+    ports = parse_module_ports(text, "ub_cmn_mem_1r1w_if_props")
+    assert "core_clk" in ports
+    assert "we" in ports and "rdata" in ports
+    assert "rst_n" not in ports and "rst_pyc" not in ports
+    check_leaf_ports(ports, module="ub_cmn_mem_1r1w_if_props")
+
+
 def test_parse_module_ports_core_clk_no_reset():
     text = """
 module ub_cmn_mem_1r1w_d5w8 (

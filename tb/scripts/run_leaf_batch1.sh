@@ -43,6 +43,7 @@ run_one() {
     >"$log" 2>&1
   local rc=$?
   set -e
+  grep -E '^DUT_RTL=' "$log" | head -n 1 || true
   if grep -qE '^FAIL ' "$log"; then
     echo "FAIL $tag (see $log)"
     grep -E '^(PASS|FAIL) ' "$log" | tail -n 20

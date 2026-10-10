@@ -1,10 +1,14 @@
 # Dual-netlist TB entry (SPEC §11).
 # Self-check (no product DUT):
 #   make selfcheck-both SIM=icarus
-# Leaf batch 1 (product leaves under rtl/):
+# Leaf batch 1:
 #   make leaf LEAF=ub_rst_sync TEST_HOOKS=0 SIM=icarus
 #   make leaf-batch1 SIM=icarus
-# TEST_HOOKS=0: no tb_* ports. TEST_HOOKS=1: unused SPEC §10 ports (leaves have none).
+# DUT filelist:
+#   TEST_HOOKS=0 -> rtl/<block>/<module>.v  (PRODUCT)
+#   TEST_HOOKS=1 -> rtl/<block>/hooks/<module>.v if present, else PRODUCT
+#   ub_rst_sync is whitelist SV: always rtl/common/ub_rst_sync.sv (no hooks copy)
+# TB wrappers still add unused SPEC §10 ports when TEST_HOOKS=1 (leaves add no ports).
 
 REPO_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 TB_ROOT   := $(REPO_ROOT)/tb
@@ -28,35 +32,48 @@ export COCOTB_HDL_TIMEPRECISION ?= 1ps
 
 TOPLEVEL_LANG := verilog
 
+# Prefer hooks/ netlist when TEST_HOOKS=1 and the file exists; else PRODUCT.
+ifeq ($(TEST_HOOKS),1)
+rtl_dut = $(if $(wildcard $(RTL)/$(1)/hooks/$(2)),$(RTL)/$(1)/hooks/$(2),$(RTL)/$(1)/$(2))
+else
+rtl_dut = $(RTL)/$(1)/$(2)
+endif
+
 ifeq ($(LEAF),ub_rst_sync)
 TOPLEVEL := tb_ub_rst_sync
 MODULE   := tb.tests.tb_rst_sync
-VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_rst_sync.sv $(RTL)/common/ub_rst_sync.sv
+DUT_RTL  := $(RTL)/common/ub_rst_sync.sv
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_rst_sync.sv $(DUT_RTL)
 else ifeq ($(LEAF),ub_pyc_rst_adapt)
 TOPLEVEL := tb_ub_rst_adapt
 MODULE   := tb.tests.tb_rst_adapt
-VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_rst_adapt.sv $(RTL)/common/ub_pyc_rst_adapt.v
+DUT_RTL  := $(call rtl_dut,common,ub_pyc_rst_adapt.v)
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_rst_adapt.sv $(DUT_RTL)
 else ifeq ($(LEAF),ub_pcs_lane_dist)
 TOPLEVEL := tb_ub_lane_dist
 MODULE   := tb.tests.tb_lane_dist
-VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_lane_dist.sv $(RTL)/pcs/ub_pcs_lane_dist.v
+DUT_RTL  := $(call rtl_dut,pcs,ub_pcs_lane_dist.v)
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_lane_dist.sv $(DUT_RTL)
 else ifeq ($(LEAF),ub_pcs_lane_dedist)
 TOPLEVEL := tb_ub_lane_dedist
 MODULE   := tb.tests.tb_lane_dedist
-VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_lane_dedist.sv $(RTL)/pcs/ub_pcs_lane_dedist.v
+DUT_RTL  := $(call rtl_dut,pcs,ub_pcs_lane_dedist.v)
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_lane_dedist.sv $(DUT_RTL)
 else ifeq ($(LEAF),ub_pcs_lane_collect)
 TOPLEVEL := tb_ub_lane_collect
 MODULE   := tb.tests.tb_lane_collect
-VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_lane_collect.sv \
-	$(RTL)/pcs/ub_pcs_lane_dist.v $(RTL)/pcs/ub_pcs_lane_dedist.v
+DUT_RTL  := $(call rtl_dut,pcs,ub_pcs_lane_dist.v) $(call rtl_dut,pcs,ub_pcs_lane_dedist.v)
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_lane_collect.sv $(DUT_RTL)
 else ifeq ($(LEAF),ub_dll_bcrc)
 TOPLEVEL := tb_ub_bcrc
 MODULE   := tb.tests.tb_bcrc
-VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_bcrc.sv $(RTL)/dll/ub_dll_bcrc.v
+DUT_RTL  := $(call rtl_dut,dll,ub_dll_bcrc.v)
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_bcrc.sv $(DUT_RTL)
 else ifeq ($(LEAF),ub_dll_bcrc_check)
 TOPLEVEL := tb_ub_bcrc_check
 MODULE   := tb.tests.tb_bcrc_check
-VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_bcrc_check.sv $(RTL)/dll/ub_dll_bcrc_check.v
+DUT_RTL  := $(call rtl_dut,dll,ub_dll_bcrc_check.v)
+VERILOG_SOURCES := $(TB_ROOT)/harness/tb_ub_bcrc_check.sv $(DUT_RTL)
 else
 TOPLEVEL := tb_passthru
 MODULE   := tb.tests.tb_selfcheck
@@ -98,6 +115,10 @@ EXTRA_ARGS += --timescale 1ns/1ps -Wno-fatal
 ifeq ($(LINE_COV),1)
 EXTRA_ARGS += --coverage
 endif
+endif
+
+ifneq ($(LEAF),)
+$(info DUT_RTL=$(DUT_RTL) TEST_HOOKS=$(TEST_HOOKS))
 endif
 
 include $(shell cocotb-config --makefiles)/Makefile.sim

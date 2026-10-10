@@ -78,8 +78,14 @@ make -C tb leaf-batch1 SIM=icarus          # gate
 make -C tb leaf-batch1 SIM=verilator       # compare
 ```
 
-Each leaf is compiled twice (`TEST_HOOKS=0` / `=1`). These leaves have no
-product hooks (SPEC §10); the HOOKS wrapper only adds unused `tb_*` ports.
+Each leaf is compiled twice (`TEST_HOOKS=0` / `=1`):
+
+- `TEST_HOOKS=0`: PRODUCT `rtl/<block>/<module>.v`
+- `TEST_HOOKS=1`: `rtl/<block>/hooks/<module>.v` if present, else PRODUCT
+- `ub_rst_sync`: whitelist SV; both netlists use `rtl/common/ub_rst_sync.sv`
+
+These leaves add no extra ports (SPEC §10). The TB wrapper still exposes
+unused `tb_*` ports on the HOOKS compile so the hook agent can bind.
 Lane TBs sweep `NUM_LANES=1/2/4/8`. Seeds print as `SEED <n>` (D8).
 
 ## Coverage scaffold

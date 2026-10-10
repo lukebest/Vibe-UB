@@ -4,7 +4,7 @@
 
 ### Added
 
-- Leaf batch 1 uvm-python TBs (`tb/` only): `ub_rst_sync`, `ub_pyc_rst_adapt`, `ub_pcs_lane_dist` / `ub_pcs_lane_dedist` / collect loopback, `ub_dll_bcrc` / `ub_dll_bcrc_check`. Dual `TEST_HOOKS=0/1` wrappers; goldens via `tb/vibe_uvm/golden.py` (`model/` then `tb/models`). Scrambler leaves not in this batch (SPEC §13).
+- Leaf batch 1 uvm-python TBs (`tb/` only): `ub_rst_sync`, `ub_pyc_rst_adapt`, `ub_pcs_lane_dist` / `ub_pcs_lane_dedist` / collect loopback, `ub_dll_bcrc` / `ub_dll_bcrc_check`. Dual `TEST_HOOKS=0/1` wrappers; goldens via `tb/vibe_uvm/golden.py` (`model/` then `tb/models`). `TEST_HOOKS=1` filelist prefers `rtl/<block>/hooks/`, else PRODUCT; whitelist `ub_rst_sync` has no hooks copy. Scrambler leaves not in this batch (SPEC §13).
 - M1 RTL leaf batch 1 (pyCircuit): whitelist `ub_rst_sync`; generated `ub_pyc_rst_adapt`, `ub_pcs_scrambler` / `ub_pcs_descrambler`, `ub_pcs_lane_dist` / `ub_pcs_lane_dedist`, `ub_dll_bcrc` / `ub_dll_bcrc_check`. PRODUCT at `rtl/<block>/<module>.v` (SPEC §2.2 / CODING_STYLE §5). `TEST_HOOKS=0`; SPEC §10 lists no hooks on these leaves.
 - `TOOLCHAIN.lock` + `tb/` uvm-python 骨架、golden-model 接口、双网表自检入口（叠在 M1 SPEC 上；不改 `rtl/` / SPEC 类文档）。
 - TB 模型按 CODING_STYLE §5 命名：`ub_dll_bcrc` 已按 SPEC §2.6 写全；`ub_pcs_scrambler` 已按已定项实现，抽头与 `AMCTL.LID`→种子为必填参数（SPEC §13，无默认）；`ub_pcs_lane_dist` 已实现。无 LMB/LTB golden。

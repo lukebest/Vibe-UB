@@ -22,3 +22,11 @@ entries:
     approver: lukebest
     approved_date: 2026-10-10
     review_when: stages != 2 or the cell interface changes
+  - id: HW-PYC-REG
+    file: rtl/pyc_lib/pyc_reg.v
+    reason: >-
+      pycc 运行库原语，原样复制自 TOOLCHAIN.lock 锁定的 pyCircuit 版本
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: TOOLCHAIN.lock pyCircuit pin or pyc_reg.v source changes
+

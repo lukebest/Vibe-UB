@@ -1,0 +1,250 @@
+"""Build and run Verilator + cocotb for one discovered fixed-netlist variant.
+
+No Verilator ``-G``. DEPTH/WIDTH are parsed from the variant and baked into a
+generated wrapper. Equivalence (PRODUCT vs HOOKS) is a gate Yosys-equiv job,
+not this TB.
+"""
+
+from __future__ import annotations
+
+import os
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+from tb.cmn.discover import (
+    REPO_ROOT,
+    MemVariant,
+    PycLibError,
+    pyc_lib_dir,
+    require_pyc_runtime,
+    require_variant_ports,
+    rtl_sim_skip_reason,
+    used_pyc_lib_files,
+)
+from tb.cmn.harness.emit_wrapper import TOPLEVEL, emit_wrapper
+from tb.cmn.ports import LeafPortError, check_leaf_ports, parse_module_ports_file
+from tb.cmn.sequences import expected_violation
+
+TB_CMN = Path(__file__).resolve().parent
+FORMAL_PROPS = REPO_ROOT / "formal" / "cmn" / "ub_cmn_mem_1r1w_if_props.sv"
+SIM_MODULE = "tb.cmn.sim_cocotb"
+_LAYER_PYC_MARKERS = ("/rtl/cmn/pyc_", "/rtl/cmn/hooks/pyc_")
+
+
+def sim_verilog_sources(
+    variant: MemVariant,
+    *,
+    wrapper: Path,
+    tb_check: bool,
+    repo: Path | None = None,
+) -> list[Path]:
+    """Wrapper + leaf + used ``rtl/pyc_lib/pyc_*.v`` (+ formal). One path per stem.
+
+    Never lists ``rtl/cmn/pyc_*.v`` or ``rtl/cmn/hooks/pyc_*.v``.
+    """
+    require_pyc_runtime(repo)
+    used = used_pyc_lib_files(variant.path, repo)
+    by_stem: dict[str, Path] = {}
+    for path in used:
+        resolved = path.resolve()
+        text = str(resolved)
+        if any(mark in text for mark in _LAYER_PYC_MARKERS):
+            raise PycLibError(
+                f"仿真文件列表拒绝层目录运行库 {resolved}；应使用 rtl/pyc_lib/"
+            )
+        by_stem[resolved.stem] = resolved
+    out = [wrapper.resolve(), variant.path.resolve()]
+    out.extend(by_stem[name] for name in sorted(by_stem))
+    if tb_check and FORMAL_PROPS.is_file():
+        out.append(FORMAL_PROPS.resolve())
+    return out
+
+
+def sim_include_dirs(repo: Path | None = None) -> list[Path]:
+    """``-I rtl/pyc_lib`` plus formal. Layer dirs are not on the include path."""
+    require_pyc_runtime(repo)
+    root = Path(repo) if repo is not None else REPO_ROOT
+    return [pyc_lib_dir(repo).resolve(), (root / "formal" / "cmn").resolve()]
+
+
+def _build_and_test(
+    variant: MemVariant,
+    *,
+    assert_no_uninit_read: bool,
+    case: str,
+    seed: int,
+    tb_check: bool,
+    random_n: int = 80,
+) -> None:
+    from cocotb.runner import get_runner
+
+    require_variant_ports(variant)
+    require_pyc_runtime()
+    if tb_check:
+        _require_formal_bind_ports()
+
+    build_dir = (
+        TB_CMN
+        / "sim_build"
+        / f"{variant.netlist}_{variant.module}_a{int(assert_no_uninit_read)}_c{int(tb_check)}"
+    )
+    build_dir.mkdir(parents=True, exist_ok=True)
+    _clear_stale_results(build_dir)
+    wrapper = emit_wrapper(
+        build_dir / "ub_cmn_mem_1r1w_tb.sv",
+        dut_module=variant.module,
+        depth=variant.depth,
+        width=variant.width,
+        wmask_w=variant.wmask_w,
+        assert_no_uninit_read=assert_no_uninit_read,
+        tb_check=tb_check,
+    )
+
+    sources = sim_verilog_sources(
+        variant, wrapper=wrapper, tb_check=tb_check
+    )
+
+    extra_env = {
+        "CMN_CASE": case,
+        "CMN_SEED": str(int(seed)),
+        "CMN_DEPTH": str(int(variant.depth)),
+        "CMN_WIDTH": str(int(variant.width)),
+        "CMN_WMASK_W": str(int(variant.wmask_w)),
+        "CMN_ASSERT_NO_UNINIT_READ": str(int(bool(assert_no_uninit_read))),
+        "CMN_RANDOM_N": str(int(random_n)),
+        "CMN_VARIANT": variant.module,
+        "CMN_NETLIST": variant.netlist,
+        "COCOTB_RESULTS_FILE": str(build_dir / "results.xml"),
+        "PYTHONPATH": (
+            str(REPO_ROOT) + os.pathsep + os.environ.get("PYTHONPATH", "")
+        ).rstrip(os.pathsep),
+    }
+    build_args = [
+        "--timescale",
+        "1ns/1ps",
+        "-Wno-fatal",
+        "-Wno-UNUSED",
+        "-Wno-UNUSEDPARAM",
+        "-Wno-DECLFILENAME",
+        "-Wno-UNOPTFLAT",
+        "--assert",
+    ]
+    includes = [str(p) for p in sim_include_dirs()]
+    # ``-Ipath`` must be one token (a spaced ``-I dir`` is a module name).
+    # pyc_* stay on sim_verilog_sources() for the file list, but are compiled
+    # once via `` `include`` + this -I — do not also pass them as -v/sources.
+    pyc_lib = pyc_lib_dir().resolve()
+    ival = f"-I{pyc_lib}"
+    if ival not in build_args:
+        build_args.append(ival)
+
+    runner = get_runner("verilator")
+    # Do not pass `parameters=` — that becomes Verilator -G (forbidden).
+    build_kw = dict(
+        hdl_toplevel=TOPLEVEL,
+        always=False,
+        build_dir=str(build_dir),
+        includes=includes,
+        build_args=build_args,
+    )
+    srcs = [
+        str(p)
+        for p in sources
+        if not (p.name.startswith("pyc_") and p.suffix.lower() in {".v", ".sv"})
+    ]
+    try:
+        runner.build(verilog_sources=srcs, **build_kw)
+    except TypeError:
+        runner.build(sources=srcs, **build_kw)
+
+    test_kw = dict(
+        hdl_toplevel=TOPLEVEL,
+        test_module=SIM_MODULE,
+        extra_env=extra_env,
+        plusargs=[f"+SEED={int(seed)}"],
+    )
+    try:
+        try:
+            runner.test(**test_kw)
+        except TypeError:
+            runner.test(hdl_toplevel=TOPLEVEL, test_module=SIM_MODULE, extra_env=extra_env)
+    except SystemExit:
+        _assert_cocotb_passed(build_dir)
+        raise
+    _assert_cocotb_passed(build_dir)
+
+
+def _require_formal_bind_ports() -> None:
+    """TB wrapper binds if_props with core_clk, no reset, and a wmask pin."""
+    if not FORMAL_PROPS.is_file():
+        raise LeafPortError(
+            f"formal bind requested but {FORMAL_PROPS} is missing"
+        )
+    ports = parse_module_ports_file(FORMAL_PROPS, "ub_cmn_mem_1r1w_if_props")
+    check_leaf_ports(ports, module="ub_cmn_mem_1r1w_if_props")
+    if "wmask" not in ports:
+        raise LeafPortError(
+            "ub_cmn_mem_1r1w_if_props missing wmask bind pin "
+            "(tied 1 when NSEG=1; connected when NSEG>1)"
+        )
+
+
+def _clear_stale_results(build_dir: Path) -> None:
+    for path in build_dir.iterdir():
+        if path.is_file() and (
+            path.name == "results.xml" or path.name.endswith(".None")
+        ):
+            path.unlink()
+
+
+def _find_cocotb_results(build_dir: Path) -> Path:
+    named = build_dir / "results.xml"
+    if named.is_file():
+        return named
+    # cocotb 1.9.2 under pytest may write <nodeid>.None; [] must not go through glob.
+    extras = [
+        p
+        for p in build_dir.iterdir()
+        if p.is_file() and p.stat().st_size > 0 and (
+            p.suffix == ".xml" or p.name.endswith(".None")
+        )
+    ]
+    if extras:
+        return sorted(extras)[-1]
+    raise AssertionError(f"cocotb results.xml missing under {build_dir}")
+
+
+def _assert_cocotb_passed(build_dir: Path) -> None:
+    xml = _find_cocotb_results(build_dir)
+    root = ET.parse(xml).getroot()
+    fails = list(root.iter("failure")) + list(root.iter("error"))
+    if fails:
+        texts = []
+        for node in fails:
+            texts.append((node.get("message") or node.text or "failure").strip())
+        raise AssertionError(
+            f"cocotb reported {len(fails)} failure(s) in {xml}: " + " | ".join(texts)
+        )
+
+
+def run_sim_variant(
+    variant: MemVariant,
+    *,
+    case: str,
+    assert_no_uninit_read: bool,
+    seed: int = 1,
+    random_n: int = 80,
+) -> None:
+    require_pyc_runtime()
+    reason = rtl_sim_skip_reason(netlist=variant.netlist)
+    if reason:
+        raise RuntimeError(reason)
+    want = expected_violation(case, assert_no_uninit_read)
+    _build_and_test(
+        variant,
+        assert_no_uninit_read=assert_no_uninit_read,
+        case=case,
+        seed=seed,
+        tb_check=want is None,
+        random_n=random_n,
+    )

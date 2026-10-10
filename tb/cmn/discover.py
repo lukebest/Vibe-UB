@@ -1,0 +1,530 @@
+"""Discover ``ub_cmn_mem_1r1w`` fixed-netlist variants (SPEC §2.2).
+
+pycc does not emit Verilog ``parameter``. Each DEPTH/WIDTH set is a separate
+module ``<leaf>_<tag>``:
+
+* PRODUCT: ``rtl/cmn/<leaf>_<tag>.v``
+* TEST_HOOKS: ``rtl/cmn/hooks/<leaf>_<tag>.v`` (same module name, §11)
+
+DEPTH/WIDTH come from the tag, a sidecar metadata file, header comments, or
+a pycircuit tag table — never from Verilator ``-G``.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import shutil
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from model.ub_cmn_mem_1r1w import clog2
+from tb.cmn.ports import (
+    CLK_PORT,
+    WMASK_PORT,
+    LeafPortError,
+    check_leaf_ports,
+    check_wmask_port,
+    parse_module_port_widths,
+    parse_module_ports,
+)
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+RTL_CMN = REPO_ROOT / "rtl" / "cmn"
+RTL_CMN_HOOKS = RTL_CMN / "hooks"
+RTL_PYC_LIB = REPO_ROOT / "rtl" / "pyc_lib"
+LEAF = "ub_cmn_mem_1r1w"
+LEAF_SUFFIXES = {".v", ".sv"}
+META_SUFFIXES = {".json", ".yml", ".yaml"}
+_INCLUDE_RE = re.compile(r"""`include\s+["<]([^">]+)[">]""")
+
+PYC_LIB_MISSING_ZH = (
+    "rtl/pyc_lib/ 不存在。pycc 运行库（pyc_reg.v 等 pyc_*）全仓只放这一份；"
+    "拒绝回退 rtl/cmn/ 或 rtl/cmn/hooks/。"
+)
+LAYER_PYC_ZH = "层目录不应有 pyc_* 运行库，应放在 rtl/pyc_lib/"
+
+
+class PycLibError(RuntimeError):
+    """SPEC §2.2: pyc_* runtime lives only in ``rtl/pyc_lib/``."""
+
+_MODULE_RE = re.compile(r"^\s*module\s+(\w+)", re.MULTILINE)
+_TAG_DEPTH_WIDTH = (
+    re.compile(
+        r"^d(?P<depth>\d+)w(?P<width>\d+)(?:m(?P<wmask>\d+))?(?:_placeholder)?$"
+    ),
+    re.compile(
+        r"^d(?P<depth>\d+)_w(?P<width>\d+)(?:_m(?P<wmask>\d+))?(?:_placeholder)?$"
+    ),
+    re.compile(
+        r"^depth(?P<depth>\d+)_width(?P<width>\d+)"
+        r"(?:_wmask(?P<wmask>\d+))?(?:_placeholder)?$"
+    ),
+)
+_COMMENT_DW = re.compile(
+    r"\bDEPTH\s*=\s*(\d+)\b.*\bWIDTH\s*=\s*(\d+)\b"
+    r"|\bWIDTH\s*=\s*(\d+)\b.*\bDEPTH\s*=\s*(\d+)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_COMMENT_WMASK = re.compile(r"\bWMASK_W\s*=\s*(\d+)\b", re.IGNORECASE)
+_PORT_WADDR = re.compile(r"\bwaddr\b[^;\n]*\[\s*(\d+)\s*:\s*0\s*\]", re.IGNORECASE)
+_PORT_WDATA = re.compile(r"\bwdata\b[^;\n]*\[\s*(\d+)\s*:\s*0\s*\]", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class MemVariant:
+    """One fixed netlist. ``module`` is the Verilog module name (no parameters)."""
+
+    path: Path
+    module: str
+    tag: str
+    depth: int
+    width: int
+    wmask_w: int
+    netlist: str  # "product" | "hooks"
+    placeholder: bool = False
+    source: str = "tag"
+    extras: dict = field(default_factory=dict)
+    ports: tuple[str, ...] = ()
+
+    @property
+    def aw(self) -> int:
+        return max(1, clog2(self.depth))
+
+    @property
+    def nseg(self) -> int:
+        return self.width // self.wmask_w if self.wmask_w else 1
+
+    @property
+    def clk_port(self) -> str | None:
+        if CLK_PORT in self.ports:
+            return CLK_PORT
+        if "clk" in self.ports:
+            return "clk"
+        return None
+
+    @property
+    def id(self) -> str:
+        tag = self.tag or "default"
+        return f"{self.netlist}:{self.module}:{tag}"
+
+
+def _read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def _module_name(text: str, fallback: str) -> str:
+    match = _MODULE_RE.search(text)
+    return match.group(1) if match else fallback
+
+
+def _split_leaf_tag(module: str) -> tuple[str, bool] | None:
+    if module == LEAF:
+        return "", False
+    prefix = LEAF + "_"
+    if not module.startswith(prefix):
+        return None
+    tag = module[len(prefix) :]
+    placeholder = tag.endswith("_placeholder")
+    if placeholder:
+        tag = tag[: -len("_placeholder")]
+    return tag, placeholder
+
+
+def _parse_tag_params(tag: str) -> tuple[int, int, int | None] | None:
+    if not tag:
+        return None
+    for cre in _TAG_DEPTH_WIDTH:
+        match = cre.match(tag)
+        if match:
+            wmask = match.groupdict().get("wmask")
+            return (
+                int(match.group("depth")),
+                int(match.group("width")),
+                int(wmask) if wmask else None,
+            )
+    return None
+
+
+def _load_sidecar(path: Path) -> dict:
+    for suffix in META_SUFFIXES:
+        meta = path.with_suffix(suffix)
+        if not meta.is_file():
+            continue
+        text = _read_text(meta)
+        if suffix == ".json":
+            data = json.loads(text)
+            return data if isinstance(data, dict) else {}
+        # Minimal YAML: key: value lines. Avoid a PyYAML dependency.
+        out: dict = {}
+        for line in text.splitlines():
+            stripped = line.split("#", 1)[0].strip()
+            if not stripped or ":" not in stripped:
+                continue
+            key, val = stripped.split(":", 1)
+            out[key.strip()] = val.strip().strip("\"'")
+        return out
+    return {}
+
+
+def _looks_like_mapping(obj: object) -> bool:
+    return isinstance(obj, dict)
+
+
+def _pick_int(raw: dict, *keys: str) -> int | None:
+    for key in keys:
+        if key in raw and raw[key] not in (None, ""):
+            return int(raw[key], 0) if isinstance(raw[key], str) else int(raw[key])
+    return None
+
+
+def _coerce_dw(raw: dict) -> tuple[int, int] | None:
+    depth = _pick_int(raw, "DEPTH", "depth")
+    width = _pick_int(raw, "WIDTH", "width")
+    if depth is None or width is None:
+        return None
+    return depth, width
+
+
+def _coerce_params(raw: dict) -> tuple[int, int, int | None] | None:
+    dw = _coerce_dw(raw)
+    if dw is None:
+        return None
+    wmask = _pick_int(raw, "WMASK_W", "wmask_w", "wmask")
+    return dw[0], dw[1], wmask
+
+
+def _from_comments(text: str) -> tuple[int, int, int | None] | None:
+    match = _COMMENT_DW.search(text)
+    if not match:
+        return None
+    if match.group(1) is not None:
+        depth, width = int(match.group(1)), int(match.group(2))
+    else:
+        depth, width = int(match.group(4)), int(match.group(3))
+    wm = _COMMENT_WMASK.search(text)
+    return depth, width, int(wm.group(1)) if wm else None
+
+
+def _port_widths(text: str) -> tuple[int | None, int | None]:
+    waddr = _PORT_WADDR.search(text)
+    wdata = _PORT_WDATA.search(text)
+    aw = int(waddr.group(1)) + 1 if waddr else None
+    width = int(wdata.group(1)) + 1 if wdata else None
+    return aw, width
+
+
+def _pycircuit_tag_table(repo: Path) -> dict[str, dict]:
+    """Best-effort read of design-B's tag → {DEPTH, WIDTH} table."""
+    cmn = repo / "pycircuit" / "cmn"
+    if not cmn.is_dir():
+        return {}
+    table: dict[str, dict] = {}
+    for path in sorted(cmn.rglob("*")):
+        if path.suffix.lower() not in {".py", ".json", ".yml", ".yaml"}:
+            continue
+        try:
+            text = _read_text(path)
+        except OSError:
+            continue
+        if path.suffix == ".json":
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if _looks_like_mapping(data):
+                for key, val in data.items():
+                    if _looks_like_mapping(val) and _coerce_dw(val):
+                        table[str(key)] = val
+        # Python: TAGS / VARIANTS / PARAMS dict literals with DEPTH/WIDTH.
+        for match in re.finditer(
+            r"[\"']([A-Za-z0-9_]+)[\"']\s*:\s*\{([^}]+)\}", text
+        ):
+            tag, body = match.group(1), match.group(2)
+            raw: dict = {}
+            for pair in re.finditer(
+                r"[\"']?(DEPTH|WIDTH|WMASK_W|depth|width|wmask_w)[\"']?\s*[:=]\s*(\d+)",
+                body,
+            ):
+                raw[pair.group(1)] = int(pair.group(2))
+            if _coerce_dw(raw):
+                table[tag] = raw
+    return table
+
+
+def parse_variant_file(
+    path: Path,
+    *,
+    netlist: str,
+    repo: Path | None = None,
+    tag_table: dict[str, dict] | None = None,
+) -> MemVariant | None:
+    """Parse one leaf file. None if it is not this primitive or DEPTH/WIDTH unknown."""
+    if path.suffix.lower() not in LEAF_SUFFIXES:
+        return None
+    text = _read_text(path)
+    module = _module_name(text, path.stem)
+    split = _split_leaf_tag(module)
+    if split is None:
+        return None
+    tag, placeholder = split
+    if module.endswith("_tb") or "if_props" in module or "formal" in module:
+        return None
+
+    source = "tag"
+    params = _parse_tag_params(tag)
+    if params is None:
+        side = _coerce_params(_load_sidecar(path))
+        if side:
+            params = side
+            source = "sidecar"
+    if params is None:
+        comment = _from_comments(text)
+        if comment:
+            params = comment
+            source = "comment"
+    table = tag_table if tag_table is not None else {}
+    if params is None and tag in table:
+        got = _coerce_params(table[tag])
+        if got:
+            params = got
+            source = "pycircuit"
+    if params is None and "" in table and not tag:
+        got = _coerce_params(table[""])
+        if got:
+            params = got
+            source = "pycircuit"
+    if params is None:
+        return None
+
+    depth, width, wmask_opt = params
+    if depth < 1 or width < 1:
+        return None
+    wmask_w = int(wmask_opt) if wmask_opt is not None else int(width)
+    if wmask_w < 1:
+        return None
+    _aw, port_w = _port_widths(text)
+    extras: dict = {}
+    if port_w is not None and port_w != width:
+        extras["port_width_mismatch"] = port_w
+    if _aw is not None:
+        extras["port_aw"] = _aw
+    extras["repo"] = str(repo) if repo is not None else ""
+    extras["wmask_w"] = wmask_w
+    ports = parse_module_ports(text, module)
+    extras["ports"] = list(ports)
+    widths = parse_module_port_widths(text, module)
+    if WMASK_PORT in widths:
+        extras["wmask_width"] = widths[WMASK_PORT]
+    return MemVariant(
+        path=path.resolve(),
+        module=module,
+        tag=tag,
+        depth=depth,
+        width=width,
+        wmask_w=wmask_w,
+        netlist=netlist,
+        placeholder=placeholder or tag.endswith("placeholder") or path.stem.endswith(
+            "_placeholder"
+        ),
+        source=source,
+        extras=extras,
+        ports=ports,
+    )
+
+
+def is_pyc_runtime_name(name: str) -> bool:
+    stem = Path(name).name
+    return stem.startswith("pyc_") and Path(stem).suffix.lower() in LEAF_SUFFIXES | {".vh"}
+
+
+def _iter_netlist_files(root: Path) -> list[Path]:
+    """Leaf netlists only. ``pyc_*`` runtime files are not variants."""
+    if not root.is_dir():
+        return []
+    out: list[Path] = []
+    for path in sorted(root.iterdir()):
+        if not path.is_file() or path.suffix.lower() not in LEAF_SUFFIXES:
+            continue
+        if is_pyc_runtime_name(path.name):
+            continue
+        out.append(path)
+    return out
+
+
+def layer_pyc_runtime_files(repo: Path | None = None) -> list[Path]:
+    """``pyc_*.v`` left under ``rtl/cmn/`` or ``rtl/cmn/hooks/`` (forbidden)."""
+    root = Path(repo) if repo is not None else REPO_ROOT
+    found: list[Path] = []
+    for directory in (root / "rtl" / "cmn", root / "rtl" / "cmn" / "hooks"):
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.iterdir()):
+            if path.is_file() and is_pyc_runtime_name(path.name):
+                found.append(path.resolve())
+    return found
+
+
+def pyc_lib_dir(repo: Path | None = None) -> Path:
+    root = Path(repo) if repo is not None else REPO_ROOT
+    return root / "rtl" / "pyc_lib"
+
+
+def require_pyc_runtime(repo: Path | None = None) -> Path:
+    """``rtl/pyc_lib/`` must exist; layer dirs must not still hold ``pyc_*``.
+
+    Missing lib is a hard error (RTL sim fails). Do not fall back to
+    ``rtl/cmn/pyc_reg.v`` or ``rtl/cmn/hooks/pyc_reg.v``.
+    """
+    leftover = layer_pyc_runtime_files(repo)
+    lib = pyc_lib_dir(repo)
+    parts: list[str] = []
+    if leftover:
+        rels = ", ".join(str(p) for p in leftover)
+        parts.append(f"{LAYER_PYC_ZH}: {rels}")
+    if not lib.is_dir():
+        parts.append(PYC_LIB_MISSING_ZH)
+    if parts:
+        raise PycLibError(" ".join(parts))
+    return lib.resolve()
+
+
+def leaf_pyc_include_names(text: str) -> list[str]:
+    """``pyc_*.v`` names pulled in by `` `include `` (SPEC §2.2)."""
+    names: list[str] = []
+    seen: set[str] = set()
+    for match in _INCLUDE_RE.finditer(text):
+        name = Path(match.group(1)).name
+        if is_pyc_runtime_name(name) and name not in seen:
+            seen.add(name)
+            names.append(name)
+    return names
+
+
+def used_pyc_lib_files(leaf: Path, repo: Path | None = None) -> list[Path]:
+    """``rtl/pyc_lib/pyc_*.v`` actually referenced by the leaf. One path per name."""
+    lib = require_pyc_runtime(repo)
+    text = leaf.read_text(encoding="utf-8", errors="replace")
+    out: list[Path] = []
+    seen: set[str] = set()
+    for name in leaf_pyc_include_names(text):
+        if name in seen:
+            continue
+        seen.add(name)
+        path = lib / name
+        if not path.is_file():
+            raise PycLibError(
+                f"{leaf.name} `include \"{name}\" 但 {path} 不存在。"
+                "运行库只从 rtl/pyc_lib/ 取，不回退层目录。"
+            )
+        out.append(path.resolve())
+    return out
+
+
+def discover_variants(repo: Path | None = None) -> list[MemVariant]:
+    """PRODUCT files in ``rtl/cmn/`` plus HOOKS files in ``rtl/cmn/hooks/``."""
+    root = Path(repo) if repo is not None else REPO_ROOT
+    table = _pycircuit_tag_table(root)
+    found: list[MemVariant] = []
+    seen: set[tuple[str, str]] = set()
+    groups = (
+        (root / "rtl" / "cmn", "product"),
+        (root / "rtl" / "cmn" / "hooks", "hooks"),
+    )
+    for directory, netlist in groups:
+        for path in _iter_netlist_files(directory):
+            var = parse_variant_file(
+                path, netlist=netlist, repo=root, tag_table=table
+            )
+            if var is None:
+                continue
+            key = (var.netlist, var.module)
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(var)
+    return found
+
+
+def discover_by_netlist(
+    netlist: str, repo: Path | None = None
+) -> list[MemVariant]:
+    return [v for v in discover_variants(repo) if v.netlist == netlist]
+
+
+def find_product_leaf(repo: Path | None = None) -> Path | None:
+    """Back-compat: first PRODUCT variant path, if any."""
+    found = discover_by_netlist("product", repo)
+    return found[0].path if found else None
+
+
+def verilator_on_path() -> bool:
+    return shutil.which("verilator") is not None
+
+
+def cocotb_importable() -> bool:
+    try:
+        import cocotb  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def rtl_sim_skip_reason(
+    repo: Path | None = None, *, netlist: str | None = None
+) -> str | None:
+    """Why the cocotb + Verilator suite cannot run. None = ready."""
+    variants = (
+        discover_by_netlist(netlist, repo)
+        if netlist is not None
+        else discover_variants(repo)
+    )
+    if not variants:
+        if netlist == "hooks" and discover_by_netlist("product", repo):
+            return (
+                "No TEST_HOOKS variants under rtl/cmn/hooks/. "
+                "PRODUCT leaf is present; design-B documents SPEC §10 has no "
+                "tb_* hooks for this primitive (PRODUCT-only netlist)."
+            )
+        where = (
+            "rtl/cmn/hooks/"
+            if netlist == "hooks"
+            else "rtl/cmn/" if netlist == "product" else "rtl/cmn/ and rtl/cmn/hooks/"
+        )
+        return (
+            f"No parseable {LEAF} variants under {where} "
+            "(SPEC §2.2 <leaf>_<tag> fixed netlists). "
+            "Product leaf is owned by design-B and has not landed. "
+            "Skipping cocotb/Verilator simulation; Python self-check still runs."
+        )
+    if not verilator_on_path():
+        return (
+            "Verilator not on PATH; cannot run the cocotb + Verilator "
+            f"{LEAF} suite even though variants were discovered."
+        )
+    if not cocotb_importable():
+        return (
+            "cocotb is not importable; cannot run the RTL simulation "
+            "suite. Install tb/requirements.txt."
+        )
+    return None
+
+
+def require_variant_ports(variant: MemVariant) -> None:
+    """Error if the netlist is not ``core_clk`` + data ports and no reset.
+
+    ``wmask[NSEG-1:0]`` is required iff ``NSEG>1``; a whole-word leaf must
+    not grow a ``wmask`` pin, and a segmented leaf must match ``NSEG``.
+    """
+    check_leaf_ports(variant.ports, module=variant.module)
+    if variant.width % variant.wmask_w != 0:
+        raise LeafPortError(
+            f"{variant.module} WIDTH={variant.width} is not a multiple of "
+            f"WMASK_W={variant.wmask_w}"
+        )
+    check_wmask_port(
+        variant.ports,
+        nseg=variant.nseg,
+        wmask_width=variant.extras.get("wmask_width"),
+        module=variant.module,
+    )

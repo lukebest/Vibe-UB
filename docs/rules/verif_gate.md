@@ -34,7 +34,7 @@ make gate
 
 层名从目录发现，脚本不写死 `pcs` / `dll` / `lmsm` / `csr`。枚举必须包含 `cmn`（Xia / PR #21：统一存储叶子 `ub_cmn_mem_1r1w`）。B/C 以后加 `pycircuit/<layer>/`、`rtl/<layer>/`、`formal/<iface>/`、`tb/<layer>/` 即可被扫到。不扫 `rtl/gen/`。
 
-SPEC §2.2 变体：同一叶子多组参数 → `rtl/<layer>/<叶子>_<标签>.v`；单组不加标签；`_placeholder` 只 lint/TB。
+SPEC §2.2 变体：同一叶子多组参数 → `rtl/<layer>/<叶子>_<标签>.v`；单组不加标签；`_placeholder` 只 lint/TB。存储原语标签定为 `d<DEPTH>w<WIDTH>[m<WMASK_W>]`（例：`ub_cmn_mem_1r1w_d512w512m64`、`ub_cmn_mem_1r1w_d64w64m16`）。
 
 | 线 | 检查 | 路径 |
 | --- | --- | --- |
@@ -157,11 +157,11 @@ PRODUCT 与 HOOKS 两套网表（SPEC §11）只要落在上述目录，都会�
 | GATE-SYN-005 | 打印 `stat`；**不做**面积 / 时序 / QoR 对比 | TEAM §1；实现侧 quick_synth | 2026-10-10 |
 | GATE-SYN-006 | `ltp -noff` 报告每个叶子最大组合逻辑级数；只报告 | PM | 2026-10-10 |
 | GATE-SYN-007 | `blackbox.yml` 模块用 `read_verilog -lib` | §1.2 | 2026-10-10 |
-| GATE-SYN-008 | `ub_cmn_mem_1r1w` 实例 depth×width 超阈值则上层 `-lib`；原语只对小变体完整综合 | 实现对齐 | 2026-10-10 |
+| GATE-SYN-008 | `ub_cmn_mem_1r1w_d<DEPTH>w<WIDTH>[m<WMASK_W>]`：DEPTH×WIDTH 超阈值则上层 `-lib`；原语完整综合只跑 ≤4096 bit（含 `d64w64m16`） | 实现对齐 | 2026-10-10 |
 
 HOOKS 网表不做本检查（CODING_STYLE §1：实现只认 PRODUCT）。已登记 stub/macro 当黑盒。
 
-`ub_cmn_mem_1r1w`：实例 `depth × width` 超过阈值时，**上层** synth-check 用 `read_verilog -lib` 把该实例当黑盒。阈值读 `docs/rules/impl_quick_synth.md`（与实现 quick_synth 对齐）；文件不存在时用 **4096**（4 kbit）。原语自身只对 **小变体**（≤ 阈值）做完整综合；大变体跳过并报告 `CMN_MEM_LARGE`。
+`ub_cmn_mem_1r1w`：变体名 `ub_cmn_mem_1r1w_d<DEPTH>w<WIDTH>[m<WMASK_W>]`，按 §2.2 自动发现。黑盒看 **DEPTH×WIDTH** 与 `docs/rules/impl_quick_synth.md` 阈值（文件不存在时 **4096**）。超过则上层 `read_verilog -lib`（两边同一份）。原语完整综合 / 等价只跑 **≤4096 bit** 的变体（含 `d64w64m16`，覆盖 wmask 路径）；更大的跳过并报告 `CMN_MEM_LARGE`。
 
 **失败判据：** 新叶子上出现 LATCH / MULTI_DRIVE / COMBO_LOOP / Yosys 结构错误。legacy 只报告。
 
@@ -207,7 +207,7 @@ M1 单时钟 `core_clk`（SPEC §4.1）。`rst_n` 异步置位、同步释放，
 | GATE-EMIT-003 | 未上 `scripts/gate/handwritten.yml` 的手写 `.v` / `.sv` 记 `HANDWRITTEN_UNLISTED` | D6；§1.1 | 2026-10-10 |
 | GATE-EQY-001 | PRODUCT≡HOOKS。本环境 **eqy 装不上**，主工具是 Yosys `equiv_make` / `equiv_simple` / `equiv_induct` / `equiv_status -assert`。eqy 若在 PATH 再用。报告写明 `tool=yosys-equiv` 或 `tool=eqy`。按 SPEC §2.2 变体逐个跑；`_placeholder` 不做等价 | SPEC §11 (d)；设计 spike | 2026-10-10 |
 | GATE-EQY-002 | 无钩子叶子：端口一一对应后直接比对。有钩子模块：`tb_test_mode=0`，并把 `tb_inj_*`、`tb_<inst>_bd_*`、`tb_<inst>_bd_vld_*` 拉低后再比对 | SPEC §11 (d)(f) | 2026-10-10 |
-| GATE-EQY-003 | 上层等价把超阈值的 `ub_cmn_mem_1r1w` 实例当黑盒，**两边同一份**；原语只对小变体做完整 PRODUCT≡HOOKS | 实现对齐 | 2026-10-10 |
+| GATE-EQY-003 | 上层等价把 DEPTH×WIDTH 超阈值的 `ub_cmn_mem_1r1w` 变体当黑盒，**两边同一份**；原语只对 ≤4096 bit（含 `d64w64m16`）做完整 PRODUCT≡HOOKS | 实现对齐 | 2026-10-10 |
 
 白名单手写与 `_placeholder` 变体跳过 emit / hooks / 等价。Yosys 缺失：`EQUIV_TOOL_MISSING`，拦截（不静默）。
 
@@ -294,7 +294,7 @@ PR 审查清单见 §11。本条不写自动 finding，避免误杀尚未补齐�
 
 ### 8.0.1 记分板比对次数（审查项，不自动拦截）
 
-记分板必须统计**实际执行的比对次数**（每次 `compare(expected, actual)` 计 1，被跳过的激励不计）。测试结束时断言：
+记分板必须统计**实际执行的比对次数**（每次 `compare(expected, actual)` 计 1；**分段比对时按段统计**，每段计 1；被跳过的激励不计）。测试结束时断言：
 
 | 要求 | 说明 |
 | --- | --- |
@@ -305,7 +305,7 @@ PR 审查清单见 §11。本条不写自动 finding，避免误杀尚未补齐�
 
 | ID | 规则 | 来源 | 日期 | 门禁 |
 | --- | --- | --- | --- | --- |
-| GATE-TB-SB-001 | 记分板统计实际比对次数；结束时断言次数 `> 0` 且等于预期 | 空测 / 全跳过仍 PASS | 2026-10-10 | **审查清单，不自动拦截** |
+| GATE-TB-SB-001 | 记分板统计实际比对次数（分段比对按段计）；结束时断言次数 `> 0` 且等于预期 | 空测 / 全跳过仍 PASS | 2026-10-10 | **审查清单，不自动拦截** |
 
 本条不写自动 finding，不改 `tb/` 基类行为。
 
@@ -353,7 +353,7 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 | VER-GATE-004 | 工具版本对照 `TOOLCHAIN.lock`，对不上要明文打印 | D7 / D16 | 2026-10-10 |
 | VER-GATE-005 | 手写 SV / stub\|macro / 钩子端口三份 `scripts/gate/` 清单 | D6；SPEC §11 | 2026-10-10 |
 | VER-GATE-006 | 等价主工具 Yosys equiv_*；eqy 可用再用 | SPEC §11 (d) | 2026-10-10 |
-| VER-GATE-007 | `ub_cmn_mem_1r1w` 是 `cmn` 普通叶子；大实例上层当黑盒；`blackbox.yml` 无 `primitive` | Xia | 2026-10-10 |
+| VER-GATE-007 | `ub_cmn_mem_1r1w` 是 `cmn` 普通叶子；变体 `d<DEPTH>w<WIDTH>[m<WMASK_W>]`；DEPTH×WIDTH 超阈值上层当黑盒；原语完整综合/等价 ≤4096 bit（含 `d64w64m16`）；`blackbox.yml` 无 `primitive` | Xia | 2026-10-10 |
 | VER-GATE-008 | 成对模块 TB 两侧独立 vs `model/` + 定向用例；审查项，不自动拦截 | A 线 lane dist | 2026-10-10 |
 | VER-GATE-009 | SPEC §2.2 变体逐个跑；`_placeholder` 只 lint/TB；PRODUCT 不得例化；源码须有 `PLACEHOLDER_SOURCE` | SPEC §2.2 | 2026-10-10 |
 | VER-GATE-010 | spec-leak：私有规范标记 / `fmt.py` / PDF / 违规 PNG/JPG 不得进公开仓库 | 隔离 | 2026-10-10 |
@@ -382,7 +382,7 @@ A 线 lane dist 反例：只做分发再收集自环时，条带方向反了仍�
 
 适用于所有接入记分板的用例（unit / subsys / top）：
 
-- [ ] 记分板累计实际比对次数（每次 compare 计 1；跳过的激励不计）
+- [ ] 记分板累计实际比对次数（每次 compare 计 1；分段比对按段统计；跳过的激励不计）
 - [ ] 测试结束断言比对次数 `> 0`（空测不得 PASS）
 - [ ] 测试结束断言比对次数等于该用例声明的预期次数（少比不得 PASS）
 

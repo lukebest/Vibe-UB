@@ -643,6 +643,9 @@ def hooks_extra_for(module: str, leaf: str | None = None) -> list[str] | None:
         return table[module]
     if leaf and leaf in table:
         return table[leaf]
+    cmn_tag = cmn_mem_tag_of(module)
+    if cmn_tag and CMN_MEM_CELL in table:
+        return table[CMN_MEM_CELL]
     # ub_lmsm_x4 → ub_lmsm
     if "_" in module:
         stem = module.rsplit("_", 1)[0]
@@ -1233,6 +1236,9 @@ def discover_pycircuit_leaves() -> list[dict[str, Any]]:
                         break
                 if module != path.stem and tag is None and module.startswith(f"{path.stem}_"):
                     tag = module[len(path.stem) + 1 :]
+                parsed = parse_cmn_mem_tag(tag) if is_cmn_mem_module(module) else None
+                if parsed and not params:
+                    params = parsed
                 leaves.append(
                     {
                         "layer": layer,
@@ -1266,6 +1272,35 @@ def is_leak_allowed(path: Path) -> bool:
 
 def is_cmn_mem_module(name: str) -> bool:
     return name == CMN_MEM_CELL or name.startswith(CMN_MEM_CELL + "_")
+
+
+# Xia: ub_cmn_mem_1r1w_<tag> with tag d<DEPTH>w<WIDTH>[m<WMASK_W>]
+# e.g. d512w512m64, d64w64m16. Bits for the blackbox test are DEPTH*WIDTH.
+_CMN_MEM_TAG_RE = re.compile(r"^d(\d+)w(\d+)(?:m(\d+))?$", re.I)
+
+
+def parse_cmn_mem_tag(tag: str | None) -> dict[str, int] | None:
+    if not tag:
+        return None
+    m = _CMN_MEM_TAG_RE.fullmatch(str(tag).strip().lstrip("_"))
+    if not m:
+        return None
+    out = {"DEPTH": int(m.group(1)), "WIDTH": int(m.group(2))}
+    if m.group(3):
+        out["WMASK_W"] = int(m.group(3))
+    return out
+
+
+def cmn_mem_tag_of(name: str) -> str | None:
+    """Return the d<DEPTH>w<WIDTH>[m<WMASK_W>] tag, or None."""
+    if name == CMN_MEM_CELL:
+        return None
+    prefix = CMN_MEM_CELL + "_"
+    if name.startswith(prefix):
+        tag = name[len(prefix) :]
+        if parse_cmn_mem_tag(tag):
+            return tag
+    return None
 
 
 _CMN_THRESH_CACHE: int | None = None
@@ -1323,9 +1358,24 @@ def _parse_int_lit(text: str) -> int | None:
 
 
 def parse_cmn_mem_dims(path: Path | None, extra: dict[str, Any] | None = None) -> tuple[int | None, int | None]:
-    """Return (depth, width) from file parameters, variant params, or name."""
+    """Return (depth, width) from tag / params / file. Bits = DEPTH*WIDTH."""
     depth = width = None
     extra = extra or {}
+    for key in (
+        extra.get("tag"),
+        extra.get("module"),
+        path.stem if path is not None else None,
+    ):
+        if not key:
+            continue
+        tag = cmn_mem_tag_of(str(key)) or (
+            str(key) if parse_cmn_mem_tag(str(key)) else None
+        )
+        parsed = parse_cmn_mem_tag(tag)
+        if parsed:
+            depth = depth or parsed["DEPTH"]
+            width = width or parsed["WIDTH"]
+            break
     for key, val in extra.items():
         lk = str(key).lower()
         if lk in {"depth", "words", "entries"} and isinstance(val, (int, str)):
@@ -1367,8 +1417,12 @@ def parse_cmn_mem_dims(path: Path | None, extra: dict[str, Any] | None = None) -
             depth = int(m2.group(1)) + (0 if "0:" in (m2.group(0) or "") else 0)
             if "0:" in m2.group(0):
                 depth = int(m2.group(1)) + 1
-        # filename / module: _(\d+)x(\d+) or _d(\d+)_w(\d+)
+        # filename / module: official d<DEPTH>w<WIDTH>[m<WMASK_W>]; legacy _NxN / _dN_wN
         stem = path.stem
+        parsed = parse_cmn_mem_tag(cmn_mem_tag_of(stem) or "")
+        if parsed:
+            depth = depth or parsed["DEPTH"]
+            width = width or parsed["WIDTH"]
         m = re.search(r"_(\d+)x(\d+)$", stem, re.I)
         if m:
             depth = depth or int(m.group(1))
@@ -1432,8 +1486,13 @@ def large_cmn_mem_lib_files(top: str, disc: dict[str, Any] | None = None) -> lis
             ):
                 cell, plist, _inst = m.group(1), m.group(2) or "", m.group(3)
                 params: dict[str, Any] = {}
+                tagged = parse_cmn_mem_tag(cmn_mem_tag_of(cell) or "")
+                if tagged:
+                    params.update(tagged)
                 for pm in re.finditer(
-                    r"\.(DEPTH|WIDTH|depth|width)\s*\(\s*([^)]+)\)", plist, re.I
+                    r"\.(DEPTH|WIDTH|WMASK_W|depth|width|wmask_w)\s*\(\s*([^)]+)\)",
+                    plist,
+                    re.I,
                 ):
                     params[pm.group(1)] = pm.group(2).strip()
                 cell_unit = defined.get(cell)
@@ -1704,13 +1763,21 @@ def discover_product_leaves() -> list[dict[str, Any]]:
                 continue
             if is_handwritten_path(path) or path.stem in handwritten_modules():
                 continue
+            tag = None
+            leaf_name = path.stem
+            params: dict[str, Any] = {}
+            cmn_tag = cmn_mem_tag_of(path.stem)
+            if cmn_tag:
+                leaf_name = CMN_MEM_CELL
+                tag = cmn_tag
+                params = parse_cmn_mem_tag(cmn_tag) or {}
             leaves.append(
                 {
                     "layer": layer,
-                    "leaf": path.stem,
+                    "leaf": leaf_name,
                     "module": path.stem,
-                    "tag": None,
-                    "params": {},
+                    "tag": tag,
+                    "params": params,
                     "placeholder": is_placeholder_path(path),
                     "product": rel(path),
                     "hooks": f"rtl/{layer}/hooks/{path.stem}.v",

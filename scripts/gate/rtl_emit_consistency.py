@@ -32,11 +32,13 @@ from gatelib import (
     collect_placeholder_policy_findings,
     cmn_mem_bits,
     cmn_mem_is_large,
+    cmn_mem_tag_of,
     discover_rtl,
     is_cmn_mem_module,
     is_placeholder_module,
     large_cmn_mem_lib_files,
     hooks_extra_for,
+    parse_cmn_mem_tag,
     is_eqy_tie_low_port,
     read_cmn_mem_threshold_bits,
     looks_generated,
@@ -371,8 +373,11 @@ def main() -> int:
             )
             continue
         extra = hooks_extra_for(module, leaf.get("leaf"))
-        if is_cmn_mem_module(module) and cmn_mem_is_large(product, thresh=thresh):
-            bits = cmn_mem_bits(product)
+        dims = parse_cmn_mem_tag(cmn_mem_tag_of(module) or "") or leaf.get("params")
+        if is_cmn_mem_module(module) and cmn_mem_is_large(
+            product, dims, thresh=thresh
+        ):
+            bits = cmn_mem_bits(product, dims)
             print(
                 f"equiv skip full {module}: large ub_cmn_mem_1r1w "
                 f"({bits} bits > {thresh}); parents blackbox both sides"

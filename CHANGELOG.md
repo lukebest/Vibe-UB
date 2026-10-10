@@ -21,7 +21,7 @@
 
 ### Changed
 
-- `docs/rules/verif_gate.md` v0.4：后门命名 `tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`（HOOKS only，§10 登记，eqy 拉低）；`ub_cmn_mem_1r1w` 时钟口 `core_clk`；regmap `variants:`（PR #11 格式）`product_` 的 `SCR_PLACEHOLDER` 必须为 0，`=1` 非 PRODUCT 只 lint/TB，`NUM_VL`/`NUM_LANES` 与变体名一致。
+- `docs/rules/verif_gate.md` v0.4：后门命名 `tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`（HOOKS only，§10 登记，eqy 拉低）；`ub_cmn_mem_1r1w` 时钟口 `core_clk`；存储变体 `d<DEPTH>w<WIDTH>[m<WMASK_W>]`；regmap `variants:`（PR #11 格式）`product_` 的 `SCR_PLACEHOLDER` 必须为 0，`=1` 非 PRODUCT 只 lint/TB，`NUM_VL`/`NUM_LANES` 与变体名一致。GATE-TB-SB-001：分段比对按段计次数。
 - `docs/rules/verif_gate.md` v0.3：§8.0.1 / §11 增补 GATE-TB-SB-001（记分板须统计实际比对次数，结束时断言次数 `> 0` 且等于预期；审查清单，不自动拦截）。
 - `docs/TEAM.md` §4、`docs/PROCESS.md` §2：豁免清单从 `docs/WAIVERS.md` 改为 `waivers/`。
 - `scripts/impl/quick_synth.*` + `docs/rules/impl_quick_synth.md` v0.2：按 SPEC §2.2 每文件一个 top（无必经 `chparam`）；`_placeholder` 单独表且不计入 PRODUCT 面积；`--baseline-map` / `--baseline-report` 对照旧模块+参数；QoR（cells / area / depth / slack）相对 baseline 超 10% 标旗；`ub_cmn_mem_1r1w`（及 `scripts/gate/blackbox.yml`）超过可配 4096-bit 阈值作黑盒并报 SRAM 估算列，小实例仍综合为 flop；STA 按 1 拍 registered read。

@@ -15,11 +15,13 @@ from gatelib import (
     blackbox_lib_files,
     cmn_mem_bits,
     cmn_mem_is_large,
+    cmn_mem_tag_of,
     discover_rtl,
     emit_report,
     is_cmn_mem_module,
     is_placeholder_path,
     large_cmn_mem_lib_files,
+    parse_cmn_mem_tag,
     print_tool_versions,
     read_cmn_mem_threshold_bits,
     rel,
@@ -217,6 +219,11 @@ def main() -> int:
     if skip:
         print(f"synth-check: blackbox.yml modules treated as -lib: {sorted(skip)}")
     print(f"synth-check: ub_cmn_mem_1r1w blackbox threshold={thresh} bits")
+    print(
+        "synth-check: variant tag d<DEPTH>w<WIDTH>[m<WMASK_W>] "
+        "(e.g. d512w512m64, d64w64m16); bits=DEPTH*WIDTH; "
+        f"full synth only ≤ {thresh} bits (includes d64w64m16)"
+    )
     if not modules:
         print("synth-check: no PRODUCT modules; PASS")
         return emit_report("synth", [])
@@ -224,8 +231,13 @@ def main() -> int:
         if unit.module in skip:
             print(f"synth-check skip top {unit.module}: listed in blackbox.yml (used as -lib)")
             continue
-        if is_cmn_mem_module(unit.module) and cmn_mem_is_large(unit.file, thresh=thresh):
-            bits = cmn_mem_bits(unit.file)
+        extra = parse_cmn_mem_tag(cmn_mem_tag_of(unit.module) or "") or {
+            "module": unit.module
+        }
+        if is_cmn_mem_module(unit.module) and cmn_mem_is_large(
+            unit.file, extra, thresh=thresh
+        ):
+            bits = cmn_mem_bits(unit.file, extra)
             print(
                 f"synth-check skip full synth {unit.module}: large ub_cmn_mem_1r1w "
                 f"variant ({bits} bits > {thresh}); parents blackbox this cell"

@@ -57,13 +57,16 @@ def build(m: Circuit, test_hooks: int = 0) -> None:
     word = crc_word.out()
     recv = recv_q.out()
     done_q = done.out()
-    any_diff = bits_or_reduce(
-        m, word.slice(lsb=0, width=CRC_W) ^ recv.slice(lsb=0, width=CRC_W)
-    )
+    crc30_diff = word.slice(lsb=0, width=CRC_W) ^ recv.slice(lsb=0, width=CRC_W)
+    rsvd = recv.slice(lsb=31, width=1)
+    w31 = word.slice(lsb=31, width=1)
+    # Reserved crc_recv[31] is ignored (SPEC). Read it against crc_word[31]
+    # (hardwired 0) so Verilator -Wall sees the bit, then AND with that
+    # registered 0 so the compare is unchanged.
+    any_diff = bits_or_reduce(m, crc30_diff) | (rsvd & w31)
     cmp_ok = ~any_diff
     cmp_fail = any_diff
     cmp_ef = recv.slice(lsb=30, width=1)
-    _ = recv.slice(lsb=31, width=1)  # rsvd: consume for -Wall
 
     ok_q.set(cmp_ok, when=done_q)
     fail_q.set(cmp_fail, when=done_q)

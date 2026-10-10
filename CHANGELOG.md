@@ -4,6 +4,7 @@
 
 ### Added
 
+- Leaf batch 1 uvm-python TBs (`tb/` only): `ub_rst_sync`, `ub_pyc_rst_adapt`, `ub_pcs_lane_dist` / `ub_pcs_lane_dedist` / collect, `ub_dll_bcrc` / `ub_dll_bcrc_check`. Dual `TEST_HOOKS=0/1` filelists; goldens via `tb/vibe_uvm/golden.py` (`model/` then `tb/models`) plus an independent SPEC-formula lane map and CRC30. Dist/collect score every lane bit against that pair (not a dist↔dedist self-loop). Filelist prefers SPEC §2.2 `ub_pcs_lane_dist_xN` netlists, falls back to the parameterized leaf. `TEST_HOOKS=1` prefers `rtl/<block>/hooks/`. Whitelist `ub_rst_sync` has no hooks copy. Wrappers match PRODUCT (no `tb_*`). Scrambler leaves not in this batch (SPEC §13).
 - M1 RTL leaf batch 1 (pyCircuit): whitelist `ub_rst_sync`; generated `ub_pyc_rst_adapt`, `ub_pcs_scrambler` / `ub_pcs_descrambler`, `ub_pcs_lane_dist` / `ub_pcs_lane_dedist`, `ub_dll_bcrc` / `ub_dll_bcrc_check`. PRODUCT at `rtl/<block>/<module>.v` and HOOKS at `rtl/<block>/hooks/<module>.v` (SPEC §2.2 / CODING_STYLE §5 / §11). SPEC §10 lists no hook ports on these leaves (HOOKS ≡ PRODUCT). Whitelist `ub_rst_sync.sv` has no hooks copy.
 - `TOOLCHAIN.lock` + `tb/` uvm-python 骨架、golden-model 接口、双网表自检入口（叠在 M1 SPEC 上；不改 `rtl/` / SPEC 类文档）。
 - TB 模型按 CODING_STYLE §5 命名：`ub_dll_bcrc` 已按 SPEC §2.6 写全；`ub_pcs_scrambler` 已按已定项实现，抽头与 `AMCTL.LID`→种子为必填参数（SPEC §13，无默认）；`ub_pcs_lane_dist` 已实现。无 LMB/LTB golden。

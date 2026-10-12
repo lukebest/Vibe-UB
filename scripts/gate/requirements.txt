@@ -1,2 +1,3 @@
 # Gate scripts. Keep this tiny; TB pins stay in tb/requirements.txt.
 PyYAML==6.0.2
+click==8.1.8

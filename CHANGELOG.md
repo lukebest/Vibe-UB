@@ -26,7 +26,7 @@
 
 ### Changed
 
-- `docs/arch/mem/contracts/`：Xia 裁定 2026-10-12（共用 4 bit 非法码、illegal 时其余输出清零、原因优先级、`desc_kind`、`out_ready` 反压、`in_ready` 复位后首拍、时钟域、L0 `comb_budget_ns: 5.0`、YAML 机读头；D-05 项改暂缓；TECTE/MAPTE 条目尺寸、`lvl`、`ctx_mapt_bb_sz`；按 Q-A11，2 MB / 1 GB 页表块在 `ub_mem_ptw_desc_dec` 合法，`ILL_MAP_2MB` 只对应 TCTE 范围表颗粒度）。
+- `docs/arch/mem/contracts/`：Xia 裁定 2026-10-12（共用 4 bit 非法码、illegal 时其余输出清零、原因优先级、`desc_kind`、`out_ready` 反压、`in_ready` 复位后首拍、时钟域、L0 `comb_budget_ns: 5.0`、YAML 机读头；D-05 项改暂缓；TECTE/MAPTE 条目尺寸、`lvl`、`ctx_mapt_bb_sz`；按 Q-A11，2 MB / 1 GB 页表块合法，`ILL_MAP_2MB` 只对应 TCTE 范围表颗粒度；`ub_mem_ptw_desc_dec` 增加 `desc_lvl[1:0]` 与各级允许的描述符类型表）。
 - SPEC §2.6：BCRC `last` 拍给出 `crc_word` 后 CRC 寄存器回到初值全 1；块首未带 `start` 的 `valid_in` 按全 1 计入，块中间未带 `start` 的 `valid_in` 接着当前 CRC 折入。上游仍应在每块首 flit 给 `start`。
 - synth-check：按 cell 类型（`$adff`/`$adffe`/`$dffsr` 等）识别异步复位触发器，对所有模块生效，不算 LATCH（豁免只作用于 LATCH，不跳过该行的 MULTI_DRIVE / COMBO_LOOP）。SCC 只对组合单元建图。真 latch、真组合环、异步 FF+真组合环三个假网表仍报失败。
 - SPEC §2.2：pyCircuit 源码目录与导入（已定）——叶子 `pycircuit/<层>/<leaf>.py`，门禁只扫该层 `*.py`（跳过 `lib/` 与 `__init__.py`）；同层 helper 在 `pycircuit/<层>/lib/` 不出网表；导入根 `pycircuit/`（`from <层>.lib import ...`），门禁 / `emit_rtl.py` / tb 把 `pycircuit/` 置于 `PYTHONPATH` 最前；仓库根目录不进 `sys.path`；工具按脚本路径调用。门禁细则见 `docs/rules/verif_gate.md`（PR #33）。架构 Xia 与守门人验证 2026-10-10 共同定。

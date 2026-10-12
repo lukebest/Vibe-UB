@@ -146,7 +146,7 @@ module ub_mem_ptw_hooks_harness (
   // Decoder ports are tied here so flatten does not create a tap_*
   // alias. ub_mem_ptw_hooks.sby `connect -set` after flatten replaces
   // these ties with the DUT-side u_desc_dec nets
-  // (pyc_instance_143/144/145 = out_valid/desc_v/desc_kind).
+  // (pyc_instance_147/148/149 = out_valid/desc_v/desc_kind).
   ub_mem_ptw_hooks_inv u_hooks_inv (
     .core_clk(core_clk),
     .rst_pyc(rst_pyc),

@@ -54,15 +54,15 @@ flatten
 # Yosys 0.33 drops dotted refs and ignores bind. After flatten the
 # cut drives the DUT-side instance nets (pycc names in #48
 # rtl/mem/hooks/ub_mem_ptw.v u_desc_dec port map):
-#   out_valid -> pyc_instance_143
-#   desc_v    -> pyc_instance_144
-#   desc_kind -> pyc_instance_145
+#   out_valid -> pyc_instance_147
+#   desc_v    -> pyc_instance_148
+#   desc_kind -> pyc_instance_149
 # Harness ties those inv ports to 0; -set replaces the ties.
 # Do not introduce tap_* aliases — connect -set unsets the lhs
 # driver and would disconnect a tap_* net from the inv port.
-connect -set \u_hooks_inv.dec_out_valid \u_dut.pyc_instance_143
-connect -set \u_hooks_inv.desc_v \u_dut.pyc_instance_144
-connect -set \u_hooks_inv.desc_kind \u_dut.pyc_instance_145
+connect -set \u_hooks_inv.dec_out_valid \u_dut.pyc_instance_147
+connect -set \u_hooks_inv.desc_v \u_dut.pyc_instance_148
+connect -set \u_hooks_inv.desc_kind \u_dut.pyc_instance_149
 opt
 memory -nomap
 opt -purge

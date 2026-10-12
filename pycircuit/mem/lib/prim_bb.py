@@ -3,8 +3,7 @@
 This @module exists so pyCircuit can emit a named instance with the PR #21
 port list. Its body is a type-check stub (rdata tied to 0) and is stripped
 from the PRODUCT / HOOKS netlist by ``pycircuit/emit.py``. The real leaf
-comes from design-B PR #21; until that variant is on main, lint/sim uses
-``tb/mem/lint_placeholder/ub_cmn_mem_1r1w_d64w109.v``.
+comes from design-B PR #21 (working-tree ``rtl/cmn/`` only; no local copy).
 """
 
 from __future__ import annotations

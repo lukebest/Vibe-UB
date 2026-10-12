@@ -1,5 +1,5 @@
 // Directed PRODUCT smoke: hit / miss / fill / overwrite / replace / bypass /
-// inv-all / inv-cond. Uses the lint placeholder for ub_cmn_mem_1r1w_d64w109.
+// inv-all / inv-cond. Instantiates ub_cmn_mem_1r1w_d64w109 from PR #21.
 // Formal one-hot / no-duplicate assertions are owned by 验证-C (no formal/mem/).
 
 module ub_mem_tlb_inv_smoke_tb;

@@ -5,14 +5,13 @@
 #   * tlb HOOKS has §10 obs + mem_tlb_wN backdoors; inv HOOKS has no tb_*
 #   * pycc regen is byte-identical for all four netlists
 #   * Verilator lint (PRODUCT + HOOKS)
-#   * Yosys synth (PRODUCT, primitive black-boxed)
+#   * Yosys synth (PRODUCT)
 #   * Yosys equiv: PRODUCT ports only (HOOKS tb_test_mode=0, bd inputs tied)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RTL="$ROOT/rtl/mem"
 HOOKS="$RTL/hooks"
-PH="$ROOT/tb/mem/lint_placeholder/ub_cmn_mem_1r1w_d64w109.v"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/ub_mem_check.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -121,7 +120,6 @@ echo "=== verilator lint PRODUCT ==="
 verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
   -Wno-PINCONNECTEMPTY \
   -I"$PYC_INC" \
-  "$PH" \
   "$RTL/ub_mem_tlb.v"
 verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
   -I"$PYC_INC" \
@@ -130,18 +128,16 @@ echo "=== verilator lint HOOKS ==="
 verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
   -Wno-PINCONNECTEMPTY \
   -I"$PYC_INC" \
-  "$PH" \
   "$HOOKS/ub_mem_tlb.v"
 verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
   -I"$PYC_INC" \
   "$HOOKS/ub_mem_inv.v"
 echo "lint ok"
 
-echo "=== yosys synth PRODUCT (primitive black-box) ==="
+echo "=== yosys synth PRODUCT ==="
 strip_include "$RTL/ub_mem_tlb.v" "$WORK/tlb_prod.v"
 strip_include "$RTL/ub_mem_inv.v" "$WORK/inv_prod.v"
 cat > "$WORK/synth.ys" <<'YS'
-read_verilog -lib ph.v
 read_verilog pyc_reg.v
 read_verilog tlb_prod.v
 hierarchy -check -top ub_mem_tlb
@@ -153,7 +149,6 @@ check -assert
 stat
 select -assert-none t:$dlatch t:$adff
 YS
-cp "$PH" "$WORK/ph.v"
 ( cd "$WORK" && yosys -q -I "$PYC_INC" -s synth.ys )
 cat > "$WORK/synth_inv.ys" <<'YS'
 read_verilog pyc_reg.v

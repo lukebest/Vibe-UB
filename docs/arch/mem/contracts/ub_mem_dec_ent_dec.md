@@ -1,16 +1,15 @@
 ```yaml
 leaf: ub_mem_dec_ent_dec
-parent: ub_mem_decoder
+parent: ub_mem_dec_walk
 clock:
   name: core_clk
   period_ns: 12.412
   reset: rst_pyc
   reset_type: sync
 latency:
-  kind: combinational
-  cycles: 0
-  max_cycles: 0
-comb_budget_ns: 5.0
+  kind: registered
+  cycles: 1
+  max_cycles: 1
 ports:
   - {name: core_clk, dir: in, width: 1, desc: 单时钟}
   - {name: rst_pyc, dir: in, width: 1, desc: 同步复位，pyc_reg 原生极性}
@@ -46,13 +45,13 @@ status: draft
 | 项 | 值 |
 | --- | --- |
 | 叶子 | `ub_mem_dec_ent_dec` |
-| 父级例化点 | `ub_mem_decoder`。第一波 L0 表在内存（D20 第 5 条），本叶子接 `ub_mem_dec_walk` 读回的原始大项；完整方案下同一叶子也接 L1 读回 |
+| 父级例化点 | `ub_mem_dec_walk`（C-D1：L0 表在内存，片上 `ub_mem_dec_l0` 已撤）。输入为遍历器已寄存的存储器读回；L0 与 L1 共用 |
 | 规范 | UB Base Spec Rev 2.0 §9.5.1；译码器表项格式由项目自定（D20 第 8 条） |
 | 微架构 | [UARCH.md](../UARCH.md) §5.5、§6.4 |
 | 裁定 | D20 S-01 (b)；接口补丁见 [README.md](README.md) §4（Xia 裁定 2026-10-12） |
 | 时钟域 | 单一 `core_clk`，同步复位 `rst_pyc`，目标周期 12.412 ns（`F_CORE` 80.57 MHz，SPEC §4.1），时序估计走 Sky130 代理；本叶子内部不做 CDC。**Xia 裁定 2026-10-12。** |
 
-User 侧译码器表项解码叶子。L0 PTE、L0 范围项、L1 PTE 共用。YAML `latency` / `comb_budget_ns` 记录 L0 组合主路径；L1 寄存 1 拍见 §3。
+User 侧译码器表项解码叶子。L0 PTE、L0 范围项、L1 PTE 共用。C-D1 之后 L0 与 L1 都是寄存 1 拍；输入为 `ub_mem_dec_walk` 已寄存的存储器读回。**Xia 裁定 2026-10-12。**
 
 ---
 
@@ -98,8 +97,7 @@ User 侧译码器表项解码叶子。L0 PTE、L0 范围项、L1 PTE 共用。YA
 ## 3. 握手与时序
 
 - 输入、输出都是同时钟 valid/ready（SPEC §3.1）。
-- **L0（`src_l1=0`）预算 C：** 现场组合解码，延迟 **0** 拍，上界 **0** 拍。`comb_budget_ns: 5.0`：12.412 ns 周期内、输入到输出的最大延迟；周期余量留给其前的存储器读出通路与其后的遍历器寄存器建立时间。**Xia 裁定 2026-10-12。** `out_valid` 随 `in_valid` 同拍；`in_ready` 跟随 `out_ready`。
-- **L1（`src_l1=1`）预算 R：** 读回后先寄存，延迟 **1** 拍，上界 **1** 拍。
+- L0 与 L1 预算 **R**：输入为遍历器已寄存的存储器读回。成交到 `out_valid` 为 **1** 拍，上界 **1** 拍。与其余五片解码叶子相同。**Xia 裁定 2026-10-12（C-D1）。**
 - `in_valid==1` 且 `in_ready==0` 时，`raw` / `src_l1` / `pte_sel` 保持。
 - `out_valid==1` 且 `out_ready==0` 时，`out_valid` 与全部输出保持。叶子兑现反压。**Xia 裁定 2026-10-12。**
 - 复位撤销后的 `in_ready`：SPEC §3.1「复位撤销后，`valid` 与 `ready` 的首拍值：**待定**（建议 `valid=0`，`ready` 在下游能收时为 1）。」该句未闭合。按 Xia 裁定 2026-10-12：撤销后第一拍 `in_ready` 可以为 0；从第二拍起，输出侧未停时 `in_ready=1`。
@@ -127,9 +125,7 @@ User 侧译码器表项解码叶子。L0 PTE、L0 范围项、L1 PTE 共用。YA
 
 ## 5. 复位值
 
-`rst_pyc` 有效期间寄存输出：`in_ready=0`，`out_valid=0`，`dent_is_range=0`，`dent_pte_v=0`，`dent_rng_v=0`，`dent_rng_base=0`，`dent_rng_limit=0`，`dent_rng_last=0`，`dent_l1_base=0`，`dent_eid=0`，`dent_token_id=0`，`dent_token_value=0`，`dent_uba_base=0`，`dent_attr=0`，`dent_illegal=0`，`dent_ill_cause=0`。
-
-L0 组合路径随输入。上游在复位期间保持 `in_valid=0`、`raw=0` 时，组合解码输出为 0。
+`rst_pyc` 有效期间：`in_ready=0`，`out_valid=0`，`dent_is_range=0`，`dent_pte_v=0`，`dent_rng_v=0`，`dent_rng_base=0`，`dent_rng_limit=0`，`dent_rng_last=0`，`dent_l1_base=0`，`dent_eid=0`，`dent_token_id=0`，`dent_token_value=0`，`dent_uba_base=0`，`dent_attr=0`，`dent_illegal=0`，`dent_ill_cause=0`。
 
 ---
 
@@ -140,13 +136,11 @@ L0 组合路径随输入。上游在复位期间保持 `in_valid=0`、`raw=0` �
 | `AP_DENT_CLK` | 只存在 `core_clk` 与同步 `rst_pyc`；叶子内部不做 CDC。 |
 | `AP_DENT_HS_IN` | `in_valid && in_ready` 的拍收下 `raw`、`src_l1`、`pte_sel`；未成交前三者保持。 |
 | `AP_DENT_RDY` | `in_ready` 不组合依赖本拍 `in_valid`。 |
-| `AP_DENT_LAT_L0` | `src_l1=0` 时，`out_valid` 与 `in_valid` 同拍，延迟为 0。 |
-| `AP_DENT_COMB_BUDGET` | `src_l1=0` 时输入到输出延迟 ≤ 5.0 ns（周期 12.412 ns）。**Xia 裁定 2026-10-12。** |
-| `AP_DENT_LAT_L1` | `src_l1=1` 且成交后，恰好 1 拍 `out_valid=1`；间隔 ≤ 1 拍。 |
+| `AP_DENT_LAT1` | L0 与 L1 成交后恰好 1 拍 `out_valid=1`；间隔 ≤ 1 拍。**Xia 裁定 2026-10-12（C-D1）。** |
 | `AP_DENT_HS_OUT` | `out_valid && out_ready` 的拍下游收下整束。 |
 | `AP_DENT_OUT_HOLD` | `out_valid && !out_ready` 期间，`out_valid` 与全部输出保持。**Xia 裁定 2026-10-12。** |
 | `AP_DENT_IN_RDY_RST` | 复位撤销后第一拍 `in_ready` 可以为 0；从第二拍起，输出侧未停时 `in_ready=1`。**Xia 裁定 2026-10-12。** |
-| `AP_DENT_RST` | `rst_pyc` 有效期间 §5 各寄存输出为其复位值。 |
+| `AP_DENT_RST` | `rst_pyc` 有效期间 §5 各输出为其复位值。 |
 | `AP_DENT_ILL_EQ` | `dent_illegal == (dent_ill_cause != 0)`。**Xia 裁定 2026-10-12。** |
 | `AP_DENT_ILL_ZERO` | `dent_illegal=1` 的 `out_valid` 拍，除 `dent_illegal` / `dent_ill_cause` 外解码输出为 0。**Xia 裁定 2026-10-12。** |
 | `AP_DENT_ILL_PRI` | 多个非法原因同时成立时，`dent_ill_cause` 取最小非 0 码。**Xia 裁定 2026-10-12。** |

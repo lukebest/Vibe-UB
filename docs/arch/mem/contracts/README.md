@@ -39,7 +39,7 @@ D20 S-01 (b) 覆盖 C 线表项位布局。UARCH 把每一种规范表项做成�
 | 叶子 | 父级例化点 | 契约 | 原始表项（桩口可见宽度） |
 | --- | --- | --- | --- |
 | `ub_mem_ptw_desc_dec` | `ub_mem_ptw`（TLB 回填 / 页表遍历） | [ub_mem_ptw_desc_dec.md](ub_mem_ptw_desc_dec.md) | 64（一次 8 B 描述符读） |
-| `ub_mem_dec_ent_dec` | `ub_mem_decoder`（接 `ub_mem_dec_walk`；第一波 L0 在内存） | [ub_mem_dec_ent_dec.md](ub_mem_dec_ent_dec.md) | L0 大项 512；L1 见 §5 暂缓 |
+| `ub_mem_dec_ent_dec` | `ub_mem_dec_walk`（C-D1：L0 在内存；输入为已寄存的读回） | [ub_mem_dec_ent_dec.md](ub_mem_dec_ent_dec.md) | L0 大项 512；L1 见 §5 暂缓 |
 | `ub_mem_tecte_dec` | `ub_mem_cfg_lkup`（CSR 写 TECT） | [ub_mem_tecte_dec.md](ub_mem_tecte_dec.md) | 512（TECTE 64 B） |
 | `ub_mem_tcte_dec` | `ub_mem_ctx_lkup`（TCT 缓存填充） | [ub_mem_tcte_dec.md](ub_mem_tcte_dec.md) | 512（一次 64 B 读） |
 | `ub_mem_l1tct_dec` | `ub_mem_ctx_lkup`（两级 TCT） | [ub_mem_l1tct_dec.md](ub_mem_l1tct_dec.md) | 64（一次 8 B 读） |
@@ -83,7 +83,7 @@ D20 S-01 (b) 覆盖 C 线表项位布局。UARCH 把每一种规范表项做成�
 4. **`desc_kind[1:0]`。** 0 = invalid，1 = table，2 = block，3 = page。
 5. **`out_ready`。** 每片叶子保留该口。第一波遍历器可以把 `out_ready` Tied 为 1。叶子在 `out_valid && !out_ready` 期间保持 `out_valid` 与全部输出稳定。各叶子接口断言 `AP_<LEAF>_OUT_HOLD` 写明本条。
 6. **复位撤销后的 `in_ready`。** SPEC §3.1 原文：「复位撤销后，`valid` 与 `ready` 的首拍值：**待定**（建议 `valid=0`，`ready` 在下游能收时为 1）。」该句未闭合。本目录按下列规则：复位撤销后的第一拍 `in_ready` 可以为 0；从第二拍起，在输出侧未停（`out_ready=1` 或本拍无未决输出）时 `in_ready=1`。
-7. **L0 组合预算。** `ub_mem_dec_ent_dec` 的 L0 路径 `comb_budget_ns: 5.0`（12.412 ns 周期内、输入到输出的最大延迟；周期余量留给其前的存储器读出通路与其后的遍历器寄存器建立时间）。L1 路径仍为寄存 1 拍。**Xia 裁定 2026-10-12。**
+7. **译码器解码时序（C-D1）。** `ub_mem_dec_ent_dec` 的 L0 与 L1 都是寄存 1 拍，与其余五片相同。输入为 `ub_mem_dec_walk` 已寄存的存储器读回。不再写 `comb_budget_ns`。**Xia 裁定 2026-10-12。**
 8. **条目尺寸（依据 UB-MEM 第 9 章）。** `ub_mem_tecte_dec.raw` = 512（TECTE 64 B）。`ub_mem_mapte_dec.raw` = 256，每一级皆然（MAPTE 32 B）。`lvl` 宽 2 bit，合法 0..3（4 KB 粒度多级 MAPT 最多 4 级；2 MB 粒度的 3 级形式首轮延后）。延后的「2 MB 映射粒度」指 TCTE 范围表颗粒度选取 2 MB，`ub_mem_tcte_dec` 报 `ILL_MAP_2MB`。`ctx_mapt_bb_sz` 是基块大小指数（4 KB × 2^n），合法 0..9（9 = 2 MB 基块）；10..15 报 `ILL_RSVD`。**Xia 裁定 2026-10-12，依据 UB-MEM 第 9 章条目尺寸。**
 9. **页表块描述符（Q-A11）。** UB-MEM 第 9 章未定义 MATT 页表描述符格式与块大小；TCTE.TGS 字段注记写明其位含义跟随体系结构。语义取 VMSAv8-64 4 KB 粒度。按 Q-A11，每个块拆成 4 KB TLB 项。`ub_mem_ptw_desc_dec` 保留输入 `desc_lvl[1:0]`（L0..L3，由 `ub_mem_ptw` 驱动，与 `in_valid` 同拍采样）。输入按编码类（`ENC_INVALID` / `ENC_TBL_PG` / `ENC_BLOCK`，公开面不写位值）与级交叉，共 12 格，验证按 `desc_lvl` × 编码类交叉。`ENC_TBL_PG`：L0–L2 为 table（`desc_kind=1`），L3 为 page（`desc_kind=3`）。`ENC_BLOCK`：L1 为 1 GB 块、L2 为 2 MB 块（`desc_kind=2`，`desc_illegal=0`）；L0 / L3 走翻译故障（`desc_v=0`，`desc_kind=0`，`desc_illegal=0`，`ILL_NONE`）。该叶子只输出块基址 `desc_addr` 与 `desc_kind`。父级 `ub_mem_ptw` 把块基址与请求 VA 的块内偏移合成 4 KB 对齐 PA，交给 TLB；`fill_*` 只携带 4 KB 页地址。`ILL_MAP_2MB` 只对应 TCTE 范围表颗粒度选取 2 MB。本条取代此前对 1 GB 块报 `ILL_UNSUP` 的行，以及此前对 L0 块 / L3 table 报 `ILL_RSVD` 的行。遍历器观测口走 SPEC §10。**Xia 裁定 2026-10-12。**
 
@@ -136,11 +136,11 @@ D20 S-01 (b) 覆盖 C 线表项位布局。UARCH 把每一种规范表项做成�
 | `leaf` | 字符串 | 叶子名，与文件名一致 |
 | `parent` | 字符串 | 父级例化点（主实例名） |
 | `clock` | 对象 | `{name: core_clk, period_ns: 12.412, reset: rst_pyc, reset_type: sync}` |
-| `latency` | 对象 | `{kind: registered \| combinational, cycles: <int>, max_cycles: <int>}`。记录第一波主路径 |
-| `comb_budget_ns` | 数 | 仅 `kind: combinational` 出现。`ub_mem_dec_ent_dec` L0 = `5.0`（Xia 裁定 2026-10-12） |
+| `latency` | 对象 | `{kind: registered \| combinational, cycles: <int>, max_cycles: <int>}`。记录第一波主路径。本批六片均为 `registered`，`cycles: 1`，`max_cycles: 1` |
+| `comb_budget_ns` | 数 | 仅 `kind: combinational` 出现。本批六片不写该键 |
 | `ports` | 列表 | 每项 `{name, dir, width, desc}`。`dir` 为 `in` / `out`。`width` 为整数、参数表达式（如 `EID_W`）、或 `unknown`（§6 未关的规范宽度） |
 | `params` | 列表 | 每项 `{name, default}`；无参数时为 `[]` |
 | `ill_cause_width` | 整数 | 恒为 `4` |
 | `status` | 字符串 | 恒为 `draft` |
 
-`ub_mem_dec_ent_dec` 的 YAML `latency` 写 L0 组合路径；L1 寄存 1 拍只出现在正文。`clock` / `rst_pyc` 同时列入 `ports`。`desc` 写字段级语义，不含原始表项内部切分。
+`clock` / `rst_pyc` 同时列入 `ports`。`desc` 写字段级语义，不含原始表项内部切分。

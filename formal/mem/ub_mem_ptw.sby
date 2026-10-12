@@ -39,12 +39,13 @@ smtbmc yices
 
 [script]
 read -formal ub_mem_ptw.v
-# Cut the private decoder: drop the inlined stub body, treat outputs
-# as free. Properties must not depend on any particular decode result.
-blackbox ub_mem_ptw_desc_dec
 read -formal ub_mem_ptw_if_props.sv
 read -formal ub_mem_ptw_harness.sv
+# read -formal keeps modules as $abstract until hierarchy derives them.
+# blackbox before hierarchy does not match. After hierarchy, cut the
+# private decoder so its outputs are unconstrained (any decode result).
 hierarchy -check -top ub_mem_ptw_harness
+blackbox ub_mem_ptw_desc_dec
 proc
 flatten
 opt

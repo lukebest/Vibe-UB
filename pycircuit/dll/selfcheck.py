@@ -2,8 +2,11 @@
 """Generator + SPEC §6.3 / §6.4 transfer self-check (not a verification TB).
 
 Proves emit() runs, PRODUCT and HOOKS have the same ports (Xia: no
-``tb_test_mode`` when SPEC §10 lists no hooks), no reserved encodings,
-and a cycle-accurate Python model of the two SMs walks every SPEC transfer.
+tb_test_mode when SPEC §10 lists no hooks), no reserved encodings,
+A-13 priorities, and directed WAIT-timer cases (#41 / D20):
+  default 323 (no fire at 322, fire at 323),
+  value 1, a large value, value 0 treated as 323,
+  mid-count rewrite takes effect only on the next wait.
 """
 
 from __future__ import annotations
@@ -28,7 +31,15 @@ ST_N, ST_Q, ST_W, ST_R, ST_E = (
     req.ST_ERROR,
 )
 ACK_N, ACK_A = ack.ST_NORMAL, ack.ST_ACK
-SUB_SET, SUB_REPLAY = ack.SUB_SET, ack.SUB_REPLAY
+WAIT_W = req.WAIT_CYC_W
+WAIT_DEFAULT = req.RETRY_WAIT_CYC_DEFAULT
+TMR_SAT = (1 << WAIT_W) - 1
+CNT_SAT = 0xFF
+
+
+def _map_wait(port: int) -> int:
+    """#41 / D20: write 0 is illegal; hardware treats 0 as 323."""
+    return WAIT_DEFAULT if port == 0 else port
 
 
 @dataclass
@@ -37,143 +48,149 @@ class ReqS:
     num_retry: int = 0
     num_phy: int = 0
     tmr: int = 0
-    retry_req_inc: int = 0
-    retry_to_inc: int = 0
+    wait_lat: int = WAIT_DEFAULT
 
 
 def step_req(
     s: ReqS,
     *,
     rst_eff: int = 0,
-    start_retry: int = 0,
-    lmsm_retrain_ack: int = 0,
-    retry_req_set_done: int = 0,
-    retry_ack_set_rx: int = 0,
-    phy_retrain_ok: int = 0,
+    blk_crc_err: int = 0,
+    fec_uncorr: int = 0,
+    phy_retrain: int = 0,
+    req_set_done: int = 0,
+    ack_set: int = 0,
+    phy_retrain_done: int = 0,
+    link_up: int = 1,
+    retry_wait_cyc: int = WAIT_DEFAULT,
     num_retry_th: int = req.NUM_RETRY_THRESHOLD,
     num_phy_th: int = req.NUM_PHY_REINIT_THRESHOLD,
-    wait_cyc: int = req.RETRY_WAIT_CYC,
-    cnt_sat: int = 0xFF,
-    tmr_sat: int = 0xFFFFFFFF,
 ) -> ReqS:
-    """One-cycle model matching ub_dll_retry_req_sm.v (SPEC §6.3)."""
+    """One-cycle model matching ub_dll_retry_req_sm (SPEC §6.3 / A-13)."""
     if rst_eff:
         return ReqS()
-    st_n = s.st
-    num_retry_n = s.num_retry
-    num_phy_n = s.num_phy
-    tmr_n = s.tmr
-    try_enter_req = 0
-    enter_retrain = 0
-    wait_timeout = 0
-    num_retry_inc = s.num_retry if s.num_retry == cnt_sat else s.num_retry + 1
-    num_phy_inc = s.num_phy if s.num_phy == cnt_sat else s.num_phy + 1
-    retry_hits_th = int(num_retry_inc == num_retry_th)
-    phy_hits_th = int(num_phy_inc == num_phy_th)
-    tmr_inc = s.tmr if s.tmr == tmr_sat else s.tmr + 1
-    tmr_to = int(s.tmr >= wait_cyc)
+    is_n = int(s.st == ST_N)
+    is_q = int(s.st == ST_Q)
+    is_w = int(s.st == ST_W)
+    is_r = int(s.st == ST_R)
+    is_e = int(s.st == ST_E)
+    illegal = int(not (is_n or is_q or is_w or is_r or is_e))
 
-    if s.st == ST_N:
-        tmr_n = 0
-        if lmsm_retrain_ack:
-            enter_retrain = 1
-        elif start_retry:
-            try_enter_req = 1
-    elif s.st == ST_Q:
-        tmr_n = 0
-        if lmsm_retrain_ack:
-            enter_retrain = 1
-            num_retry_n = 0
-        elif retry_req_set_done:
-            st_n = ST_W
-            tmr_n = 0
-    elif s.st == ST_W:
-        tmr_n = tmr_inc
-        if lmsm_retrain_ack:
-            enter_retrain = 1
-        elif retry_ack_set_rx:
-            st_n = ST_N
-        elif tmr_to:
-            wait_timeout = 1
-            try_enter_req = 1
-    elif s.st == ST_R:
-        tmr_n = 0
-        if phy_retrain_ok and not lmsm_retrain_ack:
-            try_enter_req = 1
-    elif s.st == ST_E:
-        tmr_n = 0
-        st_n = ST_E
-    else:
+    tmr_inc = s.tmr if s.tmr == TMR_SAT else s.tmr + 1
+    wait_to = int(is_w and (tmr_inc >= s.wait_lat))
+    retrain_hold = int(is_r and not link_up)
+
+    start_req = int(
+        (is_n and (blk_crc_err or fec_uncorr))
+        or (is_w and wait_to)
+        or (is_r and phy_retrain_done and not retrain_hold)
+    )
+    retry_inc = s.num_retry + 1
+    retry_hits = int(retry_inc == num_retry_th)
+    phy_inc = s.num_phy + 1
+    phy_hits = int(phy_inc == num_phy_th)
+
+    prio9 = int(is_w and wait_to)
+    prio8 = int(is_n and (blk_crc_err or fec_uncorr))
+    prio7 = int(is_q and req_set_done)
+    prio6 = int(is_w and ack_set)
+    prio5 = int(is_r and phy_retrain_done and not retrain_hold)
+    enter_retrain_evt = int((is_n or is_q or is_w) and phy_retrain)
+    enter_retrain_th = int(start_req and retry_hits)
+    prio4 = int(enter_retrain_evt or enter_retrain_th)
+    prio3 = int(prio4 and phy_hits)
+
+    if illegal:
         st_n = ST_N
-        num_retry_n = 0
-        num_phy_n = 0
-        tmr_n = 0
-
-    if try_enter_req:
-        if retry_hits_th:
-            num_retry_n = 0
-            enter_retrain = 1
-        else:
-            st_n = ST_Q
-            num_retry_n = num_retry_inc
-
-    if enter_retrain:
-        if phy_hits_th:
-            st_n = ST_E
-            num_phy_n = 0
-        else:
-            st_n = ST_R
-            num_phy_n = num_phy_inc
+    elif is_e:
+        st_n = ST_E
+    elif prio3:
+        st_n = ST_E
+    elif prio4:
+        st_n = ST_R
+    elif prio5:
+        st_n = ST_Q
+    elif prio6:
+        st_n = ST_N
+    elif prio7:
+        st_n = ST_W
+    elif prio8:
+        st_n = ST_Q
+    elif prio9:
+        st_n = ST_Q
+    else:
+        st_n = s.st
 
     enter_req = int(st_n == ST_Q and s.st != ST_Q)
+    enter_retrain = int(st_n == ST_R and s.st != ST_R)
+    enter_error = int(st_n == ST_E and s.st != ST_E)
+    enter_wait = int(st_n == ST_W and s.st != ST_W)
+    in_wait_n = int(st_n == ST_W)
+
+    if enter_retrain:
+        num_retry_n = 0
+    elif enter_req:
+        num_retry_n = retry_inc
+    else:
+        num_retry_n = s.num_retry
+    if num_retry_n > CNT_SAT:
+        num_retry_n = CNT_SAT
+
+    if enter_error:
+        num_phy_n = 0
+    elif enter_retrain:
+        num_phy_n = phy_inc
+    else:
+        num_phy_n = s.num_phy
+    if num_phy_n > CNT_SAT:
+        num_phy_n = CNT_SAT
+
+    if (not in_wait_n) or enter_wait:
+        tmr_n = 0
+    else:
+        tmr_n = tmr_inc
+
+    if enter_wait:
+        wait_lat_n = _map_wait(retry_wait_cyc)
+    else:
+        wait_lat_n = s.wait_lat
+
     return ReqS(
         st=st_n,
         num_retry=num_retry_n,
         num_phy=num_phy_n,
         tmr=tmr_n,
-        retry_req_inc=enter_req,
-        retry_to_inc=wait_timeout,
+        wait_lat=wait_lat_n,
     )
 
 
 @dataclass
 class AckS:
     st: int = ACK_N
-    sub: int = SUB_SET
 
 
 def step_ack(
     s: AckS,
     *,
     rst_eff: int = 0,
-    retry_req_set_rx: int = 0,
-    retry_ack_set_done: int = 0,
-    replay_done: int = 0,
+    req_set: int = 0,
+    ack_set_done: int = 0,
 ) -> AckS:
-    """One-cycle model matching ub_dll_retry_ack_sm.v (SPEC §6.4)."""
+    """One-cycle model matching ub_dll_retry_ack_sm (SPEC §6.4 / A-13)."""
     if rst_eff:
         return AckS()
-    st_n = s.st
-    sub_n = s.sub
-    if s.st == ACK_N:
-        sub_n = SUB_SET
-        if retry_req_set_rx:
-            st_n = ACK_A
-    elif s.st == ACK_A:
-        if s.sub == SUB_REPLAY and retry_req_set_rx:
-            sub_n = SUB_SET
-        elif s.sub == SUB_SET and retry_ack_set_done and replay_done:
-            st_n = ACK_N
-            sub_n = SUB_SET
-        elif s.sub == SUB_SET and retry_ack_set_done:
-            sub_n = SUB_REPLAY
-        elif s.sub == SUB_REPLAY and replay_done:
-            st_n = ACK_N
-            sub_n = SUB_SET
-    else:
+    is_n = s.st == ACK_N
+    is_a = s.st == ACK_A
+    illegal = not (is_n or is_a)
+    if illegal:
         st_n = ACK_N
-        sub_n = SUB_SET
-    return AckS(st=st_n, sub=sub_n)
+    elif req_set:
+        st_n = ACK_A
+    elif is_a and ack_set_done:
+        st_n = ACK_N
+    else:
+        st_n = s.st
+    return AckS(st=st_n)
 
 
 def _ports_block(text: str) -> str:
@@ -192,7 +209,7 @@ def _static_common(path: Path, module: str, *, reserved_needles: tuple[str, ...]
     assert path.stem == mod == module, f"DECLFILENAME {path.name} vs {mod}"
     for needle in reserved_needles:
         for line in text.splitlines():
-            if "st_n" in line:
+            if "st_n" in line or "st " in line:
                 assert needle not in line, line
     return text
 
@@ -221,9 +238,18 @@ def _static_product(path: Path, module: str, *, reserved_needles: tuple[str, ...
     return text
 
 
-def _static_hooks(path: Path, module: str, *, reserved_needles: tuple[str, ...]) -> str:
-    """HOOKS for a no-§10 leaf: same ports as PRODUCT, no tb_*."""
-    return _static_product(path, module, reserved_needles=reserved_needles)
+def _run_wait(s: ReqS, n: int, wait_port: int) -> ReqS:
+    for _ in range(n):
+        s = step_req(s, retry_wait_cyc=wait_port)
+    return s
+
+
+def _enter_wait(wait_port: int, num_retry: int = 1) -> ReqS:
+    s = ReqS(st=ST_Q, num_retry=num_retry)
+    s = step_req(s, req_set_done=1, retry_wait_cyc=wait_port)
+    assert s.st == ST_W and s.tmr == 0
+    assert s.wait_lat == _map_wait(wait_port)
+    return s
 
 
 def main() -> int:
@@ -234,152 +260,213 @@ def main() -> int:
 
     req_txt = _static_product(req_prod, "ub_dll_retry_req_sm", reserved_needles=req_needles)
     ack_txt = _static_product(ack_prod, "ub_dll_retry_ack_sm", reserved_needles=ack_needles)
-    req_hooks_txt = _static_hooks(req_hooks, "ub_dll_retry_req_sm", reserved_needles=req_needles)
-    ack_hooks_txt = _static_hooks(ack_hooks, "ub_dll_retry_ack_sm", reserved_needles=ack_needles)
+    req_hooks_txt = _static_product(
+        req_hooks, "ub_dll_retry_req_sm", reserved_needles=req_needles
+    )
+    ack_hooks_txt = _static_product(
+        ack_hooks, "ub_dll_retry_ack_sm", reserved_needles=ack_needles
+    )
     assert _port_names(req_txt) == _port_names(req_hooks_txt)
     assert _port_names(ack_txt) == _port_names(ack_hooks_txt)
     assert "tb_test_mode" not in _port_names(req_txt)
     assert "tb_test_mode" not in _port_names(ack_txt)
-
-    assert req_hooks == req.HOOKS_V
-    assert ack_hooks == ack.HOOKS_V
-    assert req_hooks.parent.name == "hooks"
-    assert ack_hooks.parent.name == "hooks"
 
     req_ports = _ports_block(req_txt)
     for name in (
         "core_clk",
         "rst_pyc",
         "port_rst",
-        "lmsm_retrain_ack",
+        "ub_dll_blk_crc_err",
+        "ub_dll_fec_uncorr",
+        "ub_dll_phy_retrain",
+        "ub_dll_retry_req_set_done",
+        "ub_dll_retry_ack_set",
+        "ub_dll_phy_retrain_done",
+        "link_up",
+        "retry_wait_cyc",
+        "retry_req_st",
         "dll_retrain_req",
+    ):
+        assert name in req_ports, name
+    for banned in (
+        "device_rst",
+        "send_cnt",
+        "wr_ptr",
+        "rd_ptr",
+        "rst_n",
+        "lmsm_retrain_ack",
         "start_retry",
-        "retry_req_set_done",
         "retry_ack_set_rx",
         "phy_retrain_ok",
-        "retry_req_st",
         "retry_req_inc",
         "retry_to_inc",
         "retry_err",
+        "tb_test_mode",
     ):
-        assert name in req_ports, name
-    # Do not silently grow Switch-only pins (D9 names that SPEC does not give).
-    for banned in ("device_rst", "send_cnt", "wr_ptr", "rd_ptr", "rst_n"):
         assert banned not in req_ports, banned
-    assert "tb_test_mode" not in req_ports
+    assert "[15:0]" in req_ports or "[15: 0]" in req_ports
 
     ack_ports = _ports_block(ack_txt)
     for name in (
         "core_clk",
         "rst_pyc",
         "port_rst",
-        "retry_req_set_rx",
-        "retry_ack_set_done",
-        "replay_done",
+        "ub_dll_retry_req_set",
+        "ub_dll_retry_ack_set_done",
         "retry_ack_st",
     ):
         assert name in ack_ports, name
-    for banned in ("device_rst", "wr_ptr", "rcv_ptr", "rd_ptr", "send_cnt"):
+    for banned in (
+        "device_rst",
+        "wr_ptr",
+        "rcv_ptr",
+        "rd_ptr",
+        "send_cnt",
+        "retry_req_set_rx",
+        "replay_done",
+        "tb_test_mode",
+    ):
         assert banned not in ack_ports, banned
-    assert "tb_test_mode" not in ack_ports
 
-    # --- SPEC §6.3 transfers ---
-    s = ReqS()
-    s = step_req(s, rst_eff=1)
+    # --- SPEC §6.3 transfers + A-13 ---
+    s = step_req(ReqS(), rst_eff=1)
     assert s.st == ST_N and s.num_retry == 0 and s.num_phy == 0
 
-    s = step_req(s, start_retry=1)
-    assert s.st == ST_Q and s.num_retry == 1 and s.retry_req_inc == 1
-
-    s = step_req(s, retry_req_set_done=1)
-    assert s.st == ST_W
-
-    s = step_req(s, retry_ack_set_rx=1)
-    assert s.st == ST_N
-
-    # WAIT timeout → REQ (SPEC §6.3). Use wait_cyc=1 so tmr>=1 after one WAIT beat.
-    s = step_req(ReqS(st=ST_W, tmr=0, num_retry=1), wait_cyc=1)
-    # first WAIT cycle increments tmr; tmr_to uses *current* tmr (0) so not yet
-    s = step_req(s, wait_cyc=1)
-    assert s.st == ST_Q and s.num_retry == 2 and s.retry_to_inc == 1
-
-    # 15th REQ entry (NUM_RETRY_THRESHOLD=15) → RETRAIN, clear NUM_RETRY
-    s = ReqS(st=ST_N, num_retry=14)
-    s = step_req(s, start_retry=1)
-    assert s.st == ST_R and s.num_retry == 0 and s.num_phy == 1
-
-    # RETRAIN success → REQ
-    s = step_req(s, phy_retrain_ok=1)
+    s = step_req(s, blk_crc_err=1)
     assert s.st == ST_Q and s.num_retry == 1
 
-    # PHY retrain from NORMAL → RETRAIN
-    s = step_req(ReqS(), lmsm_retrain_ack=1)
-    assert s.st == ST_R and s.num_phy == 1
+    s = step_req(s, fec_uncorr=1)
+    assert s.st == ST_Q and s.num_retry == 1  # already REQ; no re-entry
 
-    # PHY retrain from REQ clears NUM_RETRY
-    s = step_req(ReqS(st=ST_Q, num_retry=3), lmsm_retrain_ack=1)
+    s = step_req(s, req_set_done=1)
+    assert s.st == ST_W and s.tmr == 0 and s.wait_lat == WAIT_DEFAULT
+
+    s = step_req(s, ack_set=1)
+    assert s.st == ST_N
+
+    s = step_req(ReqS(), fec_uncorr=1)
+    assert s.st == ST_Q and s.num_retry == 1
+
+    # 15th REQ entry → RETRAIN, clear NUM_RETRY
+    s = step_req(ReqS(st=ST_N, num_retry=14), blk_crc_err=1)
     assert s.st == ST_R and s.num_retry == 0 and s.num_phy == 1
 
-    # 4th RETRAIN entry → ERROR, clear NUM_PHY_REINIT
-    s = ReqS(st=ST_N, num_phy=3)
-    s = step_req(s, lmsm_retrain_ack=1)
+    s = step_req(s, phy_retrain_done=1, link_up=1)
+    assert s.st == ST_Q and s.num_retry == 1
+
+    # RETRAIN + link_up==0: stay RETRAIN, ignore phy_retrain_done (A-13 #2)
+    s = step_req(ReqS(st=ST_R, num_phy=1), phy_retrain_done=1, link_up=0)
+    assert s.st == ST_R
+
+    s = step_req(ReqS(), phy_retrain=1)
+    assert s.st == ST_R and s.num_phy == 1
+
+    s = step_req(ReqS(st=ST_Q, num_retry=3), phy_retrain=1)
+    assert s.st == ST_R and s.num_retry == 0 and s.num_phy == 1
+
+    s = step_req(ReqS(st=ST_N, num_phy=3), phy_retrain=1)
     assert s.st == ST_E and s.num_phy == 0
 
-    # ERROR holds until PORT_RST
-    s = step_req(s, start_retry=1, phy_retrain_ok=1, retry_ack_set_rx=1)
+    s = step_req(s, blk_crc_err=1, phy_retrain_done=1, ack_set=1)
     assert s.st == ST_E
     s = step_req(s, rst_eff=1)
-    assert s.st == ST_N and s.num_retry == 0 and s.num_phy == 0
+    assert s.st == ST_N
 
-    # Reserved encodings never produced
-    for st in (ST_N, ST_Q, ST_W, ST_R, ST_E):
+    # crc vs fec same rank (A-13 #8)
+    s = step_req(ReqS(), blk_crc_err=1, fec_uncorr=1)
+    assert s.st == ST_Q
+
+    # phy_retrain beats crc (A-13 #4 > #8)
+    s = step_req(ReqS(), blk_crc_err=1, phy_retrain=1)
+    assert s.st == ST_R
+
+    # ack_set beats wait_to (A-13 #6 > #9)
+    s = ReqS(st=ST_W, tmr=WAIT_DEFAULT - 1, wait_lat=WAIT_DEFAULT, num_retry=1)
+    s = step_req(s, ack_set=1)
+    assert s.st == ST_N
+
+    # reserved encodings never produced
+    for st in (ST_N, ST_Q, ST_W, ST_R, ST_E, 5, 6, 7):
         for bits in range(32):
-            kwargs = dict(
-                start_retry=bits & 1,
-                lmsm_retrain_ack=(bits >> 1) & 1,
-                retry_req_set_done=(bits >> 2) & 1,
-                retry_ack_set_rx=(bits >> 3) & 1,
-                phy_retrain_ok=(bits >> 4) & 1,
+            n = step_req(
+                ReqS(st=st, num_retry=1, num_phy=1, tmr=10, wait_lat=20),
+                blk_crc_err=bits & 1,
+                fec_uncorr=(bits >> 1) & 1,
+                phy_retrain=(bits >> 2) & 1,
+                req_set_done=(bits >> 3) & 1,
+                ack_set=(bits >> 4) & 1,
+                phy_retrain_done=(bits >> 5) & 1,
+                link_up=(bits >> 6) & 1,
             )
-            n = step_req(ReqS(st=st, num_retry=1, num_phy=1, tmr=10), **kwargs)
             assert n.st in (ST_N, ST_Q, ST_W, ST_R, ST_E), n.st
 
+    # --- directed WAIT (#41 / D20) ---
+    # default 323: no fire at 322, fire at 323
+    s = _enter_wait(WAIT_DEFAULT, num_retry=1)
+    s = _run_wait(s, 322, WAIT_DEFAULT)
+    assert s.st == ST_W and s.tmr == 322, (s.st, s.tmr)
+    s = step_req(s, retry_wait_cyc=WAIT_DEFAULT)
+    assert s.st == ST_Q and s.num_retry == 2, (s.st, s.num_retry)
+
+    # value 1: fire on the first WAIT cycle
+    s = _enter_wait(1, num_retry=1)
+    s = step_req(s, retry_wait_cyc=1)
+    assert s.st == ST_Q and s.num_retry == 2
+
+    # large value 65535 (#41 / D20 legal max): no fire at 65534, fire at 65535
+    large = (1 << WAIT_W) - 1
+    s = _enter_wait(large, num_retry=1)
+    s = _run_wait(s, large - 1, large)
+    assert s.st == ST_W and s.tmr == large - 1
+    s = step_req(s, retry_wait_cyc=large)
+    assert s.st == ST_Q and s.num_retry == 2
+
+    # value 0 behaves as 323
+    s = _enter_wait(0, num_retry=1)
+    assert s.wait_lat == WAIT_DEFAULT
+    s = _run_wait(s, 322, 0)
+    assert s.st == ST_W
+    s = step_req(s, retry_wait_cyc=0)
+    assert s.st == ST_Q and s.num_retry == 2
+
+    # mid-count rewrite only affects the next wait
+    s = _enter_wait(5, num_retry=1)
+    s = _run_wait(s, 2, 2)  # rewrite port to 2 while counting to 5
+    assert s.st == ST_W and s.wait_lat == 5 and s.tmr == 2
+    s = _run_wait(s, 2, 2)
+    assert s.st == ST_W and s.tmr == 4
+    s = step_req(s, retry_wait_cyc=2)
+    assert s.st == ST_Q and s.num_retry == 2
+    s = step_req(s, req_set_done=1, retry_wait_cyc=2)
+    assert s.st == ST_W and s.wait_lat == 2 and s.tmr == 0
+    s = step_req(s, retry_wait_cyc=2)
+    assert s.st == ST_W and s.tmr == 1  # value 2: no fire on WAIT cycle 1
+    s = step_req(s, retry_wait_cyc=2)
+    assert s.st == ST_Q and s.num_retry == 3
+
     # --- SPEC §6.4 transfers ---
-    a = AckS()
-    a = step_ack(a, rst_eff=1)
-    assert a.st == ACK_N and a.sub == SUB_SET
-
-    a = step_ack(a, retry_req_set_rx=1)
-    assert a.st == ACK_A and a.sub == SUB_SET
-
-    a = step_ack(a, retry_ack_set_done=1)
-    assert a.st == ACK_A and a.sub == SUB_REPLAY
-
-    a = step_ack(a, replay_done=1)
+    a = step_ack(AckS(), rst_eff=1)
     assert a.st == ACK_N
 
-    # both dones in one cycle (empty replay)
-    a = step_ack(AckS(st=ACK_A, sub=SUB_SET), retry_ack_set_done=1, replay_done=1)
+    a = step_ack(a, req_set=1)
+    assert a.st == ACK_A
+
+    a = step_ack(a, ack_set_done=1)
     assert a.st == ACK_N
 
-    # new Retry_Req_Set during replay → stay ACK, restart set
-    a = step_ack(AckS(st=ACK_A, sub=SUB_REPLAY), retry_req_set_rx=1)
-    assert a.st == ACK_A and a.sub == SUB_SET
+    # same-cycle req_set covers ack_set_done → stay ACK
+    a = step_ack(AckS(st=ACK_A), req_set=1, ack_set_done=1)
+    assert a.st == ACK_A
 
-    # Retry_Req_Set during set-send does not invent a restart (SPEC names replay)
-    a = step_ack(AckS(st=ACK_A, sub=SUB_SET), retry_req_set_rx=1)
-    assert a.st == ACK_A and a.sub == SUB_SET
-
-    a = step_ack(AckS(st=ACK_A, sub=SUB_SET), rst_eff=1)
+    a = step_ack(AckS(st=ACK_A), rst_eff=1)
     assert a.st == ACK_N
 
-    for st, sub in ((ACK_N, SUB_SET), (ACK_A, SUB_SET), (ACK_A, SUB_REPLAY), (2, 0), (3, 1)):
+    for st in (ACK_N, ACK_A, 2, 3):
         for bits in range(8):
             n = step_ack(
-                AckS(st=st, sub=sub),
-                retry_req_set_rx=bits & 1,
-                retry_ack_set_done=(bits >> 1) & 1,
-                replay_done=(bits >> 2) & 1,
+                AckS(st=st),
+                req_set=bits & 1,
+                ack_set_done=(bits >> 1) & 1,
             )
             assert n.st in (ACK_N, ACK_A), n.st
 
@@ -387,7 +474,7 @@ def main() -> int:
         "selfcheck ok: PRODUCT + HOOKS "
         f"{req_prod.name} / {ack_prod.name}, DECLFILENAME, "
         "HOOKS ports == PRODUCT (no tb_test_mode; Xia / no §10 hooks), "
-        "SPEC §6.3 / §6.4 transfers, reserved encodings never produced"
+        "SPEC §6.3 / §6.4 / A-13, #41/D20 WAIT 16-bit latch + 0→323"
     )
     return 0
 

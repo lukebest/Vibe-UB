@@ -1,17 +1,9 @@
 #!/usr/bin/env python3
-"""Temporary emit for RETRY_*_SM leaves until PR #5 lands ``scripts/emit_rtl.py``.
+"""Emit RETRY_*_SM PRODUCT + HOOKS (pycircuit → pycc).
 
-PR #5 convention (``git show origin/cursor/rtl-m1-leaf-batch1-e5bb:pycircuit/emit.py``):
-  PRODUCT  rtl/<block>/<module>.v
-  HOOKS    rtl/<block>/hooks/<module>.v
+    PYTHONPATH=pycircuit python3 -P pycircuit/dll/emit.py
 
-    python3 pycircuit/dll/emit.py
-
-Do not add ``scripts/emit_rtl.py`` here — that file lands via PR #5 (merges
-first). After #5 is on main, merge main and register these leaves in
-``pycircuit/emit.py`` / ``scripts/emit_rtl.py`` (PRODUCT + HOOKS), then
-delete this wrapper.
-
+scripts/emit_rtl.py is the gate entry and calls the same generate().
 Do not put the repo root on PYTHONPATH (the toolchain package is also
 named pycircuit).
 """

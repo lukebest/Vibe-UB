@@ -1,0 +1,58 @@
+# ub_mem_ptw PRODUCT port formal (验证-C).
+# Stacked on PR #48. Bind / harness uses PRODUCT netlist ports only
+# (rtl/mem/ub_mem_ptw.v). No internals, no tb_* observation ports.
+#
+# ub_mem_ptw_desc_dec is a private leaf. The PRODUCT file inlines the
+# public placeholder stub; this job blackboxes that module so its
+# outputs are unconstrained. Every property must hold for ANY decode
+# result. No private bit-layout is read or written.
+#
+# pyc_reg.v lives in inc/ because #48 has no rtl/pyc_lib (same as
+# formal/mem/ub_mem_tlb.sby on the TLB formal branch).
+#
+# Default tasks (scripts/gate/formal.sh: cd formal/mem && sby -f --sequential):
+#   cover — reach event, MATT_WD complete, read+rsp, fill
+#   bmc   — port safety (Q-A08 / Q-C07)
+# prove is not a default task (k-induction is not needed for these
+# port properties; keep the gate under ~90 s).
+#
+# [files] are relative to this directory (sby_dir = formal/mem/).
+
+[tasks]
+cover
+bmc
+
+[options]
+cover:
+mode cover
+depth 16
+--
+bmc:
+mode bmc
+depth 16
+--
+
+[engines]
+# Same engine as formal/mem/ub_mem_tlb.sby. Walker has no $mem arrays;
+# yices at depth 16 is well inside the CI budget.
+smtbmc yices
+
+[script]
+read -formal ub_mem_ptw.v
+# Cut the private decoder: drop the inlined stub body, treat outputs
+# as free. Properties must not depend on any particular decode result.
+blackbox ub_mem_ptw_desc_dec
+read -formal ub_mem_ptw_if_props.sv
+read -formal ub_mem_ptw_harness.sv
+hierarchy -check -top ub_mem_ptw_harness
+proc
+flatten
+opt
+memory -nomap
+opt -purge
+
+[files]
+ub_mem_ptw_if_props.sv
+ub_mem_ptw_harness.sv
+inc/pyc_reg.v
+../../rtl/mem/ub_mem_ptw.v

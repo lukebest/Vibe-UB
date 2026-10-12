@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Directed PRODUCT smoke for ub_mem_ptw.
+# Directed HOOKS smoke for ub_mem_ptw (obs ports on HOOKS only).
 # Success cases swap in tb/mem/ub_mem_ptw_desc_dec_tb_model.v (TB protocol).
 # Stub cases keep the public placeholder (always translation-fault).
 set -euo pipefail
@@ -34,7 +34,7 @@ STUB_V="$WORK/ub_mem_ptw_desc_dec.v"
 "$PY" "$ROOT/scripts/gen_ptw_desc_dec_stub.py" --out "$STUB_V"
 grep -v '^`include "pyc_reg.v"' "$STUB_V" > "$WORK/stub_ninc.v"
 
-python3 - "$RTL/ub_mem_ptw.v" "$WORK/ub_mem_ptw_stripped.v" <<'PY'
+python3 - "$RTL/hooks/ub_mem_ptw.v" "$WORK/ub_mem_ptw_stripped.v" <<'PY'
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 text = open(src, encoding="utf-8").read()

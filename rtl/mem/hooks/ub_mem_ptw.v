@@ -191,7 +191,9 @@ module ub_mem_ptw (
   output flt_af,
   output evt_valid,
   output [3:0] evt_code,
-  output busy
+  output busy,
+  output [5:0] tb_mem_ptw_obs_st,
+  output tb_mem_ptw_obs_rd_pend
 );
 
 wire [47:0] addr_q; // pyc.name="addr_q"
@@ -338,6 +340,8 @@ wire [3:0] pyc_comb_34; // op=pyc.comb
 wire pyc_comb_348; // op=pyc.comb
 wire pyc_comb_35; // op=pyc.comb
 wire [3:0] pyc_comb_354; // op=pyc.comb
+wire pyc_comb_358; // op=pyc.comb
+wire [5:0] pyc_comb_359; // op=pyc.comb
 wire pyc_comb_36; // op=pyc.comb
 wire [47:0] pyc_comb_37; // op=pyc.comb
 wire [7:0] pyc_comb_38; // op=pyc.comb
@@ -368,6 +372,7 @@ wire [47:0] pyc_concat_118; // op=pyc.concat
 wire [47:0] pyc_concat_178; // op=pyc.concat
 wire [35:0] pyc_concat_308; // op=pyc.concat
 wire [35:0] pyc_concat_310; // op=pyc.concat
+wire [5:0] pyc_concat_357; // op=pyc.concat
 wire [8:0] pyc_concat_41; // op=pyc.concat
 wire [8:0] pyc_concat_42; // op=pyc.concat
 wire [6:0] pyc_concat_80; // op=pyc.concat
@@ -748,6 +753,10 @@ assign pyc_comb_144 = pyc_and_129;
 assign pyc_comb_145 = pyc_and_131;
 assign pyc_comb_146 = pyc_and_133;
 assign pyc_comb_147 = pyc_and_135;
+assign pyc_not_356 = (~pyc_comb_55);
+assign pyc_concat_357 = {pyc_comb_60, pyc_comb_59, pyc_comb_58, pyc_comb_57, pyc_comb_56, pyc_comb_55};
+assign pyc_comb_358 = pyc_not_356;
+assign pyc_comb_359 = pyc_concat_357;
 assign pyc_extract_85 = pyc_reg_84[0];
 assign pyc_extract_86 = pyc_reg_84[1];
 assign pyc_extract_87 = pyc_reg_84[2];
@@ -779,7 +788,6 @@ assign pyc_mux_274 = (pyc_comb_139 ? ctx_affd : affd_q);
 assign affd_q__next = pyc_mux_274;
 assign pyc_mux_355 = (pyc_comb_140 ? pyc_comb_20 : pyc_comb_136);
 assign evt_code_q__next = pyc_mux_355;
-assign pyc_not_356 = (~pyc_comb_55);
 assign raw_q = pyc_reg_75;
 assign pyc_extract_283 = addr_q[5:3];
 assign pyc_extract_284 = mem2host_rd_rsp_data[63:0];
@@ -1221,7 +1229,9 @@ assign flt_rd_err = pyc_comb_97;
 assign flt_af = pyc_comb_98;
 assign evt_valid = pyc_comb_60;
 assign evt_code = pyc_comb_136;
-assign busy = pyc_not_356;
+assign busy = pyc_comb_358;
+assign tb_mem_ptw_obs_st = pyc_comb_359;
+assign tb_mem_ptw_obs_rd_pend = pyc_comb_63;
 
 endmodule
 

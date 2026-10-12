@@ -1,7 +1,8 @@
 // Formal cut of the private decoder leaf. Public ports only.
 // Every output is $anyseq so properties must hold for ANY decode
-// result. No descriptor bit-layout. Replaces the inlined stub
-// after hierarchy (see ub_mem_ptw.sby).
+// result. No descriptor bit-layout. This file is the only
+// ub_mem_ptw_desc_dec definition the sby jobs read (never the
+// PRODUCT stub, never a module from the walker file).
 
 module ub_mem_ptw_desc_dec (
   input  wire        core_clk,

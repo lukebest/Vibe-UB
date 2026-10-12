@@ -6,10 +6,12 @@
 # Encoding values: SPEC §10 table (not yet on #50); interim values from
 # #48. Cite SPEC §10 in the localparam block.
 #
-# Decoder cut is fully free ($anyseq). #48 98818fc catch-all: desc_v=1
-# with kind not table/block/page → existing flt_xlat; any state with
-# no legal next falls back to st_idle. a_st_legal / a_rd_pend_st are
-# checked on that free cut (no contract assumes).
+# Decoder is only ub_mem_ptw_desc_dec_cut.sv (fully free $anyseq).
+# Never the PRODUCT stub, never a module inlined in the walker
+# file. `delete` before the cut drops a leftover stub if present.
+# #48 98818fc catch-all: desc_v=1 with kind not table/block/page →
+# existing flt_xlat; any state with no legal next falls back to
+# st_idle. a_st_legal / a_rd_pend_st are asserts-only (no contract).
 #
 # Default tasks: cover + bmc 24 + prove. prove PASS k=20 ~1s
 # (yices) after tracker/obs consistency asserts. Assert-only.
@@ -45,7 +47,6 @@ read -formal ub_mem_ptw.v
 read -formal ub_mem_ptw_if_props.sv
 read -formal ub_mem_ptw_hooks_inv.sv
 read -formal ub_mem_ptw_hooks_harness.sv
-hierarchy -check -top ub_mem_ptw_hooks_harness
 delete ub_mem_ptw_desc_dec
 read -formal ub_mem_ptw_desc_dec_cut.sv
 hierarchy -check -top ub_mem_ptw_hooks_harness

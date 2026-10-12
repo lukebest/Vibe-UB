@@ -14,6 +14,11 @@ forbidden_clocks:
 
 # Xia: ub_cmn_mem_1r1w (and <leaf>_<tag> variants) clock port is core_clk.
 clock_port_regex: "(^clk$|_clk$|^clock$)"
+
+# Locked pycc runtime cells keep their pin names (clk). Product leaves still
+# must use core_clk. Path match is by directory name, not a clock allowlist.
+library_primitive_dirs:
+  - rtl/pyc_lib
 reset_port_regex: "(^rst$|^rst_n$|_rst$|_rst_n$|^reset$|^rst_pyc$|^rst_n_sync$)"
 
 # Chip-level async reset entry (async assert, sync deassert).

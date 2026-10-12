@@ -1,8 +1,9 @@
 # Vibe-UB 传输层（TP）微架构草案 — B 线
 
-状态：**草案**，供 Xia / 船长评审。基线：repo `lukebest/Vibe-UB` main @ `124b1504`（PR #18）。
+状态：**草案**，供 Xia / 船长评审。基线：repo `lukebest/Vibe-UB` main @ `968747fb`（PR #59 契约补口；叠在 PR #18）。
+层间口以仓库内 `docs/arch/LAYER_CONTRACTS.md` §2（NW↔TP）、§3（TP↔TA）为权威；本文件只写微架构，不另造口名或口宽。
 规范只引用节号（UB Base Spec Rev 2.0 第 6 章，及 §5、§7、附录 B/D 的相关节）。
-记号：**【假设】** 表示本草案自定的值或做法，待确认；**【Xia】** 表示按 Xia 答复记录采纳；**【定】** 表示船长已定。
+记号：**【设计-B】** 表示本草案的微架构选择（设计-B 所有）；**【未知】** 表示契约或架构师未锁，本文件不填值；**【Xia】** 表示按 Xia 答复记录采纳；**【定】** 表示船长已定。
 
 ---
 
@@ -21,7 +22,7 @@
 ### 1.2 必做功能清单
 
 1. bypass：按 `ta2tp_bypass` / `tp2nw_bypass` 透传，保持 sop…eop 连续（§6.3）。
-2. RTP 发送：按器件级 MTU（1024/4096，8192 参数可选；附录 D.1.13）分段；加 16 B RTPH；分配 PSN（24 bit，模 16M）与 TPMSN（24 bit）；末包置 last（TPOpcode[7]）；保存副本到重传缓冲（§6.2.1、§6.4.1、§6.7.1.1.1）。
+2. RTP 发送：按器件级 MTU 分段（附录 D.1.13；本仓库未锁，标 **未知**，契约 §2）；加 16 B RTPH；分配 PSN（24 bit）与 TPMSN（24 bit）；DstTPN 24 bit（契约 §2）；末包置 last（TPOpcode[7]）；保存副本到重传缓冲（§6.2.1、§6.4.1、§6.7.1.1.1）。
 3. RTP 接收：按 DstTPN 查信道上下文；PSN 分三类（按序 / 重复 / 超前）；按序包净荷交 TA；操作收齐时按 TPMSN 顺序通知 TA；按 A 位与合并规则回 TPACK；超前包丢弃并回 TPNAK（§6.4.1、§6.4.2.2.1、§6.7.1.2）。
 4. RTP 响应处理：TPACK 累计确认释放重传缓冲；TPNAK 触发 GBN 重发；RSPST/RSPINFO 透传给 TA（§6.4.2、§6.7.1.1.2；TP-Q13【Xia】）。
 5. 超时重传：每信道一个 RTO 计时器；最大重传次数可设，超限报 B.2.1（§6.4.2.1；TP-Q11【Xia】）。
@@ -105,16 +106,17 @@ flowchart LR
   RTP --> ARBR
   CTP --> ARBR
   UTP --> ARBR
-  ARBR -- tp2ta_op_* / tp2ta_data_* / done/fail --> TA
+  ARBR -- tp2ta_op_* / tp2ta_data_* / msn_* / done/fail --> TA
+  TA -- ta2tp_cmp_* --> RTP
 ```
 
-TX 出口仲裁优先级【假设】：TPACK/TPNAK 响应 > 重传 > 新包 > bypass。理由：响应拖延会引发对端误超时；bypass 走单独 SL/VL 时仍可并行，冲突只在本口。若船长要求 bypass 绝对优先（优先通路规则），把 bypass 提到首位，代价是 RTP 响应延迟受 LS 流量影响（Q-7）。仲裁只在包边界切换。
+TX 出口仲裁优先级【设计-B】：TPACK/TPNAK 响应 > 重传 > 新包 > bypass。理由：响应拖延会引发对端误超时；bypass 走单独 SL/VL 时仍可并行，冲突只在本口。仲裁只在包边界切换。
 
 ---
 
 ## 4. 数据通路与流水
 
-通则：1 flit = 160 b（20 B），1 flit/拍，`core_clk`。每级之间用 valid/ready；凡接 `ub_cmn_mem_1r1w` 读口的级，读延迟 1 拍，后面跟 2 项 skid 缓冲以吸收下游 `ready` 回落。
+通则：数据口一律 160 b、1 flit/拍（契约 §2、§3），`core_clk`。LPH.CFG 4 bit：CTP=6、RTP=7、bypass=9（契约 §2）。每级之间用 valid/ready；凡接 `ub_cmn_mem_1r1w` 读口的级，读延迟 1 拍，后面跟 2 项 skid 缓冲以吸收下游 `ready` 回落。
 
 ### 4.1 bypass（第一波）
 
@@ -129,8 +131,8 @@ RX 对称：`nw2tp_*` 中 NLP 指向 TAH 的包直接送 `tp2ta_*`，`nw2tp_err`
 
 | 级 | 动作 | 存储访问 |
 | --- | --- | --- |
-| T0 | 收 TA 操作描述符（opcode、tassn、mode、长度、信道号） | — |
-| T1 | 读信道上下文（FF）：next_PSN、TPMSN、在途包数、在途字节、对端 CNA/LBF；窗口检查（包数 ≤ `TP_WIN_PKTS`，字节 ≤ 该信道份额）；不过则 `ta2tp_op_ready=0` | CTX 读 |
+| T0 | 收 TA 操作描述符（`ta2tp_opcode`、`ta2tp_tassn`、`ta2tp_mode`、`ta2tp_op_len`、`ta2tp_dcna[15:0]`、`ta2tp_bypass`；契约 §3） | — |
+| T1 | 读信道上下文（FF）：next_PSN、TPMSN、在途包数、在途字节、对端 CNA/LBF；窗口检查（发送窗见契约 §3 / §6.5.1.4.1）；不过则 `ta2tp_op_ready=0` | CTX 读 |
 | T2 | 分配 PSN、算本段长度（min(剩余, MTU)）、生成 RTPH（A 位：末包或每第 8 包置 1）；向重传缓冲申请 flit 槽（空闲链表/环形指针） | — |
 | T3 | 头 flit 拼装：RTPH 16 B + TA 头起始字节，后续 flit 移位对齐（RTPH 16 B 不整 20 B，需 4 B 错位寄存） | — |
 | T4 | 同拍两路：flit → TX 出口仲裁；flit → RTB 写口；末 flit 写描述符表并启动/续期 RTO | RTB 写、DSC 写、TMR 写 |
@@ -154,9 +156,9 @@ RX 对称：`nw2tp_*` 中 NLP 指向 TAH 的包直接送 `tp2ta_*`，`nw2tp_err`
 | X1 | 解 RTPH；DstTPN 低 log2(`NUM_TP_CH`) 位索引上下文，高位比对，失配丢包计数 | CTX 读 |
 | X2 | PSN 分类：等于 EPSN → 按序；落在 [EPSN−8M, EPSN−1] → 重复（丢净荷，回 TPACK）；其余 → 超前（乱序关：丢包、回 TPNAK；乱序开：查 BitMap） | BMP 读（可选） |
 | X3 | 按序：EPSN+1；TPMSN 检查（B.2.3 规则）；TPOpcode 检查（B.2.2）；长度检查（C.24）；净荷去 RTPH 后交 `tp2ta_data_*` | CTX 写 |
-| X4 | 末包且前序齐：发「操作收齐」通知（按 TPMSN 序）；ACK 请求入响应队列（A=1 立即；A=0 合并：8 包或 1 µs；ROL 末包等 TA 完成） | — |
+| X4 | 末包且前序齐：`tp2ta_msn_valid/ready` + `tp2ta_tpmsn[23:0]`（契约 §3）；ACK 请求入响应队列（A=1 立即；A=0 合并：8 包或 1 µs；ROL 末包等 `ta2tp_cmp_*` 成交） | — |
 
-TPACK/TPNAK 收向（发送端角色）：X1 后分支到 `ub_tp_retry`，按累计 PSN 释放描述符与 RTB 槽，停/续 RTO；RSPST/RSPINFO 经 `tp2ta_done/fail` 边带透传。
+TPACK/TPNAK 收向（发送端角色）：X1 后分支到 `ub_tp_retry`，按累计 PSN 释放描述符与 RTB 槽，停/续 RTO。发起端完成仍走 `tp2ta_done` / `tp2ta_fail`（带 `tp2ta_tassn`）。ROL 目标完成走 `ta2tp_cmp_*`；`ta2tp_cmp_rspst` / `ta2tp_cmp_rspinfo` 宽 **未知**（契约 §3）。
 
 ### 4.5 CTP
 
@@ -164,38 +166,38 @@ TX：T0→T2（插 1 B CTPH）→出口；RX：X0→X1（解 CTPH）→交 TA。
 
 ---
 
-## 5. 接口（按 `docs/arch/LAYER_CONTRACTS.md` §2、§3）
+## 5. 接口（权威：`docs/arch/LAYER_CONTRACTS.md` §2、§3）
 
-### 5.1 NW↔TP
+下列名与宽一律抄契约。数据口一律 160 b、1 flit/拍。CFG 编码 4 bit：CTP=6、RTP=7、bypass=9。
+
+### 5.1 NW↔TP（契约 §2）
 
 | 组 | 信号 | 握手 |
 | --- | --- | --- |
 | TX 数据 | `tp2nw_data[159:0]`、`tp2nw_valid/ready/sop/eop` | valid/ready；TP 源；NW 可停 |
-| TX 边带 | `tp2nw_sl[3:0]`、`tp2nw_nlp[2:0]`、`tp2nw_bypass` | 随 sop 有效，保持到 eop 成交 |
+| TX 边带 | `tp2nw_sl[3:0]`、`tp2nw_nlp[2:0]`、`tp2nw_bypass`、`tp2nw_dcna[15:0]`、`tp2nw_lbf[7:0]`、`tp2nw_rt[1:0]`、`tp2nw_cci[15:0]` | `valid` 期间保持到成交；NW 写入 NTH |
 | RX 数据 | `nw2tp_data[159:0]`、`nw2tp_valid/ready/sop/eop`、`nw2tp_err` | valid/ready；TP 可停（禁止 valid-only）；err 与 eop 同拍 |
-| RX 错误 | `nw2tp_icrc_err`（eop 对齐）、`nw2tp_drop`（1 拍） | — |
-| 控制/状态 | `nw2tp_flush`（电平）、`nw_link_up`（电平） | `nw_link_up=0` ⇒ TP 不发起新包 |
+| RX 错误 | `nw2tp_icrc_err`（eop 对齐；CFG9 保持 0，CFG7 与 eop 对齐）、`nw2tp_drop`（1 拍） | — |
+| 控制/状态 | `nw2tp_flush`（电平）、`nw_link_up`（电平） | `nw_link_up=0` ⇒ 无 TX 成交 |
 
-RTP 需要的 NTH 字段（DCNA、LBF、CCI、RT）在契约口上没有：见 §9 不一致项 M-1。【假设】补 `tp2nw_dcna[23:0]`、`tp2nw_lbf[7:0]`、`tp2nw_rt[1:0]`（随 sop），以及 RX 侧 `nw2tp_scna[23:0]`。
+RX 侧是否另开 `nw2tp_scna` / `nw2tp_cci`、以及 `nw2tp_data` 是否已剥 NTH：契约标 **未知**（Q-1）。24-b CNA 格式下 `tp2nw_dcna` 是否加宽：**未知**。
 
-### 5.2 TP↔TA
+### 5.2 TP↔TA（契约 §3）
 
 | 组 | 信号 | 握手 |
 | --- | --- | --- |
-| 提交描述符 | `ta2tp_op_valid/ready`、`ta2tp_opcode[7:0]`、`ta2tp_tassn[15:0]`、`ta2tp_mode[1:0]`、`ta2tp_bypass` | valid/ready，每拍 ≤1 个操作 |
+| 提交描述符 | `ta2tp_op_valid/ready`、`ta2tp_opcode[7:0]`、`ta2tp_tassn[15:0]`、`ta2tp_mode[1:0]`、`ta2tp_bypass`、`ta2tp_dcna[15:0]`、`ta2tp_op_len` | valid/ready，每拍 ≤1 个操作。`ta2tp_mode` 编码 **未知**；`ta2tp_op_len` 宽 **未知**（Q-8） |
 | 提交净荷 | `ta2tp_data[159:0]`、`ta2tp_valid/ready/sop/eop` | valid/ready |
-| 完成 | `tp2ta_done`、`tp2ta_fail`（互斥，1 拍，带 `tp2ta_tassn`）、`tp2ta_err`（eop 对齐） | 脉冲，TA 必须当拍收 |
-| 收向递交 | `tp2ta_op_*`、`tp2ta_data_*` | valid/ready |
+| 完成 | `tp2ta_done`、`tp2ta_fail`（互斥，1 拍，带 `tp2ta_tassn`）、`tp2ta_err`（最后净荷 eop 对齐） | 脉冲。`tp2ta_fail` 原因码 **未知**（Q-9） |
+| 整操作完成 | `tp2ta_msn_valid/ready`、`tp2ta_tpmsn[23:0]` | valid/ready；成交键为 TPMSN |
+| 收向递交 | `tp2ta_op_*`、`tp2ta_data_*`（含 `tp2ta_tassn[15:0]`、`tp2ta_tpmsn[23:0]`） | valid/ready |
+| ROL 目标完成 | `ta2tp_cmp_valid/ready`、`ta2tp_cmp_tassn[15:0]`、`ta2tp_cmp_fail`、`ta2tp_cmp_opcode[7:0]`、`ta2tp_cmp_rspst`、`ta2tp_cmp_rspinfo`；可选 `ta2tp_cmp_data[159:0]` / valid/ready/sop/eop | valid/ready；成交后再发该操作末包 TPACK。`rspst` / `rspinfo` 宽 **未知** |
 
-【假设】补充信号（见 M-2/M-3）：
-- `tp2ta_op_cmpl_valid/ready` + `tp2ta_op_cmpl_tpmsn[23:0]`：收端「操作收齐」通知（§6.1、§6.7.1.2.1）。
-- `ta2tp_tgt_done_valid/ready` + 状态（RSPST 3 b、RSPINFO 5 b）+ 信道号 + TPMSN：ROL 下目标 TA 完成后通知 TP 发末包 TPACK（§6.8.2）。
-- `ta2tp_op_ch[log2(NUM_TP_CH)-1:0]`、`ta2tp_op_len`（字节，宽待定）：RTP 选信道与分段所需。
-- `tp2ta_fail_rsn[2:0]`：区分超时超限（B.2.1）、TPNAK 不可恢复、flush。
+提交口 `ready=0` 的原因：发送窗满（§6.5.1.4.1）或下游 `tp2nw_ready=0`（契约 §3）。ROL 等待走 `ta2tp_cmp_*`，不堵提交口。`ta2tp_op_ch` 是否每操作给出：**未知**。
 
 ### 5.3 flush / link-down
 
-`nw2tp_flush=1` 期间：不开新包；RTB 内未确认的操作对 TA 逐个 `fail`（rsn=flush），描述符清空，RTO 停；信道上下文保留（软件决定是否复位信道）。flush 完成所需拍数上界 = 未决操作数（≤ `TP_DSC_DEPTH`）+ 常数，记入 SPEC 回填。
+`nw2tp_flush=1` / `nw_link_up=0`：不得开始新包（契约 §2）。每个未决 TASSN 须 `done` 或 `fail`；每个未决 TPMSN 经 `tp2ta_msn_*` 成交（契约 §3）。flush 拍数 **未知**。flush 后未确认操作一律 `fail` 还是等 link 恢复后续传：**未知**（Q-10）。信道上下文是否保留由软件决定，本文件不另定。
 
 ---
 
@@ -209,14 +211,14 @@ RTP 需要的 NTH 字段（DCNA、LBF、CCI、RT）在契约口上没有：见 �
 | 表 | 所属 | 实例 | DEPTH | WIDTH | 理由 |
 | --- | --- | --- | --- | --- | --- |
 | 重传缓冲 RTB | `ub_tp_retry` | `ub_cmn_mem_1r1w` | 4096 | 160 | 全局 64 KB 净荷份额【Xia TP-Q06】按 flit 计 = 3277，取 2 的幂 4096（80 KB 原始容量，含 RTPH/头开销与碎片余量）；宽度等于 1 flit，读写各 1 flit/拍正好匹配线速。参数 `TP_RTB_DEPTH` |
-| 重传描述符 DSC | `ub_tp_retry` | `ub_cmn_mem_1r1w` | 512 | 96 | `NUM_TP_CH`16 × 窗 32 包 = 512；字段：RTB 起址 12 + flit 数 8（≤ 8192 B/20 B + 1 = 411 需 9，取 9）+ PSN 24 + TPMSN 24 + TASSN 16 + opcode/last/A 10 + 保留 1 = 96。按「信道号 × 32 + PSN 低 5 位」寻址，无需 CAM |
+| 重传描述符 DSC | `ub_tp_retry` | `ub_cmn_mem_1r1w` | 512 | 96 | `NUM_TP_CH`16 × 窗 32 包 = 512【设计-B】；字段：RTB 起址 12 + flit 数 9 + PSN 24 + TPMSN 24 + TASSN 16 + opcode/last/A 10 + 保留 1 = 96。按「信道号 × 32 + PSN 低 5 位」寻址，无需 CAM。器件级 MTU **未知**，flit 数字段宽不据此回填 |
 | RTO/计时器表 TMR | `ub_tp_retry` | `ub_cmn_mem_1r1w` | 16 | 32 | 每信道：µs 计数 23 + 重传次数 3 + 档位/使能 4 + ACK 合并计数 2（合并 8 包计数另放 CTX）。由 1 µs 节拍驱动的轮询扫描器逐项读改写，16 项在 80 拍/µs 内扫完 |
 | 收端 BitMap BMP（可选） | `ub_tp_rtp` | `ub_cmn_mem_1r1w` + `WMASK_W` | 16 | 128 | 乱序接收开启时才例化（`TP_OOO_EN`）；宽度 = 乱序区间下限 128【Xia TP-Q05】，区间 ≤ BitMap 宽度；按位 WMASK 置位，滑窗时整字重写 |
-| 信道上下文 CTX | `ub_tp_rtp` | FF【假设】 | 16 | ≈ 220 | 字段见下；每包两次访问（T1 读、T2/X3 写）且背靠背同址，1 拍寄存读加前递代价高于 16×220 FF；`NUM_TP_CH>32` 时改例化 1r1w（Q-4） |
+| 信道上下文 CTX | `ub_tp_rtp` | FF【设计-B】 | 16 | ≈ 220 | 字段见下；每包两次访问（T1 读、T2/X3 写）且背靠背同址，1 拍寄存读加前递代价高于 16×220 FF；`NUM_TP_CH>32` 时改例化 1r1w（Q-4） |
 
-CTX 每信道字段（TX/RX 各一套 PSN 空间）：valid 1、DstTPN 高位 20、对端 CNA 24、LBF 8、TX next_PSN 24、TX 最老未确认 PSN 24、TX TPMSN 24、在途包 6、在途字节 17、RX EPSN 24、RX TPMSN 24、RX 当前 TPMSN 首 PSN 24、ACK 合并计数 3、快速重传/乱序/算法选择 4。
+CTX 每信道字段（TX/RX 各一套 PSN 空间）：valid 1、DstTPN 高位 20、对端 CNA 16（契约 §2 优先通路 `dcna[15:0]`；24-b 格式口宽 **未知**）、LBF 8、TX next_PSN 24、TX 最老未确认 PSN 24、TX TPMSN 24、在途包 6、在途字节 17、RX EPSN 24、RX TPMSN 24、RX 当前 TPMSN 首 PSN 24、ACK 合并计数 3、快速重传/乱序/算法选择 4。
 
-RTB 空间管理：每信道静态切片（4096/16 = 256 flit ≈ 5 KB/信道）【假设】。比空闲链表简单，代价是单信道最多 ~1 个 4096 B 包在途。若需单信道大窗，改为全局环形 + 每信道字节份额（Q-5）。
+RTB 空间管理：每信道静态切片（4096/16 = 256 flit ≈ 5 KB/信道）【设计-B】。比空闲链表简单，代价是单信道最多 ~1 个 4096 B 包在途。若需单信道大窗，改为全局环形 + 每信道字节份额（Q-5）。
 
 读口仲裁：RTB 读者只有重传引擎；DSC 读者为 ACK 处理（释放）与重传引擎，ACK 优先；TMR 读者只有扫描器，ACK/重传对计时器的更新走写口并在扫描器读到同址时前递。
 
@@ -252,42 +254,51 @@ PSN 规则（§6.4.1【Xia】）：24 bit，next = (cur+1) mod 2^24；最大已�
 
 ---
 
-## 9. 与 PR #18 契约 / 清单的不一致（对照第 6 章）
+## 9. 与 `LAYER_CONTRACTS` §2 / §3 的对照（main `968747fb` / #59）
 
-| 编号 | 位置 | 现状 | 第 6 章 / 已有答复 | 建议 |
-| --- | --- | --- | --- | --- |
-| M-1 | LAYER_CONTRACTS §2 口表 | TP→NW 只有 SL/NLP/bypass 边带 | RTP 走 CFG7，需 DCNA、LBF（区分信道，§6.5.1.2）、RT（§5.3.2）；CC 要读写 CCI（§6.6） | 补 `tp2nw_dcna/lbf/rt/cci` 与 RX `nw2tp_scna/cci`，或明确 NTH 由 TP 生成放 data |
-| M-2 | LAYER_CONTRACTS §3 | 收向只有 `tp2ta_op_*` + data | §6.1、§6.7.1.2.1：净荷逐包交 TA，另有「操作收齐」按 TPMSN 通知 | 补操作收齐通知口 |
-| M-3 | LAYER_CONTRACTS §3 | 无目标 TA→TP 完成口 | §6.8.2：ROL 末包 TPACK 等目标 TA 完成，携带 TA 状态 | 补 `ta2tp_tgt_done_*` |
-| M-4 | LAYER_CONTRACTS §2/§3 字段表 | PSN 空间、RTPH 位宽、TP MTU 写「未知」 | §6.2.1、§6.4.1 已给（PSN 24、RTPH 16 B 各字段）；MTU 在附录 D.1.13 | 按 Xia 答复 §0.3/§0.4 回填 |
-| M-5 | 任务决策 | RETRY WAIT / Probe 超时列为 TP 参数 | 第 6 章无这两个计时器；TP 计时器为 RTO、ACK 合并、（TA 侧）RNR | 参数归 DLL/LMSM，TP 只放 RTO 系列 |
-| M-6 | MODULE_INVENTORY §4 | `ub_tp_rtp`「可后加」，`ub_tp_retry`「RTP 必做」，GBN/SR「未知」 | §6.4.2 超时重传默认开；TP-Q01 定 GBN 先做 | 清单回填 GBN 先做、SR 可选 |
-| M-7 | LAYER_CONTRACTS §2 错误表 | ICRC 是否每包都带「未知」 | CFG9 无 ICRC（B.2.6）；CFG7 带 ICRC（§5.3.7） | 回填：bypass 无，RTP 有 |
-| M-8 | LAYER_CONTRACTS §3 握手 | 「禁止 valid-only」理由写 ROL 等完成 | §6.8.2 的等待发生在目标 TP 发 TPACK 时，与 TA→TP 提交口握手方式无关 | 理由改为窗满 / 下游反压 |
-| M-9 | LAYER_CONTRACTS §3 反压 | RTP 窗满引 §6.6.1.1（拥塞窗） | 发送窗限制见 §6.5.1.4.1；拥塞窗在 CC 可选模块 | 引用改为 §6.5.1.4.1 + TP-Q06 |
+权威在契约。本表每条指向契约；本文件不另造口。
 
----
-
-## 10. 给 Xia 的开放问题
-
-1. NW↔TP 口上 NTH 字段（DCNA/LBF/RT/CCI）由 TP 以边带交给 NW，还是 TP 直接在 data 里写好 NTH？RX 侧 NW 交给 TP 的 data 是否已剥 NTH？（M-1）
-2. 契约 §3 是否接受新增「操作收齐」口与 ROL 目标完成口（M-2/M-3）？信号名请定。
-3. TX 出口仲裁：bypass 是否必须绝对优先于 RTP 响应 / 重传？
-4. 信道上下文用 FF（16 信道 ≈ 3.5 Kbit）可否接受？`NUM_TP_CH` 上限多少时改用 1r1w？
-5. RTB 空间：每信道静态切片（256 flit）还是全局环形 + 字节份额？前者单信道吞吐受限。
-6. RTB 64 KB 全局份额按净荷计还是按含头 flit 计？本草案取 DEPTH 4096×160 b，比 64 KB 多 16 KB。
-7. 描述符表按「信道 × 32 + PSN 低 5 位」直接寻址，是否同意把单信道窗固定为 2 的幂（32）并以参数改？
-8. `ta2tp_op_len` 宽度：按 TA 最大操作长度定，请给上限（TA-Q05 关联）。
-9. `tp2ta_fail` 原因码集合与编码（契约中「原因 未知」）。
-10. flush 时 RTB 中未确认操作一律 fail，还是等 link 恢复后续传？
-11. 计时器 1 µs 节拍由 TP 自建分频，还是全芯片共享一个 `ub_cmn_us_tick`（DLL/LMSM/TA RNR 也要）？
-12. RETRY_WAIT_CYC / PROBE_WAIT_CYC 归 DLL / LMSM 参数表，确认 TP 不持有（M-5）。
-13. `TP_ATOMIC_EN` 的作用面：TP 层只影响长度检查与 TPMSN 计数，还是另有路径？默认 0 是否同意？
-14. 收到 F=1 伪包时是否回 TPACK（按 A 位）——TP-Q13 已采纳，请确认 obs 计数口名。
-15. HOOKS：RTB / DSC 是否进 SPEC §10 点名存储（给 `tb_<inst>_bd_*` backdoor）？建议 DSC 进、RTB 不进。
+| 编号 | 契约位置 | 契约现状 | 本草案 |
+| --- | --- | --- | --- |
+| M-1 | §2 TX 边带 | `tp2nw_sl[3:0]`、`tp2nw_nlp[2:0]`、`tp2nw_bypass`、`tp2nw_dcna[15:0]`、`tp2nw_lbf[7:0]`、`tp2nw_rt[1:0]`、`tp2nw_cci[15:0]` | **关闭**（契约已锁边带；RX `scna`/`cci` 另开与否仍 **未知**，见 Q-1） |
+| M-2 | §3 整操作完成 | `tp2ta_msn_valid/ready` + `tp2ta_tpmsn[23:0]` | **关闭** |
+| M-3 | §3 ROL 目标完成 | `ta2tp_cmp_valid/ready`、`ta2tp_cmp_tassn[15:0]`、`ta2tp_cmp_fail`、`ta2tp_cmp_opcode[7:0]` | **关闭**，但 `ta2tp_cmp_rspst` / `ta2tp_cmp_rspinfo` 宽仍 **未知** |
+| M-4 | §2 / §3 字段 | RTPH 16 B；DstTPN / PSN / TPMSN 各 24 b | 上述已锁。器件级 MTU 仍 **未知**（附录 D.1.13，契约未锁） |
+| M-5 | §3 反压 / 计时器 | `RETRY_WAIT_CYC` 归 DLL `ub_dll_retry`（§4.7.3.3）；`PROBE_WAIT_CYC` 归 LMSM `ub_lmsm`（§3.4.3.2）；均为 323 拍【定】 | **关闭**。TP 自有计时器只有 RTO 与 ACK 合并 |
+| M-6 | §2 未决 | GBN 与选择重传两套都有；先做哪一套 **未知** | 仍 **未知**。实现上 GBN 先做，SR 另跟踪（清单回填不在本 PR） |
+| M-7 | §2 ICRC | ICRC 适用于 CFG7；CFG9（bypass）不带 | **关闭** |
+| M-8 | §3 握手 | 提交口 `ready=0`：发送窗满（§6.5.1.4.1）或 `tp2nw_ready=0`；ROL 走 `ta2tp_cmp_*` | **关闭** |
+| M-9 | §2 / §3 发送窗 | 发送窗见 §6.5.1.4.1；拥塞控制属 `ub_tp_cc` | **关闭** |
 
 ---
 
-## 附：假设汇总
+## 10. 开放问题
 
-- A1 TX 仲裁优先级（§3）。A2 新增接口信号（§5）。A3 CTX 用 FF。A4 RTB 静态切片、DEPTH 4096。A5 DSC 直接寻址。A6 µs 分频 Q16 阈值。A7 RX 头 flit 错位处理 1 拍。上述均待评审。
+架构师未锁的标 **未知**，本文件不填值。其余为设计-B 微架构决定，沿用本草案已写选择。
+
+### 10.1 仍 **未知**（待架构师）
+
+1. **Q-1** RX：`nw2tp_data` 是否已剥 NTH；是否另开 `nw2tp_scna` / `nw2tp_cci`（契约 §2 未决）。TX 边带已由契约锁定（M-1）。
+2. **Q-2** 与 `tp2ta_msn_*` / `ta2tp_cmp_*` 相关的拍序、TPMSN 回 TA 的拍位、描述符是否带信道号 / DstTPN：契约标 **未知**。口名与已锁宽见 M-2 / M-3。
+8. **Q-8** `ta2tp_op_len` 宽度（及 TA 最大操作长度）：**未知**（契约 §3）。
+9. **Q-9** `tp2ta_fail` 原因码集合与编码：**未知**（契约 §3）。
+10. **Q-10** flush 后未确认操作一律 `fail`，还是等 link 恢复后续传：**未知**（契约 §3）。拍数亦 **未知**。
+
+### 10.2 设计-B 决定（沿用本草案已写选择）
+
+3. **Q-3** TX 出口仲裁：响应 > 重传 > 新包 > bypass。只在包边界切换。
+4. **Q-4** 信道上下文用 FF（16 信道）；`NUM_TP_CH>32` 时改 1r1w。
+5. **Q-5** RTB 每信道静态切片（256 flit）。
+6. **Q-6** RTB `DEPTH=4096`、宽 160 b（比 64 KB 净荷份额多 16 KB 头/碎片余量）。
+7. **Q-7** 描述符按「信道 × 32 + PSN 低 5 位」直接寻址；单信道窗参数化为 32。
+11. **Q-11** 1 µs 节拍由 TP 自建 Q16 分频（§7），不依赖尚未存在的共享 tick。
+12. **Q-12** 关闭（M-5）：`RETRY_WAIT_CYC` / `PROBE_WAIT_CYC`（323 拍）属 `ub_dll_retry` / `ub_lmsm`；TP 只持 RTO 与 ACK 合并。
+13. **Q-13** `TP_ATOMIC_EN` 默认 0；本层只影响长度检查与 TPMSN 计数，不另开通路。
+14. **Q-14** 收到 F=1：按普通包做 PSN 检查，丢净荷、计数；按 A 位回 TPACK。obs 计数口名不在本草案另起。
+15. **Q-15** HOOKS：DSC 进 SPEC §10 点名存储（`tb_<inst>_bd_*`）；RTB 不进。
+
+---
+
+## 附：设计-B 选择汇总
+
+- D1 TX 仲裁优先级（§3）。D2 口名与宽跟契约 §2 / §3，不再自拟。D3 CTX 用 FF。D4 RTB 静态切片、DEPTH 4096。D5 DSC 直接寻址。D6 µs 分频 Q16 阈值。D7 RX 头 flit 错位处理 1 拍。

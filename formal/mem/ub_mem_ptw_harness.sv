@@ -58,6 +58,10 @@ module ub_mem_ptw_harness (
   wire        evt_valid;
   wire [3:0]  evt_code;
   wire        busy;
+  wire        l1_blk_leaf;
+  wire        l2_blk_leaf;
+  wire        l1_pfn_ok;
+  wire        l2_pfn_ok;
   wire        l1_blk_fill;
   wire        l2_blk_fill;
 
@@ -125,6 +129,10 @@ module ub_mem_ptw_harness (
     .desc_addr(36'b0),
     .desc_kind(2'b0),
     .desc_lvl(2'b0),
+    .l1_blk_leaf(l1_blk_leaf),
+    .l2_blk_leaf(l2_blk_leaf),
+    .l1_pfn_ok(l1_pfn_ok),
+    .l2_pfn_ok(l2_pfn_ok),
     .l1_blk_fill(l1_blk_fill),
     .l2_blk_fill(l2_blk_fill)
   );
@@ -155,6 +163,10 @@ module ub_mem_ptw_harness (
     .mem2host_rd_rsp_err(mem2host_rd_rsp_err),
     .fill_valid(fill_valid),
     .fill_ready(fill_ready),
+    .l1_blk_leaf(l1_blk_leaf),
+    .l2_blk_leaf(l2_blk_leaf),
+    .l1_pfn_ok(l1_pfn_ok),
+    .l2_pfn_ok(l2_pfn_ok),
     .l1_blk_fill(l1_blk_fill),
     .l2_blk_fill(l2_blk_fill),
     .flt_valid(flt_valid),

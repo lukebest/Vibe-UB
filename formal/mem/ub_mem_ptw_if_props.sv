@@ -23,8 +23,9 @@
 // one" counts accepted event handshakes, not cycles of evt_valid.
 //
 // Decoder: after hierarchy the .sby reads cut/ub_mem_ptw_desc_dec.sv
-// ($anyseq on every output). Block-fill covers compare fill_pfn to
-// the harness-computed expected PFN (ub_mem_ptw_blk_exp).
+// ($anyseq on every output). Block-fill covers and a_l1_blk_pfn /
+// a_l2_blk_pfn compare fill_pfn to the harness-computed expected
+// PFN (ub_mem_ptw_blk_exp; one §8 mapping).
 
 module ub_mem_ptw_if_props (
   input  wire        core_clk,
@@ -52,6 +53,10 @@ module ub_mem_ptw_if_props (
   input  wire        mem2host_rd_rsp_err,
   input  wire        fill_valid,
   input  wire        fill_ready,
+  input  wire        l1_blk_leaf,
+  input  wire        l2_blk_leaf,
+  input  wire        l1_pfn_ok,
+  input  wire        l2_pfn_ok,
   input  wire        l1_blk_fill,
   input  wire        l2_blk_fill,
   input  wire        flt_valid,
@@ -222,6 +227,15 @@ module ub_mem_ptw_if_props (
     if (chk && matt_inflight) begin
       a_matt_no_rd:   assert (!mem2host_rd_valid);
       a_matt_no_fill: assert (!fill_valid);
+    end
+    // L1 1 GB / L2 2 MB block leaf: fill_pfn equals the harness §8
+    // expected value (ub_mem_ptw_blk_exp; one mapping). Antecedent
+    // is a fill presented for that leaf. Issued fills are a subset.
+    if (chk && l1_blk_leaf) begin
+      a_l1_blk_pfn: assert (l1_pfn_ok);
+    end
+    if (chk && l2_blk_leaf) begin
+      a_l2_blk_pfn: assert (l2_pfn_ok);
     end
     if (chk && matt_inflight && evt_valid) begin
       a_matt_evt_code: assert (evt_code == EVT_MATT_WD_MISS[EVT_CODE_W-1:0]);

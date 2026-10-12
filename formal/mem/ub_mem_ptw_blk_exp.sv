@@ -19,12 +19,22 @@ module ub_mem_ptw_blk_exp (
   input  wire [35:0] desc_addr,
   input  wire [1:0]  desc_kind,
   input  wire [1:0]  desc_lvl,
+  output wire        l1_blk_leaf,
+  output wire        l2_blk_leaf,
+  output wire        l1_pfn_ok,
+  output wire        l2_pfn_ok,
   output wire        l1_blk_fill,
   output wire        l2_blk_fill
 );
-  localparam [1:0] KIND_BLOCK = 2'd2;
-  localparam [1:0] LVL_L1     = 2'd1;
-  localparam [1:0] LVL_L2     = 2'd2;
+  // One mapping block (contract §8 / Xia). Covers and a_l*_blk_pfn share it.
+  localparam [1:0] KIND_BLOCK  = 2'd2;
+  localparam [1:0] LVL_L1      = 2'd1;
+  localparam [1:0] LVL_L2      = 2'd2;
+  localparam integer L1_BASE_LSB = 18;
+  localparam integer L2_BASE_LSB = 9;
+  localparam integer VA_PAGE_LSB = 12;
+  localparam integer L1_VA_MSB   = 29;
+  localparam integer L2_VA_MSB   = 20;
 
   reg [35:0] f_blk_base;
   reg [63:0] f_va;
@@ -56,13 +66,17 @@ module ub_mem_ptw_blk_exp (
     end
   end
 
-  wire [35:0] exp_l1_pfn = {f_blk_base[35:18], f_va[29:12]};
-  wire [35:0] exp_l2_pfn = {f_blk_base[35:9],  f_va[20:12]};
+  wire [35:0] exp_l1_pfn = {f_blk_base[35:L1_BASE_LSB], f_va[L1_VA_MSB:VA_PAGE_LSB]};
+  wire [35:0] exp_l2_pfn = {f_blk_base[35:L2_BASE_LSB], f_va[L2_VA_MSB:VA_PAGE_LSB]};
 
-  assign l1_blk_fill = fill_valid && fill_ready &&
-                       (f_kind == KIND_BLOCK) && (f_lvl == LVL_L1) &&
-                       (fill_pfn == exp_l1_pfn);
-  assign l2_blk_fill = fill_valid && fill_ready &&
-                       (f_kind == KIND_BLOCK) && (f_lvl == LVL_L2) &&
-                       (fill_pfn == exp_l2_pfn);
+  // Fill presented for an L1 1 GB / L2 2 MB block leaf (kind/lvl from
+  // the decoder ports latched before fill). Issued = presented & ready.
+  assign l1_blk_leaf = fill_valid &&
+                       (f_kind == KIND_BLOCK) && (f_lvl == LVL_L1);
+  assign l2_blk_leaf = fill_valid &&
+                       (f_kind == KIND_BLOCK) && (f_lvl == LVL_L2);
+  assign l1_pfn_ok   = (fill_pfn == exp_l1_pfn);
+  assign l2_pfn_ok   = (fill_pfn == exp_l2_pfn);
+  assign l1_blk_fill = l1_blk_leaf && fill_ready && l1_pfn_ok;
+  assign l2_blk_fill = l2_blk_leaf && fill_ready && l2_pfn_ok;
 endmodule

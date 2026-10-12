@@ -13,6 +13,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cdc_rdc import analyze_module
 from formal_bind import check_formal_binds, discover_sby_files, sby_run_cwd
+from formal_depth import (
+    INHERIT_STATUS,
+    check_formal_depth,
+    check_formal_inherit,
+    parse_sby_bmc_depth,
+    sby_inherits_hooks_prove,
+)
+from equiv_blackbox import equiv_blackbox_set
+from formal_parent_free import check_formal_parent_free
 from gatelib import (
     Finding,
     collect_lock_completeness_findings,
@@ -33,8 +42,15 @@ from gatelib import (
 from hooks_port_consistency import compare_ports
 from large_mem_manifest import check_large_mem_manifest
 from lint import lint_module, lint_sources_for, parse_verilator
-from pyc_lib_check import check_pyc_lib
+from one_module import check_one_module
+from pyc_lib_check import (
+    ALLOWLIST_NOTE,
+    check_pyc_lib,
+    check_pyclib_single,
+    stale_pyclib_copy_allowlist,
+)
 from pycircuit_provenance import static_splice_check
+from private_selftest import run_all as run_private_selftests
 from rtl_emit_consistency import (
     compare_emitted_rtl,
     emit_unavailable_findings,
@@ -243,6 +259,133 @@ def test_pyc_lib_skip_missing_dir() -> None:
             _fail("pyc-lib-skip-missing", "missing rtl/pyc_lib must not fail")
         if any(h.bucket == "new" for h in hits):
             _fail("pyc-lib-skip-missing", "must not introduce blocking findings")
+
+
+def test_pyc_lib_missing_hard_after_main() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        rtl = root / "rtl"
+        rtl.mkdir(parents=True)
+        _write_gate_yml(root, "pyc_lib_on_main", True)
+        hits = check_pyc_lib(rtl, lock_src=None)
+        hit = _expect_rule("pyc-lib-missing-hard", hits, "PYC_LIB_MISSING")
+        if hit.bucket != "new":
+            _fail("pyc-lib-missing-hard", "must block once origin/main has rtl/pyc_lib")
+
+
+def _write_gate_yml(root: Path, key: str, value: bool) -> None:
+    yml = root / "scripts" / "gate" / "private_leaves.yml"
+    yml.parent.mkdir(parents=True, exist_ok=True)
+    prev = yml.read_text(encoding="utf-8") if yml.is_file() else "leaves: []\n"
+    yml.write_text(prev + f"{key}: {str(value).lower()}\n", encoding="utf-8")
+
+
+def test_pyclib_single_copy_and_ok() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        rtl = root / "rtl"
+        _v(rtl / "pyc_lib" / "pyc_reg.v", "pyc_reg", "input clk")
+        _v(rtl / "pcs" / "ub_pcs_leaf.v", "ub_pcs_leaf", "input core_clk")
+        _write_gate_yml(root, "pyclib_single_required", True)
+        hits = check_pyclib_single(root, rtl)
+        if any(f.rule in {"PYCLIB_COPY", "PYCLIB_FETCH"} for f in hits):
+            _fail("pyclib-single-ok", f"clean tree must pass, got {hits}")
+        print("SELFTEST PASS pyclib-single-ok: no PYCLIB_COPY/FETCH")
+
+        _v(root / "formal" / "cmn" / "pyc_reg.v", "pyc_reg", "input clk")
+        hit = _expect_rule("pyclib-copy-name", check_pyclib_single(root, rtl), "PYCLIB_COPY")
+        if "formal/cmn/pyc_reg.v" not in hit.file:
+            _fail("pyclib-copy-name", f"expected formal copy, got {hit.file}")
+        if hit.bucket != "new":
+            _fail("pyclib-copy-name", "must be blocking when required")
+
+        (root / "formal" / "cmn" / "pyc_reg.v").unlink()
+        _v(rtl / "common" / "alias.v", "pyc_reg", "input clk")
+        hit = _expect_rule("pyclib-copy-module", check_pyclib_single(root, rtl), "PYCLIB_COPY")
+        if "defines module pyc_reg" not in hit.message:
+            _fail("pyclib-copy-module", hit.message)
+
+
+def test_pyclib_single_fetch_and_report() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        rtl = root / "rtl"
+        _v(rtl / "pyc_lib" / "pyc_reg.v", "pyc_reg", "input clk")
+        script = root / "scripts" / "impl" / "pull_lib.sh"
+        script.parent.mkdir(parents=True)
+        script.write_text(
+            "git show origin/main:rtl/pyc_lib/pyc_reg.v > rtl/pyc_lib/pyc_reg.v\n",
+            encoding="utf-8",
+        )
+        hit = _expect_rule("pyclib-fetch-report", check_pyclib_single(root, rtl), "PYCLIB_FETCH")
+        if hit.bucket != "report":
+            _fail("pyclib-fetch-report", "must be report-only until #47 is on main")
+        _write_gate_yml(root, "pyclib_single_required", True)
+        hit = _expect_rule("pyclib-fetch-block", check_pyclib_single(root, rtl), "PYCLIB_FETCH")
+        if hit.bucket != "new":
+            _fail("pyclib-fetch-block", "must be blocking when required")
+        if "git show" not in hit.message:
+            _fail("pyclib-fetch-block", hit.message)
+
+        fixture = root / "scripts" / "gate" / "selftest.py"
+        fixture.parent.mkdir(parents=True, exist_ok=True)
+        fixture.write_text(
+            'ok = _git_show("deadbeef", "rtl/pyc_lib/pyc_reg.v", "out.v")\n'
+            "git show origin/main:rtl/pyc_lib/pyc_reg.v\n",
+            encoding="utf-8",
+        )
+        hits = [f for f in check_pyclib_single(root, rtl) if f.file.endswith("selftest.py")]
+        if hits:
+            _fail("pyclib-fetch-skip-selftest", "gate selftest fixtures are excluded")
+        print("SELFTEST PASS pyclib-fetch-skip-selftest: scripts/gate selftest ignored")
+
+
+def test_pyclib_copy_allowlist_transitional() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        rtl = root / "rtl"
+        _v(rtl / "pyc_lib" / "pyc_reg.v", "pyc_reg", "input clk")
+        _v(rtl / "common" / "pyc_reg.v", "pyc_reg", "input clk")
+        _write_gate_yml(root, "pyclib_single_required", True)
+        yml = root / "scripts" / "gate" / "private_leaves.yml"
+        yml.write_text(
+            yml.read_text(encoding="utf-8")
+            + "pyclib_copy_on_main:\n  rtl/common/pyc_reg.v: true\n",
+            encoding="utf-8",
+        )
+        hit = _expect_rule(
+            "pyclib-allowlist-report",
+            check_pyclib_single(root, rtl),
+            "PYCLIB_COPY",
+        )
+        if hit.file != "rtl/common/pyc_reg.v":
+            _fail("pyclib-allowlist-report", hit.file)
+        if hit.bucket != "report":
+            _fail("pyclib-allowlist-report", "allowlisted copy must stay report-only")
+        if ALLOWLIST_NOTE not in hit.message:
+            _fail("pyclib-allowlist-report", hit.message)
+        if stale_pyclib_copy_allowlist(root):
+            _fail("pyclib-allowlist-report", "entry is live on this fixture main")
+
+        yml.write_text(
+            "leaves: []\npyclib_single_required: true\n"
+            "pyclib_copy_on_main:\n  rtl/common/pyc_reg.v: false\n",
+            encoding="utf-8",
+        )
+        stale = stale_pyclib_copy_allowlist(root)
+        if "rtl/common/pyc_reg.v" not in stale:
+            _fail(
+                "pyclib-allowlist-stale",
+                "missing file on main must remind to delete the allowlist entry",
+            )
+        hit = _expect_rule(
+            "pyclib-allowlist-stale-blocks",
+            check_pyclib_single(root, rtl),
+            "PYCLIB_COPY",
+        )
+        if hit.bucket != "new":
+            _fail("pyclib-allowlist-stale-blocks", "gone from main → normal blocking")
+        print("SELFTEST PASS pyclib-allowlist-stale: delete entry after #5")
 
 
 def test_pyc_lib_byte_diff() -> None:
@@ -454,6 +597,377 @@ def test_sby_relative_and_missing() -> None:
         if any("cmn_bmc/config.sby" in (f.file or "") for f in hits):
             _fail("sby-skip-workdir", "workdir config.sby must not produce findings")
         print("SELFTEST PASS sby-skip-workdir: only formal/<iface>/*.sby")
+
+
+def test_formal_bmc_vs_cover_depth() -> None:
+    if parse_sby_bmc_depth("[options]\nbmc: depth 40\ndepth 8\n") != 40:
+        _fail("formal-depth-parse", "bmc: depth must win over generic depth")
+    if parse_sby_bmc_depth("[options]\ndepth 20\n") != 20:
+        _fail("formal-depth-parse", "unprefixed depth must be the BMC depth")
+    print("SELFTEST PASS formal-depth-parse: bmc: depth wins")
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        sby = repo / "formal" / "cmn" / "toy.sby"
+        sby.parent.mkdir(parents=True)
+        sby.write_text(
+            "[tasks]\nbmc\ncover\n[options]\nbmc: mode bmc\nbmc: depth 10\n"
+            "cover: mode cover\ncover: depth 20\n",
+            encoding="utf-8",
+        )
+        cover = repo / "formal" / "cmn" / "toy_cover"
+        eng = cover / "engine_0"
+        eng.mkdir(parents=True)
+        (eng / "logfile.txt").write_text(
+            "SBY [toy_cover] engine_0: Reached cover statement at "
+            "toy.sv:4.3-4.20 (step 8).\n",
+            encoding="utf-8",
+        )
+        hits = check_formal_depth(repo)
+        hit = _expect_rule("formal-bmc-shallow", hits, "FORMAL_BMC_SHALLOW")
+        if hit.bucket != "report":
+            _fail("formal-bmc-shallow", "GATE-FORMAL-DEPTH (3) must be report-only")
+        if "8" not in hit.message or "10" not in hit.message:
+            _fail("formal-bmc-shallow", hit.message)
+        sby.write_text(
+            "[options]\nmode bmc\ndepth 20\n",
+            encoding="utf-8",
+        )
+        hits = check_formal_depth(repo)
+        if any(f.rule == "FORMAL_BMC_SHALLOW" for f in hits):
+            _fail("formal-bmc-ok", "depth 20 covers step 8 + 6")
+        print("SELFTEST PASS formal-bmc-ok: bmc >= cover + 6")
+
+
+INHERIT_SBY = """\
+[tasks]
+prove
+product_prove
+[options]
+prove: mode prove
+product_prove: mode prove
+depth 20
+"""
+
+
+def test_formal_inherit_equiv() -> None:
+    if not sby_inherits_hooks_prove(INHERIT_SBY):
+        _fail("formal-inherit-parse", "default prove + product_prove must inherit")
+    if sby_inherits_hooks_prove("[tasks]\nprove\nbmc\n[options]\nprove: mode prove\n"):
+        _fail("formal-inherit-parse", "prove-only must not inherit")
+    print("SELFTEST PASS formal-inherit-parse: product_prove is the inherit pattern")
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        sby = repo / "formal" / "mem" / "ub_mem_parent.sby"
+        sby.parent.mkdir(parents=True)
+        sby.write_text(INHERIT_SBY, encoding="utf-8")
+        pos = check_formal_inherit(
+            repo,
+            {
+                "ub_mem_parent": {
+                    "status": "PASS",
+                    "outputs": ["q"],
+                    "blackboxes": [],
+                }
+            },
+        )
+        if any(f.rule == "FORMAL_INHERIT_NO_EQUIV" for f in pos):
+            _fail("formal-inherit-ok", "PASS equiv must allow inherit")
+        print(f"SELFTEST PASS formal-inherit-ok: {INHERIT_STATUS}")
+        for bad in (None, {"status": "SKIP"}, {"status": "PRIVATE_SKIP"}, {"status": "FAIL"}):
+            status = {} if bad is None else {"ub_mem_parent": bad}
+            hit = _expect_rule(
+                f"formal-inherit-{bad and bad.get('status') or 'missing'}",
+                check_formal_inherit(repo, status),
+                "FORMAL_INHERIT_NO_EQUIV",
+            )
+            if hit.bucket != "report":
+                _fail("formal-inherit-neg", "rule 4 must stay report-only")
+        boxed = check_formal_inherit(
+            repo,
+            {
+                "ub_mem_parent": {
+                    "status": "PASS",
+                    "outputs": ["q"],
+                    "blackboxes": [],
+                }
+            },
+        )
+        # no contracts/instances in the fixture → PASS still inherits
+        if any(f.rule == "FORMAL_INHERIT_NO_EQUIV" for f in boxed):
+            _fail("formal-inherit-nobox", "no private instances → no blackbox required")
+        (repo / "docs" / "arch" / "mem" / "contracts").mkdir(parents=True)
+        (repo / "docs" / "arch" / "mem" / "contracts" / "toy.md").write_text(
+            "---\nleaf: ub_mem_toy_dec\nports:\n  - {name: out, dir: out, width: 1}\n---\n",
+            encoding="utf-8",
+        )
+        parent = repo / "formal" / "mem" / "ub_mem_parent.v"
+        parent.write_text(
+            "module ub_mem_parent(input clk, output q);\n"
+            "  wire s;\n"
+            "  ub_mem_toy_dec u(.clk(clk), .out(s));\n"
+            "  assign q = s;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        sby.write_text(
+            INHERIT_SBY + "[files]\nub_mem_parent.v\n",
+            encoding="utf-8",
+        )
+        miss = _expect_rule(
+            "formal-inherit-need-blackbox",
+            check_formal_inherit(
+                repo,
+                {
+                    "ub_mem_parent": {
+                        "status": "PASS",
+                        "outputs": ["q"],
+                        "blackboxes": [],
+                    }
+                },
+            ),
+            "FORMAL_INHERIT_NO_EQUIV",
+        )
+        if "EQUIV_BLACKBOX" not in miss.message:
+            _fail("formal-inherit-need-blackbox", "message must name EQUIV_BLACKBOX")
+        ok = check_formal_inherit(
+            repo,
+            {
+                "ub_mem_parent": {
+                    "status": "PASS",
+                    "outputs": ["q"],
+                    "blackboxes": ["ub_mem_toy_dec"],
+                }
+            },
+        )
+        if any(f.rule == "FORMAL_INHERIT_NO_EQUIV" for f in ok):
+            _fail("formal-inherit-boxed", "PASS + EQUIV_BLACKBOX must inherit")
+        print("SELFTEST PASS formal-inherit-boxed: blackbox lines required")
+
+
+def test_equiv_private_blackbox_hides_const_stub() -> None:
+    """Flattening a const-0 stub hides a HOOKS/PRODUCT parent mismatch."""
+    if not shutil_which("yosys"):
+        _fail("equiv-blackbox", "yosys required")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        stub = root / "ub_mem_toy_dec.v"
+        product = root / "ub_mem_parent.v"
+        hooks = root / "ub_mem_parent_hooks.v"
+        stub.write_text(
+            "module ub_mem_toy_dec(input clk, output out);\n"
+            "  assign out = 1'b0;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        product.write_text(
+            "module ub_mem_parent(input clk, output q);\n"
+            "  wire s;\n"
+            "  ub_mem_toy_dec u_leaf(.clk(clk), .out(s));\n"
+            "  assign q = s;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        hooks.write_text(
+            "module ub_mem_parent(input clk, output q);\n"
+            "  wire s;\n"
+            "  ub_mem_toy_dec u_leaf(.clk(clk), .out(s));\n"
+            "  assign q = 1'b0;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        flat = run_equiv(
+            "ub_mem_parent",
+            product,
+            hooks,
+            None,
+            extra_rtl=[stub],
+            blackboxes=[],
+        )
+        if flat is not None and flat.rule == "EQUIV_FAIL":
+            _fail("equiv-flatten-hides", "flattened const stub must hide the parent mismatch")
+        boxed = run_equiv(
+            "ub_mem_parent",
+            product,
+            hooks,
+            None,
+            extra_rtl=[stub],
+            blackboxes=["ub_mem_toy_dec"],
+        )
+        if boxed is None or boxed.rule != "EQUIV_FAIL":
+            _fail(
+                "equiv-blackbox-shows",
+                "blackboxed stub outputs must be free; mismatch must FAIL",
+            )
+        print("SELFTEST PASS equiv-blackbox-shows: const stub no longer hides parent diff")
+
+
+def test_one_module_per_file() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        parent = repo / "rtl" / "mem" / "ub_mem_ptw.v"
+        parent.parent.mkdir(parents=True)
+        parent.write_text(
+            "module ub_mem_ptw(input clk, output q);\n"
+            "  assign q = 1'b0;\n"
+            "endmodule\n"
+            "module ub_mem_ptw_desc_dec(input clk, output d);\n"
+            "  assign d = 1'b0;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        (repo / "docs" / "arch" / "mem" / "contracts").mkdir(parents=True)
+        (repo / "docs" / "arch" / "mem" / "contracts" / "desc.md").write_text(
+            "---\nleaf: ub_mem_ptw_desc_dec\nports:\n  - {name: d, dir: out, width: 1}\n---\n",
+            encoding="utf-8",
+        )
+        hits = check_one_module(repo)
+        priv = _expect_rule("one-module-private", hits, "PRIVATE_IN_PARENT")
+        if priv.bucket != "report":
+            _fail("one-module-private", "PRIVATE_IN_PARENT must stay report-only until #47")
+        two = repo / "rtl" / "pcs" / "ub_pcs_two.v"
+        two.parent.mkdir(parents=True)
+        two.write_text(
+            "module ub_pcs_a(input clk, output q);\n  assign q = 1'b0;\nendmodule\n"
+            "module ub_pcs_b(input clk, output r);\n  assign r = 1'b1;\nendmodule\n",
+            encoding="utf-8",
+        )
+        # drop the private pair so only MULTI_MODULE remains from ub_pcs_two
+        parent.write_text(
+            "module ub_mem_ptw(input clk, output q);\n  assign q = 1'b0;\nendmodule\n",
+            encoding="utf-8",
+        )
+        multi = _expect_rule("one-module-multi", check_one_module(repo), "MULTI_MODULE")
+        if multi.bucket != "report":
+            _fail("one-module-multi", "MULTI_MODULE is report-only")
+        lib = repo / "rtl" / "pyc_lib" / "pyc_two.v"
+        lib.parent.mkdir(parents=True)
+        lib.write_text(
+            "module pyc_a(input clk, output q);\n  assign q = 1'b0;\nendmodule\n"
+            "module pyc_b(input clk, output r);\n  assign r = 1'b1;\nendmodule\n",
+            encoding="utf-8",
+        )
+        two.write_text(
+            "module ub_pcs_a(input clk, output q);\n  assign q = 1'b0;\nendmodule\n",
+            encoding="utf-8",
+        )
+        if any(f.rule in {"MULTI_MODULE", "PRIVATE_IN_PARENT"} for f in check_one_module(repo)):
+            _fail("one-module-ok", "pyc_lib helpers and single-module files must pass")
+        print("SELFTEST PASS one-module-ok: pyc_lib excluded, single module clean")
+
+
+def test_equiv_blackbox_set_union() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        (repo / "scripts" / "gate").mkdir(parents=True)
+        (repo / "scripts" / "gate" / "blackbox.yml").write_text(
+            "entries:\n  - {module: ub_cmn_mem_1r1w, file: rtl/cmn/ub_cmn_mem_1r1w.v}\n",
+            encoding="utf-8",
+        )
+        (repo / "docs" / "arch" / "mem" / "contracts").mkdir(parents=True)
+        (repo / "docs" / "arch" / "mem" / "contracts" / "toy.md").write_text(
+            "---\nleaf: ub_mem_toy_dec\nports:\n  - {name: out, dir: out, width: 1}\n---\n",
+            encoding="utf-8",
+        )
+        names = equiv_blackbox_set(repo)
+        if "ub_mem_toy_dec" not in names:
+            _fail("equiv-blackbox-set", f"contract leaf missing: {names}")
+        # yml module is included when the file parses; stub_modules() reads REPO_ROOT yml
+        print(f"SELFTEST PASS equiv-blackbox-set: {names}")
+
+
+def _parent_free_tree(root: Path, *, assume_default: bool, assume_diag: bool) -> Path:
+    """#45-shaped: contract leaf + parent that instantiates it."""
+    yml = root / "scripts" / "gate" / "private_leaves.yml"
+    yml.parent.mkdir(parents=True, exist_ok=True)
+    yml.write_text("leaves: []\nparent_free_required: true\n", encoding="utf-8")
+    contract = root / "docs" / "arch" / "mem" / "contracts" / "ub_mem_toy_dec.md"
+    contract.parent.mkdir(parents=True, exist_ok=True)
+    contract.write_text(
+        "```yaml\n"
+        "leaf: ub_mem_toy_dec\n"
+        "parent: ub_mem_ptw\n"
+        "clock: {name: core_clk, period_ns: 12.412, reset: rst_pyc, reset_type: sync}\n"
+        "latency: {kind: registered, cycles: 1, max_cycles: 1}\n"
+        "ports:\n"
+        "  - {name: core_clk, dir: in, width: 1, desc: clk}\n"
+        "  - {name: rst_pyc, dir: in, width: 1, desc: rst}\n"
+        "  - {name: desc_v, dir: out, width: 1, desc: decoded valid}\n"
+        "params: []\n"
+        "ill_cause_width: 4\n"
+        "assertions: [AP_TOY_CLK]\n"
+        "status: draft\n"
+        "```\n\n# toy\n`AP_TOY_CLK`\n",
+        encoding="utf-8",
+    )
+    parent = root / "formal" / "mem" / "parent.sv"
+    props = root / "formal" / "mem" / "props.sv"
+    diag = root / "formal" / "mem" / "assume_diag.sv"
+    sby = root / "formal" / "mem" / "parent.sby"
+    parent.parent.mkdir(parents=True, exist_ok=True)
+    parent.write_text(
+        "module ub_mem_ptw(input core_clk, input rst_pyc, input desc_v);\n"
+        "  ub_mem_toy_dec u_dec (.core_clk(core_clk), .rst_pyc(rst_pyc), .desc_v(desc_v));\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+    assume_line = (
+        "  a_leaf: assume property (@(posedge core_clk) desc_v == 1'b1);\n"
+        if assume_default
+        else "  a_legal: assert property (@(posedge core_clk) desc_v === desc_v);\n"
+    )
+    props.write_text(
+        "module props(input core_clk, input desc_v);\n" + assume_line + "endmodule\n",
+        encoding="utf-8",
+    )
+    diag.write_text(
+        "module assume_diag(input core_clk, input desc_v);\n"
+        + (
+            "  a_leaf: assume property (@(posedge core_clk) desc_v == 1'b1);\n"
+            if assume_diag
+            else ""
+        )
+        + "endmodule\n",
+        encoding="utf-8",
+    )
+    sby.write_text(
+        "[tasks]\nbmc\ndiag\n"
+        "[options]\nbmc: mode bmc\ndiag: mode bmc\n"
+        "[script]\nread -sv parent.sv\nread -sv props.sv\n"
+        "diag: read -sv assume_diag.sv\nprep -top ub_mem_ptw\n"
+        "[files]\nparent.sv\nprops.sv\ndiag: assume_diag.sv\n",
+        encoding="utf-8",
+    )
+    return sby
+
+
+def test_formal_parent_free() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _parent_free_tree(root, assume_default=False, assume_diag=True)
+        hits = check_formal_parent_free(root)
+        if any(f.rule == "FORMAL_PRIVATE_ASSUME" for f in hits):
+            _fail("parent-free-ok", f"diag-only assume must pass: {hits[0].message}")
+        print("SELFTEST PASS parent-free-ok: assume only in named diag task")
+
+        _parent_free_tree(root, assume_default=True, assume_diag=False)
+        hit = _expect_rule("parent-free-neg", check_formal_parent_free(root), "FORMAL_PRIVATE_ASSUME")
+        if hit.bucket != "new":
+            _fail("parent-free-neg", "must be blocking when parent_free_required")
+        if "desc_v" not in hit.message or "ub_mem_toy_dec" not in hit.message:
+            _fail("parent-free-neg", hit.message)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _parent_free_tree(root, assume_default=True, assume_diag=False)
+        yml = root / "scripts" / "gate" / "private_leaves.yml"
+        yml.write_text("leaves: []\n", encoding="utf-8")
+        hit = _expect_rule(
+            "parent-free-report",
+            check_formal_parent_free(root),
+            "FORMAL_PRIVATE_ASSUME",
+        )
+        if hit.bucket != "report":
+            _fail("parent-free-report", "must be report-only until #47 is on main")
 
 
 def test_tb_selfcheck_sh_drops_pycircuit_venv() -> None:
@@ -1049,6 +1563,125 @@ def _shuffle_bcrc_ports(src: Path, dest: Path) -> None:
     dest.write_text(new, encoding="utf-8")
 
 
+def _regpair_flop(cell: str, cands: tuple[str, ...], width: int = 8) -> object:
+    from equiv_regpair import Flop
+
+    return Flop(
+        cell=cell,
+        ftype="$dff",
+        width=width,
+        q_name=cands[0],
+        d_name=f"{cands[0]}_d",
+        key="",
+        kind="sync",
+        polarity=1,
+        value=0,
+        q_aliases=cands,
+        key_candidates=tuple(sorted(cands)),
+    )
+
+
+def test_regpair_prefer_q_alias() -> None:
+    """Architectural _q + PRODUCT output on the same Q bits pair by _q."""
+    from equiv_regpair import (
+        assign_pairing_keys,
+        extract_flops,
+        group_by_key,
+        pick_shared_pairing_key,
+    )
+
+    if pick_shared_pairing_key(["pfn_q", "fill_pfn"]) != "pfn_q":
+        _fail("regpair-prefer-q-pick", "expected pfn_q among fill_pfn/pfn_q")
+    if pick_shared_pairing_key(["foo_q", "bar_q"]) is not None:
+        _fail("regpair-prefer-q-two-q", "two _q names must not pick")
+    if pick_shared_pairing_key(["fill_pfn", "pfn"]) is not None:
+        _fail("regpair-prefer-q-no-q", "no _q among aliases must not pick")
+    if pick_shared_pairing_key(["uba_q"]) != "uba_q":
+        _fail("regpair-prefer-q-unique", "single common name must pair")
+
+    gold = [
+        _regpair_flop("g_pfn", ("pfn_q", "fill_pfn"), 36),
+        _regpair_flop("g_uba", ("uba_q",), 36),
+        _regpair_flop("g_evt", ("evt_code", "evt_code_q"), 4),
+    ]
+    gate = [
+        _regpair_flop("t_pfn", ("pfn_q", "fill_pfn"), 36),
+        _regpair_flop("t_uba", ("uba_q",), 36),
+        _regpair_flop("t_evt", ("evt_code", "evt_code_q"), 4),
+    ]
+    err = assign_pairing_keys(gold, gate)
+    if err:
+        _fail("regpair-prefer-q-assign", f"unexpected pairing errors: {err}")
+    got = {ff.key for ff in gold + gate}
+    if got != {"pfn_q", "uba_q", "evt_code_q"}:
+        _fail("regpair-prefer-q-assign", f"keys={got}")
+    gmap, gamb = group_by_key(gold)
+    tmap, tamb = group_by_key(gate)
+    if gamb or tamb or set(gmap) != {"pfn_q", "uba_q", "evt_code_q"}:
+        _fail("regpair-prefer-q-group", f"g={list(gmap)} amb={gamb}+{tamb}")
+    print("SELFTEST PASS regpair-prefer-q-ok: _q wins over PRODUCT output alias")
+
+    two_q_g = [_regpair_flop("g", ("foo_q", "bar_q"), 8)]
+    two_q_t = [_regpair_flop("t", ("foo_q", "bar_q"), 8)]
+    if not assign_pairing_keys(two_q_g, two_q_t):
+        _fail("regpair-prefer-q-two-q-assign", "two shared _q names must FAIL(pairing)")
+    print("SELFTEST PASS regpair-prefer-q-two-q: multiple _q names rejected")
+
+    dup_g = [_regpair_flop("g1", ("foo_q",), 1), _regpair_flop("g2", ("foo_q",), 1)]
+    dup_t = [_regpair_flop("t1", ("foo_q",), 1), _regpair_flop("t2", ("foo_q",), 1)]
+    _ = assign_pairing_keys(dup_g, dup_t)
+    _, amb = group_by_key(dup_g)
+    if not amb:
+        _fail("regpair-prefer-q-dup-cell", "same _q on two cells must be ambiguous")
+    print("SELFTEST PASS regpair-prefer-q-dup-cell: shared name on two cells rejected")
+
+    # Flatten extract: assign fill_pfn = pfn_q on both sides.
+    rtl = (
+        "module leaf(input clk, input rst, input [3:0] d, output [3:0] fill_pfn);\n"
+        "  reg [3:0] pfn_q;\n"
+        "  always @(posedge clk) begin\n"
+        "    if (rst) pfn_q <= 4'b0;\n"
+        "    else pfn_q <= d;\n"
+        "  end\n"
+        "  assign fill_pfn = pfn_q;\n"
+        "endmodule\n"
+    )
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / "leaf.v"
+        js = Path(td) / "leaf.json"
+        src.write_text(rtl, encoding="utf-8")
+        ys = run_cmd(
+            [
+                "yosys",
+                "-q",
+                "-p",
+                f"read_verilog {src}; hierarchy -check -top leaf; "
+                f"rename -top gold; proc; flatten; write_json {js}",
+            ],
+            timeout=30,
+        )
+        if ys.returncode != 0 or not js.is_file():
+            _fail("regpair-prefer-q-extract", (ys.stdout or "")[-300:])
+        import json
+
+        mod = json.loads(js.read_text(encoding="utf-8"))["modules"]["gold"]
+        flops = extract_flops(mod)
+        if len(flops) != 1:
+            _fail("regpair-prefer-q-extract", f"expected 1 flop, got {len(flops)}")
+        cands = set(flops[0].key_candidates)
+        if "pfn_q" not in cands or "fill_pfn" not in cands:
+            _fail("regpair-prefer-q-extract", f"candidates={sorted(cands)}")
+        clone = [
+            _regpair_flop("g", tuple(flops[0].key_candidates), flops[0].width),
+            _regpair_flop("t", tuple(flops[0].key_candidates), flops[0].width),
+        ]
+        # assign_pairing_keys needs two lists
+        g_one, t_one = [clone[0]], [clone[1]]
+        if assign_pairing_keys(g_one, t_one) or g_one[0].key != "pfn_q":
+            _fail("regpair-prefer-q-extract", f"picked={g_one[0].key}")
+    print("SELFTEST PASS regpair-prefer-q-extract: flatten aliases pair on pfn_q")
+
+
 def test_equiv_ref_regpair() -> None:
     """GATE-EQY-004 (4): gold-vs-gold (+ shuffled ports) PASS; fakes and omitted rp_d FAIL."""
     root = Path(__file__).resolve().parents[2]
@@ -1315,7 +1948,11 @@ def main() -> int:
         test_manifest_unproducible,
         test_stray_pyc_reg,
         test_pyc_lib_skip_missing_dir,
+        test_pyc_lib_missing_hard_after_main,
         test_pyc_lib_byte_diff,
+        test_pyclib_single_copy_and_ok,
+        test_pyclib_single_fetch_and_report,
+        test_pyclib_copy_allowlist_transitional,
         test_unlisted_tb_obs,
         test_obs_must_be_output,
         test_sby_bind_missing_signal,
@@ -1324,6 +1961,12 @@ def main() -> int:
         test_cdc_pyc_lib_clk_not_core,
         test_setup_sby_refuses_missing_z3_note,
         test_sby_relative_and_missing,
+        test_formal_bmc_vs_cover_depth,
+        test_formal_inherit_equiv,
+        test_equiv_private_blackbox_hides_const_stub,
+        test_one_module_per_file,
+        test_equiv_blackbox_set_union,
+        test_formal_parent_free,
         test_tb_selfcheck_sh_drops_pycircuit_venv,
         test_tb_requires_verilator,
         test_tb_skip_is_fail,
@@ -1338,9 +1981,11 @@ def main() -> int:
         test_equiv_wide_bus_and_flip,
         test_equiv_real_csr_tlb,
         test_deadreg_extra,
+        test_regpair_prefer_q_alias,
         test_equiv_ref_regpair,
         test_equiv_ref_affine,
         test_equiv_ref_real_compare,
+        run_private_selftests,
     ]
     for fn in tests:
         fn()

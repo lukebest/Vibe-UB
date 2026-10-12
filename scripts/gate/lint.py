@@ -23,6 +23,8 @@ from gatelib import (
     verilator_inc_args,
     module_closure,
 )
+from one_module import check_one_module
+from private_leaves import is_private_leaf, private_skip_finding
 
 WARN_RE = re.compile(
     r"^%(Error|Warning)(?:-([A-Z0-9_]+))?:(?:\s+(\S+):(\d+):)?"
@@ -137,6 +139,7 @@ def main() -> int:
     for u in modules:
         print(f"  {u.kind:4} {u.module:24} {rel(u.file)}")
     findings: list[Finding] = collect_stub_findings("lint")
+    findings.extend(check_one_module(REPO_ROOT))
     if not modules:
         print("lint: no RTL modules discovered")
         return emit_report("lint", findings)
@@ -144,6 +147,9 @@ def main() -> int:
     # when they appear under rtl/. Handwritten whitelist and registered
     # blackbox.yml stubs still lint. ub_cmn_mem_1r1w is a normal cmn leaf.
     for unit in modules:
+        if is_private_leaf(unit.module):
+            findings.append(private_skip_finding("lint", unit.module, rel(unit.file)))
+            continue
         needed = module_closure(unit.module, disc) or [unit.file]
         findings.extend(lint_module(unit.module, unit.file, needed, incdirs))
     return emit_report("lint", findings)

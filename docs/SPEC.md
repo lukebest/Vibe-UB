@@ -500,7 +500,7 @@ M1 **只有** `core_clk`。它就是 PMA 并行字时钟：
 - 多时钟是 M1 **非目标**。产品通路不做 CDC。
 - PMA 模型与 PCS 同拍于 `core_clk`。xN 时接口宽度 `N*32`，无需跨时钟齿轮箱。
 - 工艺先用 Sky130 开源 PDK 代理值估算（§13 A-20）。`F_CORE` 已按上式确定，与工艺无关。
-- 固件从生成头文件 `ub_regs.h` 取 `F_CORE`（`F_CORE` 将作为 `regmap.yaml` 全局参数，由 `gen_regmap.py` 在 #11 之后的 REGMAP PR 发出；本 PR 不改 `regmap.yaml`）。`RETRY_WAIT_CYC` 复位默认 323 拍按本 `F_CORE` 计算，见 §6.3。
+- 固件从生成头文件 `ub_regs.h` 取 `F_CORE`（`F_CORE` 将作为 `regmap.yaml` 全局参数，由 `gen_regmap.py` 在 #11 之后的 REGMAP PR 发出；本 PR 不改 `regmap.yaml`）。`RETRY_WAIT_CYC` 与 `PROBE_WAIT_CYC` 复位默认 323 拍按本 `F_CORE` 计算，见 §6.3 / §6.1。
 
 pyc4.0 的 CDC 原语仍只允许按 §4.3 使用；M1 生成网表中不应出现跨时钟 FIFO。后续里程碑若引入第二时钟，再开新决策，不在 M1 预留 `pma_clk` 端口。
 
@@ -621,7 +621,11 @@ M1 bring-up 裁剪（默认参数已确认）：
 
 顶层 `link_up` / `link_ready` 对应上述变量，均为电平；DLL 只看 `LinkUp` 电平（UB-DL §4.2）。Retrain 期间 `LinkUp` **保持 1**，回到 Idle 再清 0（§13 A-22）。§10.2 观察口保持原定义：`tb_obs_link_up` = Null\|Active，`tb_obs_link_ready` = Active。
 
-**`Send_NullBlock` → `Link_Active`（条件已定，§3.4.3.6）：** 全部已配置 lane 上收到 **8** 个连续 Null Block，且在收到第一个之后至少已发送 **16** 个 Null Block；Null Block 出现在带 SDF 的 AMCTL 之后；开始处理数据流前 deskew 完成。超时 **2 ms** 则 Retrain 或 Idle（同节）。
+**`Send_NullBlock` → `Link_Active`（条件已定）：**
+
+规范口径（UB-PHY §3.4.3.6）：全部已配置 lane 上收到 **8** 个连续 Null Block，且在收到第一个之后至少已发送 **16** 个 Null Block；Null Block 出现在带 SDF 的 AMCTL 之后；开始处理数据流前 deskew 完成。超时 **2 ms** 则 Retrain 或 Idle（同节）。
+
+**计数（规范派生，UB-PHY §3.4.3.6）：** RX 需连续 8 个 `pcs2lmsm_null_blk` 脉冲。TX 在收到第一个 RX Null Block 之后计 `pcs2lmsm_tx_null_blk`，达到 **≥16**。
 
 **空块计数口（已定，§13 A-23）：**
 
@@ -631,6 +635,18 @@ M1 bring-up 裁剪（默认参数已确认）：
 | `pcs2lmsm_tx_null_blk` | in | 1 | **1 拍脉冲**，复位 0 | **LMSM** 在收到第一个 RX 脉冲之后累加 TX（满 16） |
 
 PCS 职责：deskew 完成且 AMCTL+SDF 之后，对全部已配置 RX lane 对齐的一个 Null Block 给一拍 `pcs2lmsm_null_blk`；全部已配置 TX lane 发出一个 Null Block 时给一拍 `pcs2lmsm_tx_null_blk`。PCS **不**保持 8/16 计数。8/16 的单位是 Null Block。
+
+**计数细则（Xia 裁定 2026-10-12 / D20）：**
+
+- **进入拍：** 状态寄存器首次等于 `Send_NullBlock` 的那一拍。该拍 `rx_cnt`、`tx_cnt` 与「已收到第一个 RX Null Block」标志保持 0，到达的脉冲不计入；从下一拍开始计数。进入前到达的脉冲忽略。
+- 离开本态（到 Discovery、Retrain、`Link_Idle`、超时）再进入时，两计数与标志从 0 重开。
+- RX「连续」：已配置 lane 上收到非 Null Block 的 flit 时清 `rx_cnt`。现有 PCS→LMSM 口表给出 `pcs2lmsm_null_blk` 作为 Null 脉冲；非 Null 收包指示口待 Xia 补定（本 SPEC 不新开端口）。
+- RX 因非 Null 清零时，`tx_cnt` 保持现值，标志保持置位（规范只要求收到一个 RX Null Block 之后 TX ≥16）。只有离开 `Send_NullBlock` 才清 TX 计数与该标志。
+- TX 计数从与第一个 RX 脉冲同一拍的 TX 脉冲起算（该拍 TX 脉冲计入）。
+- 计数饱和：RX 到 8，TX 到 16。
+- 每拍判定：`rx_cnt==8` 且 `tx_cnt>=16`。两计数在同一拍到满时当拍条件成立，下一时钟沿 LMSM 进入 `Link_Active`。无其它先后次序要求。
+
+**同拍出口优先级（Xia 裁定 2026-10-12 / D20）：** 已写的 2 ms `Send_NullBlock` 超时与 Discovery 出口优先于 8/16 计数转 `Link_Active`。
 
 **官方超时（已定，时长；周期数 = 时长 × `F_CORE`，§4.1）：**
 
@@ -646,8 +662,10 @@ PCS 职责：deskew 完成且 AMCTL+SDF 之后，对全部已配置 RX lane 对�
 | `Retrain.Confirm` | 48 ms | §3.4.3.8 |
 | `Change_Speed` 失败回 Idle | 48 ms | §3.4.3.9 |
 | `Equalization`（≤ DR4） | EQ.Passive 32 ms；EQ.Active 24 ms | §3.4.2.9、§3.4.3.10 |
-| `Probe.Wait` / `Probe.Confirm` | 固定参数 **323** 拍（ceil(4 µs × `F_CORE`)，§4.1 `F_CORE` ≈ 80.57 MHz）。无 CSR 可调字段。验证期可用 `LMSM_TMR_SCALE` 缩短步进 | §3.4.3.2；§13 A-08 |
+| `Probe.Wait` / `Probe.Confirm` | `PROBE_WAIT_CYC`：16 bit CSR，复位 **323**，合法 1..65535；进入等待当拍采样。见下段 | §3.4.3.2；§13 A-08；Xia 裁定 2026-10-12 / D20 |
 | `Change_Speed` 电气空闲停留 | M1 最短停留后回 Retrain | §3.4.3.9；§13 A-09 |
+
+**`PROBE_WAIT_CYC`（Xia 裁定 2026-10-12 / D20；交叉 §4.1、§13 A-08）：** CSR 字段宽 **16** bit，单位 `core_clk` 拍。复位值 **323** = ceil(4 µs × `F_CORE`)，`F_CORE` ≈ 80.57 MHz（§4.1）。合法范围 **1..65535**（上限约 813 µs）。**0** 为保留/非法：硬件把 0 当 323（复位默认）；固件把 0 与越界值判为非法配置并拒绝。叶子计数器/比较器宽 **16** bit（按合法范围上限 65535 定宽）。`ub_lmsm` 以输入口 `probe_wait_cyc[15:0]` 接 `ub_csr`，参数默认 323。进入 Probe 等待（`Probe.Wait` / `Probe.Confirm`）的当拍采样并装载当时的 `PROBE_WAIT_CYC`（0 折成 323）；本轮等待用该采样值；计数进行中的 CSR 写从下一次进入等待起生效。计数到达该采样值的当拍超时。`PROBE_WAIT_CYC` 与 `RETRY_WAIT_CYC`、`F_CORE` 一并写入 #11 之后的 REGMAP PR（`gen_regmap.py` 发出）；本 PR 不改 `regmap.yaml`。验证期可用 `LMSM_TMR_SCALE` 缩短步进。
 
 `cfg_*` LTB 通告针脚：端口保留；M1 用参数或绑死默认通告 DR0，后续由 CSR / 附录 D 镜像驱动电平（§13 A-24）。
 
@@ -697,7 +715,7 @@ REQ / WAIT：只允许 Retry_Idle / Retry_Req / Retry_Ack；其它 DLLCB/DLLDP �
 
 阈值（已定，规范推荐已采用，§13 A-12）：`NUM_RETRY_THRESHOLD=15`，`NUM_PHY_REINIT_THRESHOLD=4`。
 
-**`RETRY_WAIT_CYC`（已定，§13 A-10；交叉 §4.1）：** CSR 字段宽 **16** bit，单位 `core_clk` 拍。复位值 **323** = ceil(4 µs × `F_CORE`)，`F_CORE` ≈ 80.57 MHz（§4.1）。合法范围 **1..65535**（上限约 813 µs）。**0** 为保留/非法：硬件把 0 当 323（复位默认）；固件把 0 与越界值判为非法配置并拒绝。叶子计数器/比较器宽 **16** bit（按合法范围上限 65535 定宽）。`ub_dll_retry` 以输入口 `retry_wait_cyc[15:0]` 接 `ub_csr`，参数默认 323。固件从 `ub_regs.h` 取 `F_CORE`（`regmap.yaml` 全局参数由后续 REGMAP PR 经 `gen_regmap.py` 发出；本 PR 不改 `regmap.yaml`）。
+**`RETRY_WAIT_CYC`（已定，§13 A-10；交叉 §4.1）：** CSR 字段宽 **16** bit，单位 `core_clk` 拍。复位值 **323** = ceil(4 µs × `F_CORE`)，`F_CORE` ≈ 80.57 MHz（§4.1）。合法范围 **1..65535**（上限约 813 µs）。**0** 为保留/非法：硬件把 0 当 323（复位默认）；固件把 0 与越界值判为非法配置并拒绝。叶子计数器/比较器宽 **16** bit（按合法范围上限 65535 定宽）。`ub_dll_retry` 以输入口 `retry_wait_cyc[15:0]` 接 `ub_csr`，参数默认 323。固件从 `ub_regs.h` 取 `F_CORE`（`PROBE_WAIT_CYC`、`RETRY_WAIT_CYC`、`F_CORE` 由后续 REGMAP PR 经 `gen_regmap.py` 发出；本 PR 不改 `regmap.yaml`）。
 
 **装载与超时沿（已定）：** 进入 WAIT 的当拍采样并装载当时的 `RETRY_WAIT_CYC`（0 折成 323）。本轮 WAIT 计数用该采样值；计数进行中的 CSR 写从下一次进入 WAIT 起生效。计数到达该采样值的当拍给出 `ub_dll_retry_wait_to`（1 拍脉冲）并走 WAIT → REQ；到达前一拍保持 WAIT。
 
@@ -778,7 +796,7 @@ ACK 态：只发应答集与标记重放块；收方向仍正常收。
 | 非法 / 未使能 VL | NW TX `nw_tx_vl` | 整包丢弃；`CNT_BAD_VL` +1；粘滞 `IRQ_STATUS.BAD_VL` | §4.5 |
 | CSR 未映射地址 | 译码 | 读返回 0 且 `csr_err=1`；写忽略且 `csr_err=1`（响应在请求下一拍） | 项目约定 |
 
-超时的具体微秒/拍数：规范有的以节号为准（例如部分 LMSM 超时在 §3.4.3.x），实现时对照，**不抄进本仓库**。Probe 等待固定参数 323 拍；`RETRY_WAIT_CYC` 复位 323、CSR 可调，见 §6.1 / §6.3。
+超时的具体微秒/拍数：规范有的以节号为准（例如部分 LMSM 超时在 §3.4.3.x），实现时对照，**不抄进本仓库**。`PROBE_WAIT_CYC` 与 `RETRY_WAIT_CYC` 均为 16 bit CSR、复位 323，见 §6.1 / §6.3。
 
 信用：0 信用只反压。下溢（实现把计数减过 0）才走错误计数 / 粘滞 / irq。对端少归还走超时（§4.8.1）。RTL 不对下溢做 assertion。
 
@@ -839,7 +857,8 @@ M1 列中 Xia 提出的默认值已由船长确认。2026-10-12 裁定见 D20 / 
 | DLLDP 最大 flit | `MAX_DP_FLITS` | 512 | 512 | UB-DL §4.3.2.1（1–512 flit） |
 | `NUM_RETRY_THRESHOLD` | 同名 | 15 | 同 | §4.7.3.3 规范推荐已采用（§13 A-12） |
 | `NUM_PHY_REINIT_THRESHOLD` | 同名 | 4 | 同 | §4.7.3.3 规范推荐已采用（§13 A-12） |
-| RETRY WAIT 超时 | `RETRY_WAIT_CYC` | 323（16 bit CSR，1..65535；0→323） | CSR 可调 | §6.3、§4.1、§13 A-10。复位 ceil(4 µs × `F_CORE`)=323；叶子口 `retry_wait_cyc[15:0]`，计数器 16 bit |
+| RETRY WAIT 超时 | `RETRY_WAIT_CYC` | 323（16 bit CSR，1..65535；0→323） | CSR 可调 | §6.3、§4.1、§13 A-10。复位 ceil(4 µs × `F_CORE`)=323；叶子口 `retry_wait_cyc[15:0]`，计数器 16 bit。与 `PROBE_WAIT_CYC`、`F_CORE` 一并进 #11 之后的 REGMAP PR |
+| Probe 等待超时 | `PROBE_WAIT_CYC` | 323（16 bit CSR，1..65535；0→323） | CSR 可调 | §6.1、§4.1、§13 A-08；Xia 裁定 2026-10-12 / D20。进入等待当拍采样；叶子口 `probe_wait_cyc[15:0]`，计数器 16 bit。本 PR 不改 `regmap.yaml` |
 | 预编码 | `PRECODE_EN` | 0（关） | **待定** | UB-PHY §3.3.2；M1 默认关，已定 |
 | 工艺 | — | Sky130 开源 PDK 代理 | — | §13 A-20；估算用 |
 | 目标频率 | `F_CORE` | ≈80.57 MHz | 同 | `2.578125e9/32`；已定 |
@@ -1055,7 +1074,7 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 | A-05 | `pma_rx_data_valid_lane` | **已定** | 不用 per-lane valid；deskew 用 AMCTL 位置；端口删除并列非目标 | §1.2、§3.2.4 |
 | A-06 | `pma_tx_width` / `pma_rx_width` | **已定** | 与 `NUM_LANES_*` 同：二进制 1/2/4/8，其余保留，TB assert | §3.2.5、§9 |
 | A-07 | PMA 均衡针脚 | **已定** | M1 不加；列为非目标（DR0） | §1.2、§3.2.5 |
-| A-08 | Probe 等待 / 部分计数超时 | **已定** | 固定参数 323 拍（ceil(4 µs × `F_CORE`)）；无 CSR 可调字段；验证期用 `LMSM_TMR_SCALE` 缩短步进 | §6.1、§9 |
+| A-08 | Probe 等待 / 部分计数超时 | **已定** | 16 bit CSR `PROBE_WAIT_CYC`，单位拍，复位 323，合法 1..65535，0 硬件当 323、固件拒；进入等待当拍采样，到达当拍超时；叶子口 `probe_wait_cyc[15:0]`。Xia 裁定 2026-10-12 / D20 | §6.1、§4.1、§9 |
 | A-09 | `Change_Speed` 电气空闲停留 | **已定** | M1 不改速：最短停留后回 Retrain；超时 48 ms；列为非目标 | §1.2、§6.1 |
 | A-10 | `RETRY_WAIT_CYC` | **已定** | 16 bit CSR，单位拍，复位 323，合法 1..65535，0 硬件当 323、固件拒；进入 WAIT 当拍采样，到达当拍超时 | §6.3、§4.1、§9 |
 | A-11 | `LMSM_TMR_SCALE` / `AM_IVL_SCALE` | **已定** | 0 → 每拍 +1；非 0 → 每拍 +SCALE | §9、§10.4 |
@@ -1070,7 +1089,7 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 | A-20 | 工艺节点 | **已定** | 先用 Sky130 开源 PDK 代理值估算 | §4.1、§8、§9 |
 | A-21 | Probe 端接检测算法 | **已定** | 数字侧只看 `pma_probe_pulse_en` / `pma_term_detect`；算法细节列为非目标 | §1.2、§2.3、§3.2.5 |
 | A-22 | Retrain 期间 `LinkUp` | **已定** | 保持 1，回到 Idle 再清 0；§10.2 观察口保持原定义 | §6.1 |
-| A-23 | `pcs2lmsm_null_blk` / `pcs2lmsm_tx_null_blk` | **已定** | 各 1 bit、1 拍脉冲、复位 0；8/16 计数在 LMSM，单位为 Null Block | §3.3.4、§6.1 |
+| A-23 | `pcs2lmsm_null_blk` / `pcs2lmsm_tx_null_blk` | **已定** | 各 1 bit、1 拍脉冲、复位 0；8/16 计数在 LMSM（规范派生 UB-PHY §3.4.3.6；细则 Xia 裁定 2026-10-12 / D20）。RX 连续清零所需的非 Null 收包口待 Xia 补定 | §3.3.4、§6.1 |
 | A-24 | `cfg_*` LTB 通告针脚 CSR 来源 | **已定** | 端口保留；M1 用参数或绑死默认通告 DR0 | §6.1 |
 | A-VL | VL 规划与 SL→VL 映射 | **已定** | 第一波 VL0=请求、VL1=响应，Writeback 时加 VL2；DLL 按 `NUM_VL` 参数化；NW SL→VL 做成 CSR，复位 SL0→VL0、SL1→VL1 | §9 |
 | A-BF-1 | FEC 编解码拍数 / 并行度 | **实现后回填** | 实现后回填 §5 | §5 |
@@ -1086,7 +1105,7 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 | A-CL-5 | DR0 下 EQ / `RXEQ_Optimize` | **已定** | 按官方超时实现，见 §6.1 | §6.1 |
 | A-CL-6 | `tb_obs_dll_sm_st` 项目编码 | **已定** | 见 §10.3 | §10.3 |
 
-`tb_obs_dll_sm_st` 与 LMSM 顶层编码已在 §10.3 关闭。无未标状态的待定行。
+`tb_obs_dll_sm_st` 与 LMSM 顶层编码已在 §10.3 关闭。A-23 的 RX 连续清零仍缺 PCS→LMSM 非 Null 收包指示口，待 Xia 补定；其余行已标状态。
 
 ### 13.1 具名覆盖率 waiver（已定需要，实现时落文件）
 

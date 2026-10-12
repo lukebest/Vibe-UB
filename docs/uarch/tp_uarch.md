@@ -299,6 +299,25 @@ PSN 规则（§6.4.1【Xia】）：24 bit，next = (cur+1) mod 2^24；最大已�
 
 ---
 
+## 11. Unknown items（wave-1 `ub_tp_bypass` RTL）
+
+契约标 **未知** 的口不出现在本叶 RTL。登记如下（只写节号 / 口名，不填值）：
+
+| 项 | 契约 | 本叶 |
+| --- | --- | --- |
+| `ta2tp_op_len` | §3；宽 **未知**（Q-8） | 不作为 RTL 口 |
+| `ta2tp_mode` 编码 | §3；四模式编码 **未知** | 不作为 RTL 口 |
+| `ta2tp_cmp_rspst` / `ta2tp_cmp_rspinfo` | §3；宽 **未知**（M-3） | 不作为 RTL 口（ROL 属第二波） |
+| 24 b DCNA 口 | §2；优先通路锁 16 b；24 b 格式口宽 **未知** | 不作为 RTL 口；只用 `ta2tp_dcna[15:0]` / `tp2nw_dcna[15:0]` |
+| NTH.NLP→TAH 码点 | §2 **未知**（PR #61） | `tp2nw_nlp` 本叶置 0；不发明码点 |
+| `tp2nw_sl` / `lbf` / `rt` / `cci` 的 TA 侧来源 | 契约只锁 TP→NW 边带宽 | 本叶置 0；来源标 **未知** |
+| `nw2tp_icrc_err` | CFG9 无 ICRC（M-7 / B.2.6） | 不作为 RTL 口 |
+| `nw2tp_drop` / `tp2ta_done` / `tp2ta_fail` / `tp2ta_msn_*` / `ta2tp_cmp_*` / `ta2tp_opcode` / `ta2tp_tassn` | 宽已锁者留给父级或第二波 | 本叶不引出（无状态完成 / 无 TPH） |
+
+与 §10.1 的 Q-1 / Q-2 / Q-8 / Q-9 / Q-10 一并视为已登记未知，本叶不填值。
+
+---
+
 ## 附：设计-B 选择汇总
 
 - D1 TX 仲裁优先级（§3）。D2 口名与宽跟契约 §2 / §3，不再自拟。D3 CTX 用 FF。D4 RTB 静态切片、DEPTH 4096。D5 DSC 直接寻址。D6 µs 分频 Q16 阈值。D7 RX 头 flit 错位处理 1 拍。

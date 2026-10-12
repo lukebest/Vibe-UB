@@ -96,13 +96,13 @@ def test_loader_parses_all_real_headers():
         assert header.has_port("out_ready")
 
 
-def test_derived_yaml_matches_109e1c7():
+def test_derived_yaml_matches_43_head():
     ok, detail = live_matches_derived()
     assert ok, detail
     recorded = load_derived()
     live = collect_live()
     assert recorded.get("final") is True
-    assert recorded.get("source_head") == SOURCE_HEAD == "109e1c72e05415af18ac7f6274f4a45fd3c25cd8"
+    assert recorded.get("source_head") == SOURCE_HEAD == "3d08513a7e334d7deb3b3279b203b05277faf713"
     assert set(live["ptw_enc_classes"]) == set(ENC_CLASSES)
     assert len(live["ptw_enc_cross"]) == 4
     for level in live["ptw_enc_cross"].values():

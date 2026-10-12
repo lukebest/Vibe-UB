@@ -30,7 +30,7 @@ def digests_path() -> Path:
 
 
 # #43 head the lockfile was last regenerated against.
-SOURCE_HEAD = "109e1c72e05415af18ac7f6274f4a45fd3c25cd8"
+SOURCE_HEAD = "3d08513a7e334d7deb3b3279b203b05277faf713"
 
 
 def collect_live() -> dict[str, Any]:

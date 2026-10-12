@@ -140,17 +140,21 @@ module ub_mem_ptw_hooks_harness (
     .evt_ready(evt_ready)
   );
 
-  // Yosys 0.33 treats dotted hierarchical refs as implicit undriven
-  // wires. bind into ub_mem_ptw so the cut outputs are the local
-  // pyc_instance_* nets (u_desc_dec.out_valid/desc_v/desc_kind).
-  bind ub_mem_ptw ub_mem_ptw_hooks_inv u_hooks_inv (
+  // Yosys 0.33 drops dotted hierarchical refs and ignores bind.
+  // Local taps are assigned from the flattened u_desc_dec cut
+  // ports in ub_mem_ptw_hooks.sby (`connect -set` after flatten).
+  wire        tap_dec_out_valid;
+  wire        tap_desc_v;
+  wire [1:0]  tap_desc_kind;
+
+  ub_mem_ptw_hooks_inv u_hooks_inv (
     .core_clk(core_clk),
     .rst_pyc(rst_pyc),
     .tb_mem_ptw_obs_st(tb_mem_ptw_obs_st),
     .tb_mem_ptw_obs_rd_pend(tb_mem_ptw_obs_rd_pend),
-    .dec_out_valid(pyc_instance_143),
-    .desc_v(pyc_instance_144),
-    .desc_kind(pyc_instance_145),
+    .dec_out_valid(tap_dec_out_valid),
+    .desc_v(tap_desc_v),
+    .desc_kind(tap_desc_kind),
     .fill_valid(fill_valid)
   );
 

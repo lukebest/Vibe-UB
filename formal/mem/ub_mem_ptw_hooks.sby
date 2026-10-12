@@ -48,6 +48,11 @@ read -formal ub_mem_ptw_desc_dec_cut.sv
 hierarchy -check -top ub_mem_ptw_hooks_harness
 proc
 flatten
+# Drive hooks_inv taps from the free cut's public ports (Yosys 0.33
+# cannot resolve dotted refs or bind). Names are flatten of u_desc_dec.
+connect -set tap_dec_out_valid \u_dut.u_desc_dec.out_valid
+connect -set tap_desc_v \u_dut.u_desc_dec.desc_v
+connect -set tap_desc_kind \u_dut.u_desc_dec.desc_kind
 opt
 memory -nomap
 opt -purge

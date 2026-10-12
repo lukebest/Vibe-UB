@@ -149,3 +149,25 @@
 其它标 SRAM / 行为 stub 的大缓冲（如线 A `ub_dll_retry`）**应当**用同一原语，避免第二套 stub 口。
 
 HOOKS 上的 backdoor 只允许 SPEC §10 点名的阵列，口名 `tb_<inst>_bd_*`（阵列口 + `tb_<inst>_bd_vld_*`）与门控见 SPEC §10.5 与上文 §4。PRODUCT 无 `tb_*`。
+
+**实现路径（本 PR，接在 #20 §10 正文之后，不改写上表）：**
+
+| 路径 | 谁 | 做什么 |
+| --- | --- | --- |
+| `pycircuit/cmn/` → `rtl/cmn/`（+HOOKS 时的 `tb_<inst>_bd_*`） | 设计-B | pycc 生成的**普通叶子**。走 emit-consistency + Yosys `equiv`。 |
+| 门禁 stub / black box 名单 | 验证维护 | **没有**单独的 primitive 种类。本原语就是普通 pycc 叶子；**仅当**换成 SRAM 宏时才登记为 stub。换宏不改端口、不改测试。`valid_outside: true` 表示 valid 位在阵列外的复位 flop（如线 C UMMU/TLB）。 |
+| `formal/cmn/` | 架构 | formal-only 可综合行为模型 + `ub_cmn_mem_1r1w_if_props`。**不是**产品 RTL。用 `$anyconst` 盯一个地址（`NSEG` bit `written` + 该地址数据），大 `DEPTH` 也能收敛。written 跟踪只在 property/bind 模块，**不进产品 RTL**。 |
+| `model/ub_cmn_mem_1r1w.py` | 架构 | scoreboard 参考。 |
+| `tb/cmn/` | 验证-B | cocotb + Verilator；PRODUCT 与 HOOKS。 |
+
+**`rdata` 何时有效：** `rdata` 寄存器和阵列都**不复位**。`rdata` **只**在完成一次「已写入地址 / 段」的读之后才有效。模型 `rdata_valid` 是 **`NSEG` bit 段掩码**（`NSEG=1` 时仍是 1 bit，行为与整字写兼容）。未定义段的 `rdata` 为 None / unspecified；检查器和 scoreboard **只**比较 valid 段（整字比较仅当 `is_defined`，即全部段有效）。
+
+**分段写使能 `WMASK_W`（默认 `WIDTH`）：** `WIDTH` 必须是 `WMASK_W` 的整数倍；`NSEG = WIDTH/WMASK_W`。`NSEG=1`（整字写）端口表不变。仅当 `NSEG>1` 时多一个输入 `wmask[NSEG-1:0]`：bit i=1 写第 i 段（`[i*WMASK_W +: WMASK_W]`），其余段保持旧值。同址同拍 **按段 read-old**。
+
+**变体命名：** `ub_cmn_mem_1r1w_d<DEPTH>w<WIDTH>`；`NSEG>1` 时追加 `m<WMASK_W>`。例：C 线 `ub_cmn_mem_1r1w_d512w512m64`；门禁 / formal 小配置 `ub_cmn_mem_1r1w_d64w64m16`。
+
+**`ASSERT_NO_UNINIT_READ`（默认 1）：** written **按段**跟踪。`=1`：读时该字**任一**段自复位以来未写过即违规。`=0`：不报违规（未写段的 `rdata` 未定义，由所有者屏蔽）。Python 构造参数 `assert_no_uninit_read`；形式化模块参数 `ASSERT_NO_UNINIT_READ`。门禁名单 `valid_outside: true` 的实例（valid 在阵列外）设 **0**。复位之后阵列内容同样未定义。
+
+**formal：** `$anyconst` 盯一个地址。性质：未掩码段不变、掩码段写入、按段 read-old、按段未初始化检查。覆盖：单段写、相邻段写、全段写。跑现有整字小配置 + `d64w64m16`。
+
+**越界：** RTL **不截断**地址。`we`/`re` 时 `waddr`/`raddr >= DEPTH` 由断言标出（非 2 幂 `DEPTH` 时 `AW` 多出的编码会走到这里）。

@@ -1,5 +1,8 @@
 # One-button tool gate. CI jobs call the same scripts/gate/*.sh files.
-.PHONY: gate lint synth-check cdc-rdc formal regmap-consistency tb-selfcheck rtl-emit-consistency hooks-port-consistency pycircuit-provenance equiv spec-leak contract-check gate-selftest versions
+# emit: pycc PRODUCT + HOOKS. Leaf registry: pycircuit/emit.py LEAVES.
+.PHONY: gate lint synth-check cdc-rdc formal regmap-consistency tb-selfcheck rtl-emit-consistency hooks-port-consistency pycircuit-provenance equiv spec-leak contract-check gate-selftest versions emit
+
+PY ?= python3
 
 gate:
 	scripts/gate/run_all.sh
@@ -45,3 +48,6 @@ tb-selfcheck:
 
 versions:
 	scripts/gate/print_versions.sh
+
+emit:
+	$(PY) scripts/emit_rtl.py

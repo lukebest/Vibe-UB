@@ -217,14 +217,13 @@ module ub_mem_ptw_smoke_tb;
     integer guard;
     begin
       guard = 0;
-      while (!fill_valid && !flt_valid) begin
+      while (!fill_valid && !flt_valid && guard <= 80) begin
         tick;
         guard = guard + 1;
-        if (guard > 80) begin
-          $display("FAIL: walk did not complete");
-          errors = errors + 1;
-          disable wait_done;
-        end
+      end
+      if (!fill_valid && !flt_valid) begin
+        $display("FAIL: walk did not complete");
+        errors = errors + 1;
       end
     end
   endtask

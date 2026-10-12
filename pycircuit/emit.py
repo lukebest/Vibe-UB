@@ -148,7 +148,7 @@ def _header(
     if leaf == "ub_mem_tlb":
         extra = f"// Instantiates {STUB_MOD} by name (design-B PR #21).\n"
     if leaf == "ub_mem_ptw":
-        extra = f"// Instantiates {STUB_DEC} (public placeholder; body stripped).\n"
+        extra = f"// Instantiates {STUB_DEC} (public placeholder stub).\n"
     contract = ""
     if handwritten_contract:
         contract = "// contract_sha256: HANDWRITTEN\n"

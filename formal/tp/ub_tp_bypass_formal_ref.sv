@@ -1,57 +1,58 @@
 // Formal-only synthesizable CFG9 bypass (tp_uarch §4.1). Not product RTL.
-// Matches pycircuit/tp/ub_tp_bypass.py: 1-cycle registered slices,
-// 1 outstanding op, no ICRC / RTP / CTP / GBN.
+// DATA_W=8 (product is 160 b) so BMC stays tractable; handshake and
+// sidebands match pycircuit/tp/ub_tp_bypass.py.
+// 1-cycle registered slices, 1 outstanding op, no ICRC / RTP / CTP / GBN.
 
 module ub_tp_bypass_formal_ref (
-  input  wire         core_clk,
-  input  wire         rst_pyc,
-  input  wire [159:0] ta2tp_data,
-  input  wire         ta2tp_valid,
-  output wire         ta2tp_ready,
-  input  wire         ta2tp_sop,
-  input  wire         ta2tp_eop,
-  input  wire         ta2tp_op_valid,
-  output wire         ta2tp_op_ready,
-  input  wire         ta2tp_bypass,
-  input  wire [15:0]  ta2tp_dcna,
-  output wire [159:0] tp2nw_data,
-  output wire         tp2nw_valid,
-  input  wire         tp2nw_ready,
-  output wire         tp2nw_sop,
-  output wire         tp2nw_eop,
-  output wire         tp2nw_bypass,
-  output wire [15:0]  tp2nw_dcna,
-  output wire [3:0]   tp2nw_sl,
-  output wire [2:0]   tp2nw_nlp,
-  output wire [7:0]   tp2nw_lbf,
-  output wire [1:0]   tp2nw_rt,
-  output wire [15:0]  tp2nw_cci,
-  input  wire [159:0] nw2tp_data,
-  input  wire         nw2tp_valid,
-  output wire         nw2tp_ready,
-  input  wire         nw2tp_sop,
-  input  wire         nw2tp_eop,
-  input  wire         nw2tp_err,
-  input  wire         nw2tp_flush,
-  input  wire         nw_link_up,
-  output wire [159:0] tp2ta_data,
-  output wire         tp2ta_valid,
-  input  wire         tp2ta_ready,
-  output wire         tp2ta_sop,
-  output wire         tp2ta_eop,
-  output wire         tp2ta_err
+  input  wire        core_clk,
+  input  wire        rst_pyc,
+  input  wire [7:0]  ta2tp_data,
+  input  wire        ta2tp_valid,
+  output wire        ta2tp_ready,
+  input  wire        ta2tp_sop,
+  input  wire        ta2tp_eop,
+  input  wire        ta2tp_op_valid,
+  output wire        ta2tp_op_ready,
+  input  wire        ta2tp_bypass,
+  input  wire [15:0] ta2tp_dcna,
+  output wire [7:0]  tp2nw_data,
+  output wire        tp2nw_valid,
+  input  wire        tp2nw_ready,
+  output wire        tp2nw_sop,
+  output wire        tp2nw_eop,
+  output wire        tp2nw_bypass,
+  output wire [15:0] tp2nw_dcna,
+  output wire [3:0]  tp2nw_sl,
+  output wire [2:0]  tp2nw_nlp,
+  output wire [7:0]  tp2nw_lbf,
+  output wire [1:0]  tp2nw_rt,
+  output wire [15:0] tp2nw_cci,
+  input  wire [7:0]  nw2tp_data,
+  input  wire        nw2tp_valid,
+  output wire        nw2tp_ready,
+  input  wire        nw2tp_sop,
+  input  wire        nw2tp_eop,
+  input  wire        nw2tp_err,
+  input  wire        nw2tp_flush,
+  input  wire        nw_link_up,
+  output wire [7:0]  tp2ta_data,
+  output wire        tp2ta_valid,
+  input  wire        tp2ta_ready,
+  output wire        tp2ta_sop,
+  output wire        tp2ta_eop,
+  output wire        tp2ta_err
 );
   wire can_tx_env = nw_link_up & ~nw2tp_flush;
 
   reg        busy_q;
   reg        tx_valid_q;
-  reg [159:0] tx_data_q;
+  reg [7:0]  tx_data_q;
   reg        tx_sop_q;
   reg        tx_eop_q;
   reg [15:0] dcna_q;
   reg        bypass_q;
   reg        rx_valid_q;
-  reg [159:0] rx_data_q;
+  reg [7:0]  rx_data_q;
   reg        rx_sop_q;
   reg        rx_eop_q;
   reg        rx_err_q;
@@ -91,13 +92,13 @@ module ub_tp_bypass_formal_ref (
     if (rst_pyc) begin
       busy_q     <= 1'b0;
       tx_valid_q <= 1'b0;
-      tx_data_q  <= 160'b0;
+      tx_data_q  <= 8'b0;
       tx_sop_q   <= 1'b0;
       tx_eop_q   <= 1'b0;
       dcna_q     <= 16'b0;
       bypass_q   <= 1'b0;
       rx_valid_q <= 1'b0;
-      rx_data_q  <= 160'b0;
+      rx_data_q  <= 8'b0;
       rx_sop_q   <= 1'b0;
       rx_eop_q   <= 1'b0;
       rx_err_q   <= 1'b0;

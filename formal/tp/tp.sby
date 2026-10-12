@@ -1,5 +1,5 @@
 # Wave-1 CFG9 bypass interface (LAYER_CONTRACTS §2 / §3).
-# Formal-only ref; no product RTL. BMC depth covers deepest cover + 6.
+# Formal-only 8-bit-data stub; no product RTL. BMC depth 16 (cover+6).
 
 [tasks]
 bmc
@@ -15,7 +15,7 @@ mode cover
 --
 
 [engines]
-smtbmc z3
+smtbmc --nopresat z3
 
 [script]
 read -formal ub_tp_bypass_if_props.sv

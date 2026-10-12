@@ -32,6 +32,7 @@ formal/*/*_cover/
 formal/*/*_prove/
 formal/*/*_live/
 formal/*/*_assume_diag/
+formal/**/status.sqlite
 
 # Impl quick-synth: never commit PDK / liberty / local work dirs
 .cache/sky130/

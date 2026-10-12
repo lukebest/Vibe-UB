@@ -31,6 +31,26 @@ ports:
   - {name: desc_ill_cause, dir: out, width: 4, desc: 共用非法原因码}
 params: []
 ill_cause_width: 4
+assertions:
+  - AP_PTW_AF
+  - AP_PTW_BLOCK
+  - AP_PTW_CLK
+  - AP_PTW_FAULT
+  - AP_PTW_HS_IN
+  - AP_PTW_HS_OUT
+  - AP_PTW_ILL_AD
+  - AP_PTW_ILL_EQ
+  - AP_PTW_ILL_PRI
+  - AP_PTW_ILL_ZERO
+  - AP_PTW_IN_RDY_RST
+  - AP_PTW_KIND
+  - AP_PTW_KIND_LVL
+  - AP_PTW_LAT1
+  - AP_PTW_LVL
+  - AP_PTW_OUT_HOLD
+  - AP_PTW_RDY
+  - AP_PTW_RST
+  - AP_PTW_XCLASS
 status: draft
 ```
 
@@ -164,7 +184,7 @@ L1 的 1 GB 块与 L2 的 2 MB 块：`desc_kind=2`，`desc_illegal=0`。本条�
 | `AP_PTW_ILL_PRI` | 多个非法原因同时成立时，`desc_ill_cause` 取最小非 0 码。**Xia 裁定 2026-10-12。** |
 | `AP_PTW_ILL_AD` | 原始描述符要求硬件写回 Access / Dirty 时，`out_valid` 拍 `desc_ill_cause=2`（`ILL_HW_AD`）。 |
 | `AP_PTW_AF` | `AF=0` 且不要求硬件写回时，`desc_illegal=0` 且 `desc_af=0`。**Xia 裁定 2026-10-12。** |
-| `AP_PTW_KIND` | `desc_illegal=0` 时 `desc_kind` ∈ {0, 1, 2, 3}，分别 invalid / table / block / page。**Xia 裁定 2026-10-12。** |
+| `AP_PTW_KIND` | `desc_v ⇔ desc_kind≠0`：`desc_v=1` 当且仅当 `desc_kind` 非 0；`desc_v=0` 时 `desc_kind` 必须为 0。`desc_kind` 编码仍为 0 = invalid，1 = table，2 = block，3 = page。**Xia 裁定 2026-10-12；芯片开发PM 2026-10-12。** |
 | `AP_PTW_LVL` | `desc_lvl` ∈ {0, 1, 2, 3}，对应 L0..L3。**Xia 裁定 2026-10-12。** |
 | `AP_PTW_XCLASS` | 成交拍按 `desc_lvl` × {`ENC_INVALID`, `ENC_TBL_PG`, `ENC_BLOCK`} 落入 §3 十二格之一。**Xia 裁定 2026-10-12。** |
 | `AP_PTW_KIND_LVL` | `ENC_TBL_PG`：L0/L1/L2 给出 `desc_kind=1`（table）；L3 给出 `desc_kind=3`（page）。`ENC_BLOCK`：L1 给出 1 GB 块、L2 给出 2 MB 块，`desc_kind=2`。上述格子 `desc_v=1` 且 `desc_illegal=0`。**Xia 裁定 2026-10-12。** |

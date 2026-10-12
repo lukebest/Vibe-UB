@@ -1,8 +1,11 @@
 # Tool-gatekeeper surfaces. Written approval is required for waivers and
 # for changing what the gate blocks (workflow + D10 legacy list).
 # Owner = repository owner / verification lead (lukebest).
+# GATE-OWNED-PATHS: these three trees are gatekeeper-owned.
 
 /waivers/ @lukebest
+/scripts/gate/ @lukebest
+/.github/workflows/ @lukebest
 /scripts/gate/*.yml @lukebest
 /scripts/gate/*.txt @lukebest
 /scripts/gate/blackbox.yml @lukebest

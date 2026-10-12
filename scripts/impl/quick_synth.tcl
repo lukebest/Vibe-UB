@@ -8,7 +8,7 @@
 #   QS_OUTDIR       per-run output directory
 #   QS_CHPARAM      optional Yosys chparam override (SPEC §2.2: not required)
 #   QS_READ_SV      1 to pass -sv to read_verilog
-#   QS_INCDIRS      space-separated -I dirs (rtl/pyc_lib or rtl/common fallback + extras)
+#   QS_INCDIRS      space-separated -I dirs (rtl/pyc_lib required + extras)
 
 set top     $::env(QS_TOP)
 set files   $::env(QS_FILES)

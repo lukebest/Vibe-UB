@@ -42,6 +42,7 @@
 
 ### Changed
 
+- `scripts/impl/quick_synth.*`：`rtl/pyc_lib/` 缺失改为硬失败（目录来自 PR #21，必须存在）；去掉回退 `rtl/common` 的临时 WARN。attest 的 `contract_sha256` 只调用 main 上 `scripts/gate/contract_hash.py`；自测假仓库拷该文件，不再自带副本。
 - SPEC §2.4 / §3.3.4 / §9 / §10.2：`pcs_am_locked` / `tb_inj_am_lock` 改为 1 bit（已配置 RX lane 全锁定）；`ub_pcs_amctl_rx` 含 §3.2.4.4 分 lane 锁定，码字解码在 `ub_pcs_amctl_cw_dec`。Xia 裁定 2026-10-12。
 - `docs/arch/pcs/contracts/ub_pcs_amctl_cw_dec.md`：YAML 增补必填 `assertions:`（正文 8 条 `AP_CWDEC_*`，去重排序）。schema 源 main `73cfa6e1`（#49）。
 - `docs/arch/mem/contracts/ub_mem_ptw_desc_dec.md`：`AP_PTW_KIND` 改为 `desc_v ⇔ desc_kind≠0`（`desc_v=1` 当且仅当 `desc_kind` 非 0；`desc_v=0` 时 `desc_kind` 必须为 0）。编码仍为 0 = invalid / 1 = table / 2 = block / 3 = page。芯片开发PM 2026-10-12。

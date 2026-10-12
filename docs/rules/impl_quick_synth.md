@@ -42,7 +42,7 @@
    - **不**再默认 `chparam`。`--chparam KEY=VAL` / `TOP:KEY=VAL` 只作可选覆盖（模块里若已无该 parameter 则跳过并注明）。
 2. **Yosys**
    - `read_verilog`（`.sv` 加 `-sv`）。默认 **`-I rtl/pyc_lib`**（pycc runtime 原语，如 `pyc_reg.v`，从 TOOLCHAIN.lock 钉住的 pyCircuit 原样拷入）。`--incdir` / 环境变量 `QS_INCDIRS` 可再加目录。
-   - `rtl/pyc_lib/` 尚未落地时（#21 / #5 之前）**回退 `-I rtl/common`**，报告里打一行 `WARN`；临时，定库目录后去掉回退。
+   - `rtl/pyc_lib/` **必须存在**（PR #21 落地的 pycc 运行库）。缺失则硬失败、非 0 退出，不再回退 `rtl/common`。
    - 不把 `` `include `` 目标再列进 `QS_FILES`（否则 `pyc_reg` 会重定义）。
    - 大 SRAM 用 `read_verilog -lib` 作黑盒。
    - `synth -top <m> -flatten`。
@@ -135,7 +135,7 @@ OPEN §13 参数已按 §2.2 做成 `_placeholder` 固定网表时：综合进 p
 | IMP-QS-006 | `_placeholder` 变体单独列表，不计入 PRODUCT 面积合计 | SPEC §2.2 | 2026-10-10 |
 | IMP-QS-007 | 可用 `--baseline-map` 把迁移后的 `<leaf>_<tag>` 对到旧模块+参数；cells / area / depth / slack 相对 baseline 超 10% 标旗 | 本分册 | 2026-10-10 |
 | IMP-QS-008 | `ub_cmn_mem_1r1w`（及 `scripts/gate/blackbox.yml` 中的模块）depth×width 超过可配阈值（默认 4096 bit）作黑盒，SRAM est 列用标明的 bit 面积公式；小实例按 flop 综合；STA 按 1 拍 registered read。阈值与公式在工艺确定后重看 | 本分册；PR #9 §13 | 2026-10-10 |
-| IMP-QS-009 | Yosys 默认 `-I rtl/pyc_lib`（TOOLCHAIN.lock 钉住的 pyCircuit 原语）。目录未到时回退 `rtl/common` 并 WARN。`--incdir` / `QS_INCDIRS` 为额外路径。`pyc_*` 不作报告 top | 本分册；#21 / #5 | 2026-10-10 |
+| IMP-QS-009 | Yosys 默认 `-I rtl/pyc_lib`（TOOLCHAIN.lock 钉住的 pyCircuit 原语，来自 PR #21）。目录缺失则硬失败。`--incdir` / `QS_INCDIRS` 为额外路径。`pyc_*` 不作报告 top | 本分册；#21 | 2026-10-12 |
 | IMP-QS-010 | `ub_dll_crc32` / `ub_dll_crc_check` / `ub_controller_tx` / `ub_controller_rx` 只报「待删除 / to be deleted」，不进合计、不对 baseline | 本分册 | 2026-10-10 |
 | IMP-QS-011 | abc 映射后默认对高扇出数据网插确定性 `buf_4`/`buf_8` 树（max fanout 16）。`--no-buffer` 可关。每叶子报告缓冲后 max fanout。时钟 / 复位网不插。`logic depth` 不计这些 buf，须与 `--no-buffer` 深度一致；slack/area 仍用缓冲后网表。这是 proxy，用来避免无 wire-load 时单 cell 灌数千 load 的悲观 WNS | 本分册 | 2026-10-10 |
 | IMP-QS-012 | 私有叶子契约来自 `docs/arch/*/contracts/<leaf>.md`。STA 周期用契约 `clock.period_ns`；无契约时默认 `core_clk` 12.412 ns | 本分册；contracts README | 2026-10-12 |

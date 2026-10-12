@@ -11,6 +11,7 @@ are lint/TB only. Large ub_cmn_mem_1r1w instances are blackboxed.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import re
@@ -18,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from contextlib import redirect_stderr
 from pathlib import Path
 from typing import Any
 
@@ -275,42 +277,29 @@ def parse_incdirs_env(raw: str | None) -> list[Path]:
     return [Path(p) for p in parts if p]
 
 
-PYC_LIB_FALLBACK_WARN = (
-    "WARN: rtl/pyc_lib/ missing; falling back to rtl/common for Yosys -I "
-    "(temporary until #21/#5 land)"
+PYC_LIB_MISSING = (
+    "rtl/pyc_lib/ is missing; it comes from PR #21 and must be present"
 )
 
 
-def default_pyc_incdir(tree: Path) -> tuple[Path | None, str | None]:
-    """Primary include dir is rtl/pyc_lib (TOOLCHAIN.lock-pinned pyCircuit).
-
-    Until #21/#5 copy primitives there, fall back to rtl/common with a WARN.
-    """
+def default_pyc_incdir(tree: Path) -> Path:
+    """Require rtl/pyc_lib (TOOLCHAIN.lock-pinned pyCircuit from PR #21)."""
     pyc_lib = tree / "rtl" / "pyc_lib"
     if pyc_lib.is_dir():
-        return pyc_lib.resolve(), None
-    common = tree / "rtl" / "common"
-    if common.is_dir():
-        return common.resolve(), PYC_LIB_FALLBACK_WARN
-    return None, (
-        "WARN: neither rtl/pyc_lib nor rtl/common exists; `include may fail"
-    )
+        return pyc_lib.resolve()
+    die(PYC_LIB_MISSING)
+    raise SystemExit(2)
 
 
-def yosys_incdirs(
-    tree: Path, extra: list[Path] | None = None
-) -> tuple[list[Path], str | None]:
-    """Default -I rtl/pyc_lib (or rtl/common fallback); then --incdir / QS_INCDIRS."""
-    dirs: list[Path] = []
-    primary, warn = default_pyc_incdir(tree)
-    if primary is not None:
-        dirs.append(primary)
+def yosys_incdirs(tree: Path, extra: list[Path] | None = None) -> list[Path]:
+    """Default -I rtl/pyc_lib; then --incdir / QS_INCDIRS."""
+    dirs: list[Path] = [default_pyc_incdir(tree)]
     for e in extra or []:
         p = e if e.is_absolute() else (tree / e)
         p = p.resolve()
         if p.is_dir() and p not in dirs:
             dirs.append(p)
-    return dirs, warn
+    return dirs
 
 
 def is_library_cell(stem: str) -> bool:
@@ -1302,9 +1291,7 @@ def synthesize_one(
         ch_cmd = "chparam " + " ".join(parts) + f" {top}"
 
     env = os.environ.copy()
-    incdirs, inc_warn = yosys_incdirs(tree, extra_incdirs)
-    if inc_warn:
-        notes.append(inc_warn)
+    incdirs = yosys_incdirs(tree, extra_incdirs)
     env["QS_TOP"] = top
     env["QS_FILES"] = " ".join(str(p) for p in files)
     env["QS_LIB_FILES"] = " ".join(str(p) for p in lib_files)
@@ -1690,9 +1677,7 @@ def write_private_skip_table(rows: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def write_full_markdown(
-    rows: list[dict[str, Any]], inc_warn: str | None = None
-) -> str:
+def write_full_markdown(rows: list[dict[str, Any]]) -> str:
     deleted = [
         r
         for r in rows
@@ -1718,8 +1703,6 @@ def write_full_markdown(
     ]
     totals = product_area_totals(rows)
     parts: list[str] = []
-    if inc_warn:
-        parts.extend([inc_warn, ""])
     parts.extend(
         [
             "## PRODUCT / HOOKS",
@@ -2077,8 +2060,7 @@ def self_check() -> int:
             "endmodule\n",
             encoding="utf-8",
         )
-        dirs, warn = yosys_incdirs(tree)
-        expect(warn is None, f"no fallback warn when pyc_lib exists: {warn}")
+        dirs = yosys_incdirs(tree)
         expect(any(p.name == "pyc_lib" for p in dirs), f"incdirs {dirs}")
         if not shutil.which("yosys"):
             failures.append("yosys missing; include-read self-test not run")
@@ -2221,12 +2203,19 @@ Path Type: max
     with tempfile.TemporaryDirectory() as td:
         tree = Path(td)
         (tree / "rtl" / "common").mkdir(parents=True)
-        dirs, warn = yosys_incdirs(tree)
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            try:
+                yosys_incdirs(tree)
+                expect(False, "missing rtl/pyc_lib must hard-error")
+            except SystemExit as exc:
+                expect(exc.code != 0, f"pyc_lib missing exit {exc.code}")
+        err = buf.getvalue()
         expect(
-            warn is not None and "rtl/common" in (warn or ""),
-            f"fallback warn {warn}",
+            "PR #21" in err and "rtl/pyc_lib" in err and "must be present" in err,
+            f"pyc_lib hard-error message: {err}",
         )
-        expect(any(p.name == "common" for p in dirs), f"fallback dirs {dirs}")
+        expect("falling back to rtl/common" not in err, f"no common fallback: {err}")
 
     expect(
         classify_crit_path("input port clocked by core_clk", "output port")
@@ -2470,9 +2459,7 @@ def main(argv: list[str] | None = None) -> int:
         spec_text = spec_path.read_text(encoding="utf-8") if spec_path.is_file() else None
         period_ns, period_src, period_ph = detect_period(spec_text)
 
-        incdirs, inc_warn = yosys_incdirs(tree, extra_incdirs)
-        if inc_warn:
-            print(inc_warn, flush=True)
+        incdirs = yosys_incdirs(tree, extra_incdirs)
 
         leaves = list_rtl_leaves(tree)
         private_catalog = build_private_catalog(tree)
@@ -2635,7 +2622,7 @@ def main(argv: list[str] | None = None) -> int:
             "sram_periph_factor": SRAM_PERIPH_FACTOR,
             "tools": versions,
             "incdirs": [str(p) for p in incdirs],
-            "incdir_warn": inc_warn,
+            "incdir_warn": None,
             "buffer": not args.no_buffer,
             "max_fanout_limit": args.max_fanout,
             "buffer_method": (
@@ -2647,7 +2634,7 @@ def main(argv: list[str] | None = None) -> int:
         }
         jpath = args.json or (out / "results.json")
         jpath.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        print(write_full_markdown(results, inc_warn=inc_warn))
+        print(write_full_markdown(results))
         print(f"\nSRAM formula: {SRAM_FORMULA_LABEL}")
         print(f"JSON: {jpath}")
         return 0 if all(r.get("ok") for r in results) else 1

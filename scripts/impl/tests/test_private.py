@@ -15,7 +15,8 @@ import tempfile
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parents[1]
-FIXTURE_HASH = Path(__file__).resolve().parent / "fixtures" / "contract_hash.py"
+REPO_ROOT = SCRIPT_DIR.parents[1]
+REAL_CONTRACT_HASH = REPO_ROOT / "scripts" / "gate" / "contract_hash.py"
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from priv_leaf import (  # noqa: E402
@@ -202,7 +203,9 @@ def _liberty() -> Path:
 def _prep_repo(td: Path) -> Path:
     root = td
     (root / "scripts" / "gate").mkdir(parents=True)
-    shutil.copy(FIXTURE_HASH, root / "scripts" / "gate" / "contract_hash.py")
+    if not REAL_CONTRACT_HASH.is_file():
+        _fail("contract_hash", f"missing {REAL_CONTRACT_HASH}")
+    shutil.copy(REAL_CONTRACT_HASH, root / "scripts" / "gate" / "contract_hash.py")
     (root / "docs").mkdir(parents=True)
     (root / "docs" / "SPEC.md").write_text(SPEC_SNIP, encoding="utf-8")
     (root / "TOOLCHAIN.lock").write_text(LOCK, encoding="utf-8")

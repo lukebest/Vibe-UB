@@ -33,7 +33,7 @@ ports:
   - {name: ctx_mtm_gp, dir: out, width: 8, desc: 流量监测组}
   - {name: ctx_matt_ba, dir: out, width: 44, desc: 页表基址（16 B 对齐）}
   - {name: ctx_mapt_bba, dir: out, width: 43, desc: MAPT 基块地址（32 B 对齐）}
-  - {name: ctx_mapt_bb_sz, dir: out, width: 4, desc: MAPT 基块大小（4 KB 对数）}
+  - {name: ctx_mapt_bb_sz, dir: out, width: 4, desc: MAPT 基块大小指数，4 KB × 2^n，合法 0..9}
   - {name: ctx_mattr0, dir: out, width: 32, desc: 第一组属性字节}
   - {name: ctx_mattr1, dir: out, width: 32, desc: 第二组属性字节}
 params: []
@@ -89,7 +89,7 @@ status: draft
 | `ctx_mtm_gp` | out | 8 | 流量监测组 |
 | `ctx_matt_ba` | out | 44 | 页表基址（16 B 对齐后的地址） |
 | `ctx_mapt_bba` | out | 43 | MAPT 基块地址（32 B 对齐后的地址） |
-| `ctx_mapt_bb_sz` | out | 4 | MAPT 基块大小（以 4 KB 为单位的对数；2 MB 对数值见 §7） |
+| `ctx_mapt_bb_sz` | out | 4 | MAPT 基块大小指数（4 KB × 2^n）。合法 0..9（9 = 2 MB 基块）；10..15 报 `ILL_RSVD`。**Xia 裁定 2026-10-12，依据 UB-MEM 第 9 章条目尺寸。** |
 | `ctx_mattr0` | out | 32 | 第一组属性字节，供页表属性索引选择 |
 | `ctx_mattr1` | out | 32 | 第二组属性字节 |
 
@@ -116,13 +116,13 @@ status: draft
 | 符号 | 何时拉起 |
 | --- | --- |
 | `ILL_NONE` | `ctx_illegal=0` |
-| `ILL_MAP_2MB` | 原始表项要求 2 MB 映射粒度（含 2 MB MAPT 基块） |
+| `ILL_MAP_2MB` | TCTE 范围表颗粒度选取 2 MB（延后的「2 MB 映射粒度」）。2 MB 页表块描述符是另一件事，在 `ub_mem_ptw_desc_dec` 合法 |
 | `ILL_HW_AD` | 原始表项要求硬件写回 Access / Dirty（硬件标志更新） |
 | `ILL_ENDIAN` | 首轮不支持的字节序 |
 | `ILL_STALL` | Stall |
 | `ILL_MAC` | MAC 模式 |
 | `ILL_MAPT_MULTI_BLK` | 多块 MAPT |
-| `ILL_RSVD` | 保留编码 |
+| `ILL_RSVD` | 保留编码，含 `ctx_mapt_bb_sz` 取值 10..15 |
 | `ILL_PTR_OOB` | 指针越界 |
 | `ILL_UNSUP` | 其余已折成非法的首轮不支持编码 |
 
@@ -149,11 +149,6 @@ status: draft
 | `AP_TCTE_ILL_EQ` | `ctx_illegal == (ctx_ill_cause != 0)`。**Xia 裁定 2026-10-12。** |
 | `AP_TCTE_ILL_ZERO` | `ctx_illegal=1` 的 `out_valid` 拍，除 `ctx_illegal` / `ctx_ill_cause` 外解码输出为 0。**Xia 裁定 2026-10-12。** |
 | `AP_TCTE_ILL_PRI` | 多个非法原因同时成立时，`ctx_ill_cause` 取最小非 0 码。**Xia 裁定 2026-10-12。** |
-| `AP_TCTE_ILL_2MB` | 原始表项要求 2 MB 映射时，成交拍 `ctx_ill_cause=1`（`ILL_MAP_2MB`）。 |
+| `AP_TCTE_ILL_2MB` | TCTE 范围表颗粒度选取 2 MB 时，成交拍 `ctx_ill_cause=1`（`ILL_MAP_2MB`）。**Xia 裁定 2026-10-12，依据 UB-MEM 第 9 章条目尺寸。** |
 | `AP_TCTE_ILL_AD` | 原始表项要求硬件写回 Access / Dirty 时，成交拍 `ctx_ill_cause=2`（`ILL_HW_AD`）。 |
-
----
-
-## 7. 未知
-
-- `ctx_mapt_bb_sz` 表示 2 MB 的对数值。
+| `AP_TCTE_BB_SZ` | `ctx_illegal=0` 时 `ctx_mapt_bb_sz` ∈ 0..9。`ctx_mapt_bb_sz` ∈ 10..15 时 `ctx_ill_cause=3`（`ILL_RSVD`）。**Xia 裁定 2026-10-12，依据 UB-MEM 第 9 章条目尺寸。** |

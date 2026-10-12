@@ -15,9 +15,9 @@ ports:
   - {name: rst_pyc, dir: in, width: 1, desc: 同步复位，pyc_reg 原生极性}
   - {name: in_valid, dir: in, width: 1, desc: 原始 MAPTE 本拍有效}
   - {name: in_ready, dir: out, width: 1, desc: 本拍可收下原始 MAPTE}
-  - {name: raw, dir: in, width: 256, desc: 一次 32 B 表读的原始 MAPTE；最终宽度见未知}
+  - {name: raw, dir: in, width: 256, desc: 每一级原始 MAPTE，32 B}
   - {name: mode_multi, dir: in, width: 1, desc: 1 为多级 MAPT}
-  - {name: lvl, dir: in, width: 3, desc: 当前级别（0 起）；最终宽度见未知}
+  - {name: lvl, dir: in, width: 2, desc: 当前级别，合法 0..3}
   - {name: out_valid, dir: out, width: 1, desc: 解码结果本拍有效}
   - {name: out_ready, dir: in, width: 1, desc: 下游可收下}
   - {name: mapte_v, dir: out, width: 1, desc: 表项有效}
@@ -71,9 +71,9 @@ MAPT 表项解码叶子。单项与多级共用，多一个级别 / 模式选择
 | --- | --- | --- | --- |
 | `in_valid` | in | 1 | 原始 MAPTE 本拍有效 |
 | `in_ready` | out | 1 | 本拍可收下原始 MAPTE |
-| `raw` | in | 256 | 一次 32 B 表读的原始 MAPTE。内部字段位置只在私有叶子源；最终宽度见 §7 |
+| `raw` | in | 256 | 每一级原始 MAPTE（32 B）。内部字段位置只在私有叶子源。**Xia 裁定 2026-10-12，依据 UB-MEM 第 9 章条目尺寸。** |
 | `mode_multi` | in | 1 | 1 = 多级 MAPT；0 = 单项 |
-| `lvl` | in | 3 | 当前级别（0 起）。最终宽度与合法范围见 §7 |
+| `lvl` | in | 2 | 当前级别（0 起）。合法 0..3（4 KB 粒度多级 MAPT 最多 4 级）。**Xia 裁定 2026-10-12，依据 UB-MEM 第 9 章条目尺寸。** |
 | `out_valid` | out | 1 | 解码结果本拍有效 |
 | `out_ready` | in | 1 | 遍历器 / PLB 可收下。第一波可以把本口 Tied 为 1。**Xia 裁定 2026-10-12。** |
 | `mapte_v` | out | 1 | 表项有效 |
@@ -154,10 +154,4 @@ MAPT 表项解码叶子。单项与多级共用，多一个级别 / 模式选择
 | `AP_MAPTE_ILL_2MB` | 原始表项要求 2 MB 映射时，成交拍 `mapte_ill_cause=1`（`ILL_MAP_2MB`）。 |
 | `AP_MAPTE_ILL_AD` | 原始表项要求硬件写回 Access / Dirty 时，成交拍 `mapte_ill_cause=2`（`ILL_HW_AD`）。 |
 | `AP_MAPTE_ILL_OBLK` | 原始表项指示下一级在其他块时，成交拍 `mapte_ill_cause=9`（`ILL_MAPT_OTHER_BLK`）。 |
-
----
-
-## 7. 未知
-
-- `lvl` 的最终宽度与合法范围。
-- 单项 / 多级原始 `raw` 是否永远 256 bit。
+| `AP_MAPTE_LVL` | `lvl` 合法 0..3。**Xia 裁定 2026-10-12，依据 UB-MEM 第 9 章条目尺寸。** |

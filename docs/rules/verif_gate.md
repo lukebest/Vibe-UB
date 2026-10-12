@@ -4,8 +4,8 @@
 | --- | --- |
 | 分册 | `docs/rules/verif_gate.md` |
 | 所有者 | 工具守门（验证负责人兼任，见 [TEAM.md](../TEAM.md) §4） |
-| 版本 | v0.6 (2026-10-10) |
-| 类别 | 每次提交的 lint / CDC / formal / 综合 / regmap / TB / emit / 端口 / 来源 / 等价 / spec-leak |
+| 版本 | v0.8 (2026-10-12) |
+| 类别 | 每次提交的 lint / CDC / formal / 综合 / regmap / TB / emit / 端口 / 来源 / 等价 / spec-leak / contract-check |
 | 配套 | [verification.md](verification.md)、[PROCESS.md](../PROCESS.md)、[CODING_STYLE.md](../CODING_STYLE.md) §7、[DECISIONS.md](../DECISIONS.md) D6 / D7 / D10 / D17 |
 
 规则条目格式：ID / 规则 / 来源 / 日期。本分册额外写清失败判据与豁免流程。
@@ -153,6 +153,7 @@ spec-leak finding 一律按新叶子拦截，不用 `legacy.txt` 放行。
 | GATE-LINT-003 | warning 必须命中已批准豁免，否则按 §1 分栏处理 | CODING_STYLE §7 | 2026-10-10 |
 | GATE-LINT-004 | 未登记桩 / 黑盒拦截；已登记桩照常 lint | §1.2 | 2026-10-10 |
 | GATE-LINT-005 | `rtl/pyc_lib/` 原语只经 `-I` + `` `include `` 读入；不得再当作第二份源文件（否则 `%Warning-MODDUP`）。原语自己仍单独 lint | #21 pyc_reg | 2026-10-12 |
+| GATE-ONE-MODULE-PER-FILE | `rtl/`（不含 `rtl/pyc_lib/`）每个文件只定义一个 `module`（CODING_STYLE）。多模块 → `MULTI_MODULE`（先 report-only）。多出来的模块若是契约私有叶子 → `PRIVATE_IN_PARENT`（#47 进 main 后拦） | CODING_STYLE；PM | 2026-10-12 |
 
 **发现方式：** 若存在 `rtl/**/*.f` 或 `scripts/gate/filelists/*.f` 则读 filelist（支持 `+incdir+` / `-I`）；否则扫描 `rtl/<layer>/` 与 `rtl/<layer>/hooks/`，以及 `rtl/` 根下手写残留。排除 `*_tb.v` 与 `tb/`。
 
@@ -217,6 +218,7 @@ M1 单时钟 `core_clk`（SPEC §4.1）。`rst_n` 异步置位、同步释放，
 | GATE-FOR-003 | 目录下没有 `*.sby` 时 job 成功并打印 `no assertions yet` | 同上 | 2026-10-10 |
 | GATE-FOR-004 | `formal/**/*.sby` 及其引用的断言里，`bind` 的每个信号必须在对应网表中存在；找不到即拦 | PM | 2026-10-10 |
 | GATE-FOR-005 | `[files]` 里的相对路径先相对 `.sby` 目录解析；找不到报 `SBY_FILE_MISSING`，不得抛 `FileNotFoundError` | #21 cmn.sby | 2026-10-12 |
+| GATE-FORMAL-DEPTH | 深度：**(1)** `formal/<layer>/*.sby` 若有收敛的 `prove` 任务，门禁必须跑，报告记录 k 与 runtime。**(2)** prove 合不上时，BMC 深度至少覆盖 DUT 两笔完整事务加余量；PR 须附归纳反例初态，标 `not fully proven`（不是豁免）。**(3)** BMC depth 必须 ≥ 最深可达 cover 步 + 6。**(4)** PRODUCT 网表的 prove 只能在同一次 CI 的 equiv 对该叶子报真实 **PASS**（不是 `SKIP` / `PRIVATE_SKIP`，覆盖全部 PRODUCT 输出、不含 `tb_*`）时，继承已收敛的 HOOKS prove；此时 PRODUCT 状态为 `proven via HOOKS prove + PRODUCT≡HOOKS equiv`。否则 PRODUCT 回退 (2)。实现：`formal/<layer>/*.sby` 默认 `prove` 为 HOOKS、另有非默认 `*product*` prove 时读 `scripts/gate/out/equiv_status.json`，equiv 非 PASS（或缺 `EQUIV_BLACKBOX`）→ `FORMAL_INHERIT_NO_EQUIV`。现 (3)(4) 均为 **report-only** | 验证 | 2026-10-12 |
 
 有 `.sby` 但机器上没有 `sby`：失败（不得假装跑过）。ubuntu-24.04 的 apt 没有 `sby` 包；CI 用 `scripts/gate/setup_sby.sh` 装 YosysHQ/sby（默认 `v0.69`）并要求 `z3`（`smtbmc z3`）。`apt-get install sby || true` 不够。
 
@@ -233,9 +235,9 @@ M1 单时钟 `core_clk`（SPEC §4.1）。`rst_n` 异步置位、同步释放，
 | GATE-EMIT-002 | 非 legacy、非白名单手写叶子必须有 `rtl/<layer>/hooks/<module>.v` | SPEC §11 | 2026-10-10 |
 | GATE-EMIT-003 | 未上 `scripts/gate/handwritten.yml` 的手写 `.v` / `.sv` 记 `HANDWRITTEN_UNLISTED` | D6；§1.1 | 2026-10-10 |
 | GATE-EQY-001 | PRODUCT≡HOOKS。本环境 **eqy 装不上**，主工具是 Yosys `equiv_make` / `equiv_simple` / `equiv_induct` / `equiv_status -assert`。eqy 若在 PATH 再用。报告写明 `tool=yosys-equiv` 或 `tool=eqy`。按 SPEC §2.2 变体逐个跑；`_placeholder` 不做等价 | SPEC §11 (d)；设计 spike | 2026-10-10 |
-| GATE-EQY-002 | 只比 PRODUCT 端口。金样与 HOOKS 都走同一包装层（实例名 `u_leaf`），按 PRODUCT 原位宽声明与连接（修总线位宽丢失 / `Can't match gold port csr_addr_gold`）。HOOKS 多出的 `tb_test_mode` / §10 `tb_*` 输入（含 `tb_<inst>_bd_*`、`tb_<inst>_bd_vld_*`）按原位宽接 0，`tb_<inst>_obs_*` 不参加比对。主路径 Yosys `equiv_*` 全证；否则 `miter`+`sat -tempinduct`；两边由 pycc 分别生成、结构不同以致 k-induction 合不上时，再用 `sat -seq N -set-init-zero` 从同一初值 BMC。报告写明方法 | SPEC §11 (d)(f) | 2026-10-10 |
+| GATE-EQY-002 | 只比 PRODUCT 端口。金样与 HOOKS 都走同一包装层（实例名 `u_leaf`），按 PRODUCT 原位宽声明与连接（修总线位宽丢失 / `Can't match gold port csr_addr_gold`）。HOOKS 多出的 `tb_test_mode` / §10 `tb_*` 输入（含 `tb_<inst>_bd_*`、`tb_<inst>_bd_vld_*`）按原位宽接 0，`tb_<inst>_obs_*` 不参加比对。契约列出的私有叶子两边都 `blackbox`（输出当同名自由输入，桩不得 flatten / 常数传播）；每实例打 `EQUIV_BLACKBOX <leaf> in <parent>`，并记比对输出与寄存器对数。flatten 了桩则 `EQUIV_PRIVATE_FLATTENED`（#47 进 main 前 report-only）。主路径 Yosys `equiv_*` 全证；否则 `miter`+`sat -tempinduct`；两边由 pycc 分别生成、结构不同以致 k-induction 合不上时，再用 `sat -seq N -set-init-zero` 从同一初值 BMC。报告写明方法 | SPEC §11 (d)(f) | 2026-10-10 |
 | GATE-EQY-003 | 上层等价把 DEPTH×WIDTH 超阈值的 `ub_cmn_mem_1r1w` 变体当黑盒，**两边同一份**。原语 ≤4096 bit（含 `d64w64m16`）跑完整 PRODUCT≡HOOKS；更大的不跑完整 equiv，改为除模块名外逐字节一致 + 端口检查 | 实现对齐 | 2026-10-10 |
-| GATE-EQY-004 | 公式参考等价（`formal/<层>/ref/` + `scripts/gate/equiv_ref.sh`）满足以下**其一**即通过：(1) Yosys `equiv_make` / `equiv_simple` / `equiv_induct` 全部证明，没有未证的 `$equiv`；(2) `miter -equiv -flatten` 加 `sat -tempinduct -prove` 证明通过；(3) `miter -equiv -flatten -make_outputs` 后用 Yosys 自带 `yosys-abc`：`dsec`（或 `write_aiger` 后 `&r; &dsec`），或在寄存器已对应/暴露为端口后 `&cec`；(4) `EQUIV_METHODS=regpair`：flatten 后遍历每个触发器实例（`pyc_reg` 或 `$dff/$adff/$dffe/$adffe`），`rp_q_*` 取该实例 `.q`/Q 端口所连的线，`rp_d_*` 取同一实例的 `.d`/D 端口。配对键：收集与该 FF Q **同一组位**的全部线名，去掉 pycc 自动名（`pyc_reg_N`、`pyc_comb_N`、带 `__…L<行号>` 后缀的），再按最后一层名字归一化，与对侧求交集；恰好一个才配上，零个或多于一个都 `FAIL(pairing)` 并列候选名。**不用 cell 名**（`pyc_reg_20_inst` 不是键）。`ub_dll_bcrc_check` 预期 7 对（`crc`/`crc_word`/`done`/`recv_q`/`ok_q`/`fail_q`/`eflag_q`）。禁止手填配对表。切掉 FF 后两侧统一接口——去掉时钟（及被切 FF 用到的异步复位）PI，切出的 Q 命名 `rp_q_<name>` 作 PI、D 命名 `rp_d_<name>` 作 PO，原端口保留原名。打印两侧 PI/PO 名表，名字集合不一致直接失败并列差异。禁止按端口顺序对齐。切点两侧分别写成普通 AIGER（PI/PO 按名字同一顺序，禁止 `write_aiger -miter` 再丢给 `&cec`），用 ABC `&cec` 按名比对；NOT EQ 必须能 `write_cex` 并在切点端口上复现，写不出反例记 `SCRIPT_ERROR` 不当结论。报告所用证明条与原始结论行。并单独核对每对复位方式（同步/异步/无）与极性、复位值相同。寄存器集合不一致（extra / missing / 位宽不同）由 PM 定为走时序：打印 `regpair=NOTAPPLICABLE(set-mismatch)`，改从复位出发只比叶子输出的时序证明，**归纳收敛才算过**。无 `fail` 开关。**GATE-SYN-DEADREG** 在 PRODUCT（被测）网表上查，独立失败，不能被时序证明抵消。复位值或复位类型不一致仍直接 FAIL。regpair **只在两边状态编码一致时适用**。次态（`rp_d_*`）不等但集合与复位已过时打印 `regpair=INCONCLUSIVE(state-encoding)` 并自动改用不切寄存器的时序证明：两边各用自己的复位值作初值（禁止 `-set-init-zero`，crc 初值是 INIT 不是 0；禁止 `-set-init-def`），`write_aiger -zinit` 后 ABC `bmc3` 搜反例；Yosys sat 第 1–2 拍 `in_rst_pyc=1`，`-prove-skip 2`，断言只在复位释放后生效。既不判 RTL 错，也不放行。该时序证明**须归纳收敛**才算过；BMC 到 N 拍无反例、超时记为「未证完」/ FAIL，**不算过也不算证伪**。翻一位 CRC、`last` 后带尾值两个假网表必须拿到 BMC 真反例并在 Icarus 端口上复现。最终结论以时序证明为准。报告打印配对表、配对数、未配对数、PI/PO 名表、cec/prove 原始结论行、复位核对、所用方法。每种方法设超时，超时视为未证明，按 (1)→(2)→(3)→(4) 再试下一种；regpair  inconclusive 后强制走时序证明。(5) 仅用于 `&cec` 超时的纯 XOR 次态：在切开后参与比较的那份网表上，`proc; flatten; opt` 之后、任何 techmap/abc/工艺映射之前，把 `start`/`valid_in`/`last` 的 8 种取值定为常量、`rst_pyc` 固定 0，再 `opt_expr; opt_clean`；输入锥只允许 `$xor`/`$xnor`/`$not`/`$reduce_xor`/`$reduce_xnor`/`$pos` 和常量（位选/拼接为连线）。残留 `$mux`/`$pmux` 或其它单元（含数据位当选择端的 `$mux`、锥内 `$and`）即方法不适用。`$mux` 仅当两数据臂只差常量（POLY 的 `s?(x^C):x`）视为已退化。参考侧与设计侧都查。前提通过后在全 0 和每个单位向量上比较，全等即 EQ，有差异必须带可回放反例。报告 `method=affine`、组合数、比较点数、每组合前提检查结果。输入锥为常量（选中 INIT）也算仿射。自检：`d[0]&d[1]` 假网表、数据位当选择端的 `$mux` 假网表必须被前提检查拦下；仿射但单位向量上错一位必须 NOT EQ 带反例。假网表（lane 正向/反向映射、BCRC 改错一位 CRC、丢掉 `start` 同拍 flit、改错一个寄存器复位值、多一个配不上的寄存器、`last` 后不回全 1 把尾值带进下一块、`rst_adapt` 极性反了、仿射锥里插 AND / 数据位 `$mux`、仿射错一位）必须被真实比对（`equiv_*` 未证点、sat 反例、ABC `NOT EQUIVALENT`、regpair 配对/复位失败、仿射前提失败、或时序证明反例/未证完）打掉，禁止用 grep 源码或文件名判定。参考对参考自比必须通过 | 守门人 | 2026-10-10 |
+| GATE-EQY-004 | 公式参考等价（`formal/<层>/ref/` + `scripts/gate/equiv_ref.sh`）满足以下**其一**即通过：(1) Yosys `equiv_make` / `equiv_simple` / `equiv_induct` 全部证明，没有未证的 `$equiv`；(2) `miter -equiv -flatten` 加 `sat -tempinduct -prove` 证明通过；(3) `miter -equiv -flatten -make_outputs` 后用 Yosys 自带 `yosys-abc`：`dsec`（或 `write_aiger` 后 `&r; &dsec`），或在寄存器已对应/暴露为端口后 `&cec`；(4) `EQUIV_METHODS=regpair`：flatten 后遍历每个触发器实例（`pyc_reg` 或 `$dff/$adff/$dffe/$adffe`），`rp_q_*` 取该实例 `.q`/Q 端口所连的线，`rp_d_*` 取同一实例的 `.d`/D 端口。配对键：收集与该 FF Q **同一组位**的全部线名，去掉 pycc 自动名（`pyc_reg_N`、`pyc_comb_N`、带 `__…L<行号>` 后缀的），再按最后一层名字归一化，与对侧求交集；恰好一个共同名则配上。多个共同名时，若其中恰好一个带 `_q` 后缀（架构 Q；另一名是同一组位上的 PRODUCT 输出口），按该 `_q` 配对。零个共同名、多个 `_q` 名、或同一名落到不同 cell，仍 `FAIL(pairing)` 并列候选名。**不用 cell 名**（`pyc_reg_20_inst` 不是键）。`ub_dll_bcrc_check` 预期 7 对（`crc`/`crc_word`/`done`/`recv_q`/`ok_q`/`fail_q`/`eflag_q`）。禁止手填配对表。切掉 FF 后两侧统一接口——去掉时钟（及被切 FF 用到的异步复位）PI，切出的 Q 命名 `rp_q_<name>` 作 PI、D 命名 `rp_d_<name>` 作 PO，原端口保留原名。打印两侧 PI/PO 名表，名字集合不一致直接失败并列差异。禁止按端口顺序对齐。切点两侧分别写成普通 AIGER（PI/PO 按名字同一顺序，禁止 `write_aiger -miter` 再丢给 `&cec`），用 ABC `&cec` 按名比对；NOT EQ 必须能 `write_cex` 并在切点端口上复现，写不出反例记 `SCRIPT_ERROR` 不当结论。报告所用证明条与原始结论行。并单独核对每对复位方式（同步/异步/无）与极性、复位值相同。寄存器集合不一致（extra / missing / 位宽不同）由 PM 定为走时序：打印 `regpair=NOTAPPLICABLE(set-mismatch)`，改从复位出发只比叶子输出的时序证明，**归纳收敛才算过**。无 `fail` 开关。**GATE-SYN-DEADREG** 在 PRODUCT（被测）网表上查，独立失败，不能被时序证明抵消。复位值或复位类型不一致仍直接 FAIL。regpair **只在两边状态编码一致时适用**。次态（`rp_d_*`）不等但集合与复位已过时打印 `regpair=INCONCLUSIVE(state-encoding)` 并自动改用不切寄存器的时序证明：两边各用自己的复位值作初值（禁止 `-set-init-zero`，crc 初值是 INIT 不是 0；禁止 `-set-init-def`），`write_aiger -zinit` 后 ABC `bmc3` 搜反例；Yosys sat 第 1–2 拍 `in_rst_pyc=1`，`-prove-skip 2`，断言只在复位释放后生效。既不判 RTL 错，也不放行。该时序证明**须归纳收敛**才算过；BMC 到 N 拍无反例、超时记为「未证完」/ FAIL，**不算过也不算证伪**。翻一位 CRC、`last` 后带尾值两个假网表必须拿到 BMC 真反例并在 Icarus 端口上复现。最终结论以时序证明为准。报告打印配对表、配对数、未配对数、PI/PO 名表、cec/prove 原始结论行、复位核对、所用方法。每种方法设超时，超时视为未证明，按 (1)→(2)→(3)→(4) 再试下一种；regpair  inconclusive 后强制走时序证明。(5) 仅用于 `&cec` 超时的纯 XOR 次态：在切开后参与比较的那份网表上，`proc; flatten; opt` 之后、任何 techmap/abc/工艺映射之前，把 `start`/`valid_in`/`last` 的 8 种取值定为常量、`rst_pyc` 固定 0，再 `opt_expr; opt_clean`；输入锥只允许 `$xor`/`$xnor`/`$not`/`$reduce_xor`/`$reduce_xnor`/`$pos` 和常量（位选/拼接为连线）。残留 `$mux`/`$pmux` 或其它单元（含数据位当选择端的 `$mux`、锥内 `$and`）即方法不适用。`$mux` 仅当两数据臂只差常量（POLY 的 `s?(x^C):x`）视为已退化。参考侧与设计侧都查。前提通过后在全 0 和每个单位向量上比较，全等即 EQ，有差异必须带可回放反例。报告 `method=affine`、组合数、比较点数、每组合前提检查结果。输入锥为常量（选中 INIT）也算仿射。自检：`d[0]&d[1]` 假网表、数据位当选择端的 `$mux` 假网表必须被前提检查拦下；仿射但单位向量上错一位必须 NOT EQ 带反例。假网表（lane 正向/反向映射、BCRC 改错一位 CRC、丢掉 `start` 同拍 flit、改错一个寄存器复位值、多一个配不上的寄存器、`last` 后不回全 1 把尾值带进下一块、`rst_adapt` 极性反了、仿射锥里插 AND / 数据位 `$mux`、仿射错一位）必须被真实比对（`equiv_*` 未证点、sat 反例、ABC `NOT EQUIVALENT`、regpair 配对/复位失败、仿射前提失败、或时序证明反例/未证完）打掉，禁止用 grep 源码或文件名判定。参考对参考自比必须通过 | 守门人 | 2026-10-10 |
 
 公式参考等价与 PRODUCT≡HOOKS 分开：入口是 `scripts/gate/equiv_ref.sh`，参考在 `formal/<层>/ref/`。上表 (1)(2)(3)(4)(5) 五选一；日志写 `METHOD=equiv_make+simple+induct` / `miter+sat-tempinduct` / `abc-dsec`（或 `abc-cec`）/ `regpair + named-aiger &cec` / `affine` / `seq-bmc3` 以及 `equiv_ref TIME method=… sec=… result=…`。regpair 另打 `REGPAIR pair=` / `unmatched` / `gold_pi`/`gold_po` / `ports=` / `cec_line=` / `prove_method=` / `reset` / `affine_prereq` / `regpair=PASS|FAIL(…)|INCONCLUSIVE(state-encoding)|NOTAPPLICABLE(set-mismatch)|FAIL(script)`。假网表不过则本项失败。参考对参考（含一侧端口顺序打乱、同一公式的矩阵改写）必须通过；一侧故意少一个 `rp_d_*` 口必须 `ports=FAIL` 并列缺名。NOT EQ 必须附可回放反例。`&cec` 超时的纯 XOR 次态可走 (5) 仿射法（见上表）。
 
@@ -327,7 +329,7 @@ A 线 lane dist 漏检：只跑分发→收集自环，映射方向反了也能�
 | --- | --- | --- | --- | --- |
 | GATE-TB-PAIR-001 | 成对模块每一侧独立 vs `model/` 逐位比对，并带 one-hot / 递增定向用例；自环不能当唯一检查 | A 线 lane dist 漏检 | 2026-10-10 | **审查清单，不自动拦截** |
 
-PR 审查清单见 §11。本条不写自动 finding，避免误杀尚未补齐的 D10 台。
+PR 审查清单见 §12。本条不写自动 finding，避免误杀尚未补齐的 D10 台。
 
 ### 8.0.1 记分板比对次数（审查项，不自动拦截）
 
@@ -371,7 +373,7 @@ PR 审查清单见 §11。本条不写自动 finding，避免误杀尚未补齐�
 1. 在 `waivers/pending/` 写 YAML 草稿：`approver: TODO`，`status: pending`，理由标明「待守门人批准」。
 2. 守门人（验证，`waivers/approvers.yml` 中的 login）书面批准后，把条目移入 `waivers/<check>.yml`，填写 `approver`、`approved_date`、`review_when`。
 3. 脚本**只认带批准人且批准人是守门人**的条目；`TODO` / 空 / 非守门人 / `draft` 一律忽略。
-4. `.github/CODEOWNERS` 把 `waivers/`、`scripts/gate/*.yml`、`scripts/gate/*.txt`、`.github/workflows/gate.yml` 的审批指给仓库 owner `lukebest`。
+4. `.github/CODEOWNERS` 把 `waivers/`、`scripts/gate/`、`.github/workflows/` 的审批指给仓库 owner `lukebest`。非守门人 PR 改 `waivers/` 时，守门人须在 PR 评论里写一行 `GATE-WAIVER-APPROVED: waivers/<file>.yml`（见 §11 GATE-OWNED-PATHS）。守门人 PR 的标题必须以 `gate:` 开头。
 
 `scripts/gate/handwritten.yml`、`scripts/gate/blackbox.yml`、`scripts/gate/hooks_ports.yml`、`scripts/gate/leak_allow.yml` 的条目字段与豁免相同：路径或模块、原因、批准人、日期、复查条件。`waivers/pending/` 草稿只展示。
 
@@ -402,10 +404,39 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 | VER-GATE-015 | 公式参考等价（`formal/<层>/ref/`）：Yosys `equiv_*` 全证或 `miter`+`sat -tempinduct` 其一通过，报告写明路径；每个参考须有假网表且必须失败 | PM | 2026-10-10 |
 | VER-GATE-016 | 大网表走 `rtl/<层>/manifest.yml`；超阈值 `.v` / 清单生成不出拦截；`rtl/pyc_lib/` 缺了跳过、有了逐字节；`tb_<inst>_obs_*` 只出；sby bind 信号必须存在；D10/迁移名册缺文件标已删除并扣总数；COMBO_DEPTH 只数逻辑门 | 本分册 v0.5 | 2026-10-10 |
 | VER-GATE-017 | 导入根 `<repo>/pycircuit` 置 `PYTHONPATH` 最前；仓库根不进 `sys.path`；叶子不含 `lib/`；`lib/` 只做拼接扫描 | SPEC §2.2 | 2026-10-10 |
+| VER-GATE-018 | S-01(b) 契约 / 桩 hash / `reports/private/<layer>/<leaf>.yml` / 角色目录；见 §11 | D20 S-01 (b) | 2026-10-12 |
 
 ---
 
-## 11. PR 审查清单（人工，不自动拦截）
+## 11. 私有叶子与契约（S-01(b)）
+
+船长 2026-10-12：S-01 = (b)。位布局只在私有仓库。公开树放接口契约、pyCircuit 桩和 attest 副本。
+
+扫描 `docs/arch/*/contracts/*.md`（含 pcs；跳过 README）。契约文件开头是 YAML 段（`---` … `---`；兼容开头 ` ```yaml ` 围栏）。
+
+| ID | 规则 | 来源 | 日期 |
+| --- | --- | --- | --- |
+| GATE-CONTRACT-001 | `scripts/gate/contract_hash.py`：`yaml.safe_load` 后 `json.dumps(obj, sort_keys=True, separators=(',',':'), ensure_ascii=False)` 的 UTF-8 再 sha256。全部字段参与（含 `assertions`）。列表顺序保留。缩进 / 注释 / 正文不改变 digest | 本分册 | 2026-10-12 |
+| GATE-CONTRACT-002 | 字段缺失或类型不符 → FAIL。扫描 `docs/arch/*/contracts/`（含 pcs）。`parent` 必须等于**该层自己的** `docs/arch/<layer>/UARCH.md` §3 叶子表「叶子」列某一行（去反引号 / 空白后全等）。pcs 用 `docs/arch/pcs/UARCH.md`，不看 `docs/arch/mem/UARCH.md`。描述列、其它列、正文、以及同一格 `+` 后面的名字都不算。缺行 → `PARENT_UNKNOWN`（拦）。`MODULE_INVENTORY` yml 仍可补 | README §8 / PM | 2026-10-12 |
+| GATE-CONTRACT-003 | `comb_budget_ns`：组合 / 0 拍叶子缺 → FAIL；寄存叶子带了 → FAIL | Xia | 2026-10-12 |
+| GATE-CONTRACT-004 | `assertions:` 必填且非空。缺 / 空列表 → `CONTRACT_FIELD_MISSING`。正文 `` `AP_*` `` 未列入 → `CONTRACT_ASSERT_UNLISTED`；YAML 有、正文无 → `CONTRACT_ASSERT_UNUSED`。切换：`docs/arch/*/contracts/README.md` §8 行写 `` `assertions` `` 且含「必填」（#49 标记）后改为拦截；之前 report-only。`private_leaves.yml` `assertions_required: true\|false` 可覆盖 | Xia / PM | 2026-10-12 |
+| GATE-CONTRACT-HASH-SINGLE | `scripts/gate/` 以外不得自带契约 hash 实现：文件名 `contract_hash.py`，或 `def contract_sha256` / `def contract_hash`。应 `import` `scripts/gate/contract_hash.py`。命中 → `CONTRACT_HASH_DUP`。#47 进 main 前 report-only（看 `origin/main` 的本条，或 `hash_single_required`）。已知副本待删除：`tb/mem/stub_models/contract_hash.py`（#44）、`scripts/impl/tests/fixtures/contract_hash.py`（#52） | PM | 2026-10-12 |
+| GATE-PRIV-001 | `scripts/gate/private_leaves.yml` 登记私有叶子 | D20 | 2026-10-12 |
+| GATE-PRIV-002 | `gen_private_stub.py` 写 `pycircuit/<layer>/stub/<leaf>.py`，经 pycc 生成 `rtl/<layer>/stub/<leaf>.v`（D5，不手写拼 Verilog）。`.py` 与 `.v` 头两行：`contract_sha256: <hex>`、`generated-by: scripts/gate/gen_private_stub.py`。`--formal-free` 另写 `formal/<layer>/cut/<leaf>.sv`：输出由 `(* anyseq *)` 自由输入驱动。门禁核 `.v` 与 cut 头 hash == 当前契约；cut 头 `HANDWRITTEN` 同 rtl 桩（#47 进 main 前 report-only） | D5 | 2026-10-12 |
+| GATE-PRIV-003 | 手写占位桩同路径、头写 `contract_sha256: HANDWRITTEN`。脚本进 main 前 report-only，之后 FAIL | PM | 2026-10-12 |
+| GATE-PRIV-004 | 登记叶子在 lint / synth / formal / equiv 报 `PRIVATE_SKIP`（report-only，不跑实现检查） | 本分册 | 2026-10-12 |
+| GATE-PRIV-005 | 公开门禁读 `reports/private/<layer>/<leaf>.yml`（私有 CI 产出 `attest/<layer>/<leaf>.yml`，拷入公开仓库时放这里）。缺文件 → FAIL | PM | 2026-10-12 |
+| GATE-PRIV-006 | attest 字段：`leaf`、`contract_sha256`、`netlist_sha256`、`toolchain_sha256`、`clock{name,period_ns}`、`cells`、`area_um2`、`regs`、`logic_depth`、`depth_incl_buf`、`wns_ns`、`crit_path`（`public` / `私有叶子内部`）、`status`（PASS/FAIL）。`contract_sha256` 必须等于当前契约；`clock` 与契约 YAML 一致；`status==PASS`；`wns_ns>=0`。任一不符 FAIL | 实现 / PM | 2026-10-12 |
+| GATE-PRIV-007 | 私有仓库角色目录（report 先行）：PR 改动只落在一个 `design/` `model/` `verif/` `impl/`（`public/` 视为共享）。跨角色 → `ROLE_CROSS` FAIL。标题须带 `[角色]` | PM | 2026-10-12 |
+| GATE-PRIVATE-PARENT-FREE | formal 里每个私有叶子实例的输出当自由输入（桩切掉）。父级状态合法性断言必须在叶子输出自由下成立。契约派生的、约束私有叶子**输出口**的 `assume` 只允许出现在单独命名的诊断 sby 任务（不是默认 `bmc`/`cover`/`prove`，也不是无前缀共享文件）。默认任务命中 → `FORMAL_PRIVATE_ASSUME`。#47 进 main 前 report-only（看 `origin/main` 的本条，或 `parent_free_required`） | 验证 | 2026-10-12 |
+| GATE-OWNED-PATHS | 非守门人 PR 改 `scripts/gate/` 或 `.github/workflows/` → `GATE_FILE_TOUCHED`（列出文件，文案「门禁文件由守门人维护」）。守门人 PR：标题以 `gate:` 开头（大小写敏感）。`waivers/` 例外：任何 PR 可改，但每条改动文件须有守门人评论一行 `GATE-WAIVER-APPROVED: <waiver id>`（`<waiver id>` = 该文件 POSIX 路径，如 `waivers/lint.yml`）。CI 用 GitHub API 读 PR issue / review 评论；API 未接通时只报 `GATE_WAIVER_UNCHECKED` / 缺评论报 `GATE_WAIVER_UNAPPROVED`，均为 report-only。`scripts/gate/` 与 workflow 的 `GATE_FILE_TOUCHED` 在 #47 进 main 前 report-only（看 `origin/main` 的本条，或 `owned_paths_required`）。CODEOWNERS 覆盖这三棵路径 | PM | 2026-10-12 |
+| GATE-PYCLIB-SINGLE | `rtl/pyc_lib/` 是唯一原语副本。其它已提交文件定义 `rtl/pyc_lib/` 已有模块或同名文件 → `PYCLIB_COPY`（#47 进 main 后拦）。过渡：`rtl/common/pyc_reg.v` 在 `origin/main` 仍有该文件时只报告，附注 `remove after #5`；`origin/main` 一旦没有该文件，该副本按普通 COPY 拦截，且自检要求删掉 allowlist 条目。`PYCLIB_FETCH`（`git show <ref>:rtl/pyc_lib` / `git checkout <ref> -- rtl/pyc_lib` / `git fetch`+pyc_lib / 从 site-packages/toolchain 拷 `pyc_reg.v`）#47 进 main 后拦。`rtl/pyc_lib/` 缺失：仅当 `origin/main` 已有该目录（#21 合入后）才 `PYC_LIB_MISSING` 硬拦；之前 report-only，避免 #47 先于 #21 合入把所有 PR 打红 | PM | 2026-10-12 |
+
+CLI：`python3 -P scripts/gate/contract_hash.py <contract.md>` 打印 hex。
+
+---
+
+## 12. PR 审查清单（人工，不自动拦截）
 
 合入前审查人勾选。门禁脚本不根据本清单 FAIL。
 

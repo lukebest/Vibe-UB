@@ -10,6 +10,8 @@
 - `docs/arch/MODULE_INVENTORY.md`：Xia 裁定 2026-10-12 关闭 `ub_pcs_amctl_rx` 三条 MISSING。M1：无分 lane valid，锁定按 UB-PHY §3.2.4.4 在叶内做，`pcs_am_locked` = 已配置 lane 全锁定。M2：公开只写识别/场语义（表 3-7、「AMCTL Identification Mechanism」）；码字解码进私有叶 `ub_pcs_amctl_cw_dec`（S-01(b)，船长已确认）。M3：SDF/EDF 按 `CTRL_TYPE`/`CTRL_DETAIL`（§3.2.4.2「AMCTL Controlling」）。`pcs_rx_lid[3:0]` 公开只称 `LID_NULL`。不抄码字/CW/符号下标。
 - `docs/arch/MODULE_INVENTORY.md`：`ub_pcs_amctl_rx` 完备性核对表（端口 / AMCTL 识别 / SDF / 已配置 lane / `pcs_rx_lid[3:0]`+`pcs_rx_lid_vld`）。scrambler placeholder 期 LID 口 Tie，waiver `placeholder, D20`。
 - `docs/arch/MODULE_INVENTORY.md` + SPEC §3.3.4 / §6.1 / A-23：登记 `ub_pcs_nullblk_det`（线 A 设计）。Xia 裁定 2026-10-12：旁路观察 `pcs2dll_*` / `dll2pcs_*`；`ub_pcs_amctl_rx` 出寄存电平 `pcs_rx_sdf_seen`；新增 `lmsm2pcs_nb_phase`；Null 判别 UB-DL §4.3.3.2 + `CLENGTH==5'b00000`；每拍至多一个 block（§3.3.1 / §3.3.2），保持 1-bit 脉冲；RX 门控在寄存前，TX 无门控；t→t+1，LMSM 计 ≥s+1。参考模型待写。
+- `docs/arch/MODULE_INVENTORY.md`：登记 `ub_pcs_nullblk_det`（线 A；出 `pcs2lmsm_null_blk` / `pcs2lmsm_rx_nonnull_blk` / `pcs2lmsm_tx_null_blk`，SPEC §3.3.4 / §6.1 / §13 A-23）。C 线六片解码叶子按 `docs/arch/mem/contracts/README.md` 对齐：`ub_mem_ptw_desc_dec` / `ub_mem_dec_ent_dec` / `ub_mem_tecte_dec` / `ub_mem_tcte_dec` / `ub_mem_l1tct_dec` / `ub_mem_mapte_dec`（S-01(b) 私有叶子，所有权 设计-C，契约 架构 Xia）。合计 **84** 模块，S19 / M34 / L31；M1 覆盖 21。
+- 门禁 S-01(b)：`scripts/gate/contract_check.py` 扫 `docs/arch/*/contracts/*.md`；`contract_hash.py` 对 YAML 映射做规范 sha256；`gen_private_stub.py` 写 `pycircuit/<layer>/stub/` 并经 pycc 出 `rtl/<layer>/stub/`；公开 attest 路径 `reports/private/<layer>/<leaf>.yml`。规则 `docs/rules/verif_gate.md` §12 GATE-CONTRACT-* / GATE-PRIV-*。
 - `docs/SPEC.md` §14：线 C 第 9 章（UMMU / 译码器）首轮裁定写入 MEM 章（船长 2026-10-12 09:05 / D20；S-01 落地见同日 09:20）。每条引用规范节与决策 ID。§10.5 按 C-D1 撤 `mem_dec_b0`…`mem_dec_b7`。docs-only。
 - `docs/arch/mem/contracts/`：C 线私有解码叶子公开信号契约（D20 S-01 (b)；docs-only）。
 - `tb/models/ub_pcs_fec.py`：RS(128,120) FEC 编解码黄金模型（UB-PHY §3.2.2.1 / §3.2.3.5，SPEC §2.4 `ub_pcs_fec_enc` / `ub_pcs_fec_dec`；T=4 / T=2 / bypass）。
@@ -29,12 +31,31 @@
 - `docs/DECISIONS.md` D17：团队分工与流程（Luke Liu via Firstmate，2026-10-10 16:48 Asia/Shanghai）。
 - `docs/DECISIONS.md` D18：全层级范围，作为完整 UB 控制器（Luke Liu via Firstmate，2026-10-10 17:04 Asia/Shanghai）；D18 取代 D2 的分阶段范围。
 - `docs/DECISIONS.md` D19：三线并行与新增角色（Luke Liu via Firstmate，2026-10-10 17:22 Asia/Shanghai）。
+- `docs/arch/MODULE_INVENTORY.md`：77 模块（S12 / M34 / L31；M1 覆盖 20）。列含 **线 A/B/C**（D19）；可选标延后；优先通路标 ★。其余列：钩子、数据通路、时钟复位+频率、存储深×宽（SRAM / 行为 stub 时序）、软件可见面。
+- `docs/arch/LAYER_CONTRACTS.md`：§1–§3（DLL↔NW / NW↔TP / TP↔TA）先写最详，卡线 A/B；§4 TA↔FUN；§5–§7 线 C。DLL↔NW 锁 160 b、1 flit/拍。
+- `docs/arch/TRADEOFFS.md`：PM 四项标 **已定 D19**（3 线 A/B/C；LS 优先通路；必做先；附录 M10 后）。保留影响面/S/M/L；Sky130 代理至 PR #9 工艺。截止 Tue 2026-10-13。不改 DECISIONS/TEAM/PROCESS。
 - `docs/arch/mem/UARCH.md`：线 C 第 9 章内存管理微架构草案（UMMU + 译码器结构；解码叶子与结构叶子分开；不冻结端口）。
 
 ### Changed
 
 - SPEC §2.4 / §3.3.4 / §9 / §10.2：`pcs_am_locked` / `tb_inj_am_lock` 改为 1 bit（已配置 RX lane 全锁定）；`ub_pcs_amctl_rx` 含 §3.2.4.4 分 lane 锁定，码字解码在 `ub_pcs_amctl_cw_dec`。Xia 裁定 2026-10-12。
 - `docs/arch/pcs/contracts/ub_pcs_amctl_cw_dec.md`：YAML 增补必填 `assertions:`（正文 8 条 `AP_CWDEC_*`，去重排序）。schema 源 main `73cfa6e1`（#49）。
+- `docs/arch/mem/contracts/ub_mem_ptw_desc_dec.md`：`AP_PTW_KIND` 改为 `desc_v ⇔ desc_kind≠0`（`desc_v=1` 当且仅当 `desc_kind` 非 0；`desc_v=0` 时 `desc_kind` 必须为 0）。编码仍为 0 = invalid / 1 = table / 2 = block / 3 = page。芯片开发PM 2026-10-12。
+- SPEC §14 Q-A11：TCTE 范围表的 2 MB 颗粒度配置只由 `ub_mem_tcte_dec` 解码并报 `ILL_MAP_2MB`；L1 的 1 GB 与 L2 的 2 MB 页表块描述符合法（`desc_kind=2`，`desc_illegal=0`），遍历器将其拆成 4 KB TLB 回填。
+- 门禁 hooks：`HOOKS-UB-MEM-PTW` 登记 `tb_mem_ptw_obs_st` / `tb_mem_ptw_obs_rd_pend`（只读、不受 `tb_test_mode`；批准人验证）。
+- 门禁 regpair：同一 FF Q 上架构 `_q` 名与 PRODUCT 输出口同时出现时按 `_q` 配对；多个 `_q` 或同名落到不同 cell 仍 `FAIL(pairing)`。
+- 门禁 formal：`GATE-FORMAL-DEPTH` (4)：PRODUCT prove 仅在同次 CI equiv 对该叶子真实 PASS 时可继承 HOOKS prove；否则回退 (2)。report-only `FORMAL_INHERIT_NO_EQUIV`。继承还要求该模块实例化的每个私有叶子都有 `EQUIV_BLACKBOX`。
+- 门禁 equiv：blackbox 集合 = `blackbox.yml` ∪ 契约叶子；PRODUCT≡HOOKS / regpair / emit flatten 前都 `blackbox`。flatten 则 `EQUIV_PRIVATE_FLATTENED`（#47 进 main 前 report-only）。
+- 门禁 lint：`GATE-ONE-MODULE-PER-FILE`。`MULTI_MODULE` 先 report-only；`PRIVATE_IN_PARENT` 在 #47 进 main 后拦。
+- `gen_private_stub.py --formal-free`：写 `formal/<layer>/cut/<leaf>.sv`（anyseq 自由输出）。cut 头 hash / HANDWRITTEN 同 rtl 桩。
+- 门禁 emit：`GATE-PYCLIB-SINGLE`：`rtl/pyc_lib/` 以外不得再有同名 / 同模块原语副本（`PYCLIB_COPY`），脚本不得从其它 ref 或 toolchain 拉取（`PYCLIB_FETCH`）。`rtl/common/pyc_reg.v` 在 main 仍有该文件时只报告（#5 删后自检提醒去 allowlist）。缺 `rtl/pyc_lib/` 仅在 main 已有该目录后硬拦。`PYCLIB_FETCH` / 其它 COPY 在 #47 进 main 后拦。
+- 门禁 contract-check：`GATE-OWNED-PATHS`：非守门人 PR 改 `scripts/gate/`、`.github/workflows/` → `GATE_FILE_TOUCHED`（「门禁文件由守门人维护」）。守门人 = PR 标题以 `gate:` 开头。`waivers/` 可在任意 PR 添加，须守门人评论 `GATE-WAIVER-APPROVED: <path>`；API 未接通前只报告。#47 进 main 前 `GATE_FILE_TOUCHED` report-only。
+- 门禁 formal：`GATE-PRIVATE-PARENT-FREE`：默认 sby 任务不得 `assume` 私有叶子输出口（桩切掉，父级断言在自由输出下成立）。诊断任务可单独命名。#47 进 main 前 report-only。
+- 门禁 formal：`GATE-FORMAL-DEPTH`（prove 收敛则必跑并记 k/runtime；否则 BMC 覆盖两笔完整事务+余量并附归纳反例初态，标 `not fully proven`。BMC depth ≥ 最深 cover + 6，现为 report-only）。
+- 门禁 contract-check：扫描 `docs/arch/*/contracts/`（含 pcs）。pcs 的 `parent` 查 `docs/arch/pcs/UARCH.md` §3 叶子列，不看 mem 表。
+- 门禁 contract-check：`scripts/gate/` 以外不得自带 `contract_hash.py` / `def contract_sha256`。#47 进 main 前只报告（`GATE-CONTRACT-HASH-SINGLE`）。
+- 门禁 contract-check：`assertions:` 必填、与正文 `` `AP_*` `` 一一对应。#49 把 README §8 标成「必填 / 参与 hash」之前只报告；标记进 main（或 `assertions_required: true`）后拦截。
+- 门禁 contract-check：`parent` 只认 `UARCH.md` §3 叶子表「叶子」列的本行名字（去反引号 / 空白后全等）。描述列或其它节出现同名不算；`+` 拼在同一格里的后续名字等设计拆行（#46）之后才算。缺行 `PARENT_UNKNOWN` 拦截，不设豁免。
 - SPEC §14 Q-C07 / Q-A08 / Q-A11：`ub_mem_tbl_rd` 的 `len`（8 bit 字节数，合法 8/32/64）与 `tag`（4 bit）；请求侧由寄存器驱动、不要求同拍首读，`valid && !ready` 时下一拍保持 `valid` 与 `addr`/`len`/`tag`（`AP_TBLRD_REQ_HOLD`）；遍历器事件口暂定 `evt_valid`/`evt_ready`、`EVT_CODE_W=4`、`EVT_MATT_WD_MISS`=1（等 Q-E09）；遍历器对 `ub_mem_ptw_desc_dec` 任意输出回到合法态，`desc_v=1` 且 `desc_kind` ∉ {1,2,3} 走既有翻译故障分支与既有故障码。§10 登记 `ub_mem_ptw` 观察口 `tb_mem_ptw_obs_st`（6 bit 一hot `{st_evt, st_flt, st_fill, st_dec, st_rd, st_idle}`，#48 `b522fd6`）与 `tb_mem_ptw_obs_rd_pend`（1 bit，`= rd_valid_q`；仅 `TEST_HOOKS=1`，不受 `tb_test_mode` 门控；`AP_TBLRD_REQ_HOLD` k-induction）。Xia 裁定 2026-10-12 11:05。
 - GATE-EQY-004 (split from #16 onto main): `equiv_ref.sh` / `equiv_regpair.py` write per-side named binary combinational AIGER for `&cec` (never `write_aiger -miter` / `-ascii`). NOT EQ is a verdict only with a replayable CEX; otherwise `SCRIPT_ERROR`. After `&cec` timeout, method (5) affine next-state folds `start`/`valid_in`/`last` (8 combos, `rst_pyc=0`) at Yosys coarse grain; allowed `$xor`/`$xnor`/`$not`/`$reduce_xor`/`$reduce_xnor`/`$pos`/const; leftover `$mux`/`$pmux` or other cells = N/A. Self-tests: `d[0]&d[1]` and data-bit `$mux` fail the precondition; one-bit affine plant is NOT EQ with CEX. **Open:** ABC `&cec` AIGER export on RX leaves 294 PIs unused (script bug); RX 1-bit POs fall back to Yosys `sat -prove-asserts`, remaining wide `rp_d_*` to affine.
 - `docs/arch/mem/contracts/`：六份叶子契约 YAML 增补必填 `assertions:`（正文引用的 `AP_*` ID，去重排序，参与契约 hash）。
@@ -70,6 +91,9 @@
 - `LMSM_CTRL.START` 更名为 `CTRL.LMSM_START`（REGMAP `0x0000` bit1）。关闭 `STATUS.RETRY_REQ_ST` / `RETRY_ACK_ST` 与 `PARAM_PHY.NUM_LANES_{TX,RX}` 编码（二进制 1/2/4/8）；保留值 RTL 不产出、TB assert。
 - `docs/TEAM.md`、`docs/PROCESS.md`：按 D18 写全层级范围；PROCESS §6 为「全层级推进」。
 - `docs/TEAM.md`、`docs/PROCESS.md`：按 D19 写入三条轨道、轨道所有权，以及「设计-B」/「验证-B」、「设计-C」/「验证-C」新角色。
+- `docs/SPEC.md` §1 / `docs/SPEC_INDEX.md` Phase 列：D18 全控制器；D19 线 A/B/C + 优先通路；§1.4 按线写里程碑草案。不改 TEAM/PROCESS/DECISIONS；不改 `regmap.yaml`。不展开 PR #9 的 §6/§13 针脚。
+- `docs/arch/MODULE_INVENTORY.md` 存储列：行为 stub 时序（Xia 提案，非规范）默认读 1 拍寄存、1R1W、同址 read-old；换 SRAM 宏不改口/测试。第 9 章 UMMU 大表钩子列：每表 `tb_*` backdoor 预载（we/addr/wdata）+ 回读（re/rdata），仅 HOOKS；宽随表项格式（未关前 **未知**）；待与表格式一并写入 SPEC §10。§11 计数与行对齐：PHY S1/M4/L4，合计 S12/M34/L31。
+- `docs/arch/MODULE_INVENTORY.md` 存储列挂到统一原语 `ub_cmn_mem_1r1w`：线 B RTP 重传/重排、TA 未决与线 C UMMU/decoder **须**例化；其它 SRAM/stub **应当**例化。口形/时序见该原语（CODING_STYLE 存储节，另 PR）。不改 TEAM/PROCESS/DECISIONS。
 - `docs/CODING_STYLE.md` §10：统一存储原语 `ub_cmn_mem_1r1w`（`DEPTH`/`WIDTH`；时钟口 `core_clk`；阵列无复位；1R1W `we/waddr/wdata` + `re/raddr/rdata`；读 1 拍寄存、同址 read-old — Xia 提案，规范未裁定）。pyCircuit 行为模型、pycc 生成、门禁 stub 名单；换宏不改口。线 B RTP 重传/重排、TA 未决与线 C `mem_tlb_w0`…`w3` / `mem_dec_b0`…`b7` / `mem_dec_tlb` 必须例化。页表与 MAPT 在系统内存；PLB 为 FF。
 - SPEC §10.5 + CODING_STYLE §4：§10 点名存储允许 HOOKS-only `tb_<inst>_bd_*`（阵列 we/addr/wdata/re/rdata + 原语外 valid flop 伴随口 `tb_<inst>_bd_vld_*`），`tb_test_mode` 门控；等价检查接低。其它叶子内部缓冲不得加钩子。不改 TEAM/PROCESS/DECISIONS；不改 `regmap.yaml`。
 - SPEC §11 (d) / §10.5 / CODING_STYLE：PRODUCT vs HOOKS 形式等价的规范工具改为 Yosys **`equiv`**（版本见 `TOOLCHAIN.lock`）；eqy 可安装后作可选补充。规则不变：`tb_test_mode=0`，全部 `tb_*` 钩子**输入**（含 `tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`）接低；只比 PRODUCT 已有端口。

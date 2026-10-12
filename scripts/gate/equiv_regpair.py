@@ -7,8 +7,11 @@ the wire on that cell's Q pin; rp_d_* is the same cell's D pin — the
 line after the reset/hold mux, never pyc_reg.d / *.__next. Pairing key:
 collect every wire that shares the FF Q bit-group, drop pycc auto-names
 (`pyc_reg_N`, `pyc_comb_N`, `__…L<line>` suffixes), normalize (last
-hierarchy segment, lower-case), intersect with the other side. Exactly
-one common name pairs; 0 or >1 is FAIL(pairing). Cell names are not
+hierarchy segment, lower-case), intersect with the other side. One common name pairs. Several common
+names pair on the unique shared ``_q`` (architectural Q); a PRODUCT
+output alias on the same bits is not a second key. 0 common names,
+several shared ``_q`` names, or one name on two cells is
+FAIL(pairing). Cell names are not
 keys. Extra/missing/width: return code 4; caller treats that as
 regpair=NOTAPPLICABLE(set-mismatch) and switches to uncut output seq
 (PM: GATE-EQY-004). Strip clock (and async-reset used by the cut FFs)
@@ -76,7 +79,9 @@ NORM_HELP = (
     "flatten first, then $dff Q/D (D = post reset/hold mux, not pyc_reg.d / "
     "*__next). Pairing key = all wires on the Q bit-group, minus pycc "
     "auto-names (pyc_reg_N / pyc_comb_N / __…L<line>), last hierarchy "
-    "segment, intersect both sides; exactly one pairs. Cell names are "
+    "segment, intersect both sides; one name or the unique shared _q "
+    "pairs (PRODUCT output on the same bits is not a second key). "
+    "Cell names are "
     "not keys. Pair before opt_clean. extra/missing/width = "
     "NOTAPPLICABLE(set-mismatch) → uncut output seq (PM)"
 )
@@ -125,6 +130,24 @@ def is_pycc_auto_name(name: str) -> bool:
 
 def strip_q_key(key: str) -> str:
     return re.sub(r"_q$", "", key, flags=re.I)
+
+
+def is_q_suffix_key(key: str) -> bool:
+    """Architectural Q alias: normalized name ends with _q (not the letter q)."""
+    return len(key) > 2 and key.endswith("_q")
+
+
+def pick_shared_pairing_key(common: list[str]) -> str | None:
+    """One shared name, or the unique shared _q among output-port aliases."""
+    names = sorted({n for n in common if n})
+    if not names:
+        return None
+    if len(names) == 1:
+        return names[0]
+    q_names = [n for n in names if is_q_suffix_key(n)]
+    if len(q_names) == 1:
+        return q_names[0]
+    return None
 
 
 def net_of_cell_port(mod: dict, bits: list) -> str | None:
@@ -320,8 +343,10 @@ def assign_pairing_keys(
     """Set ff.key from architectural Q aliases. Cell names are never keys.
 
     Collect every wire on the Q bit-group, drop pycc auto-names, normalize,
-    intersect with the other side. Exactly one common name pairs.
-    A side with one leftover name uses that name. 0 or >1 → FAIL(pairing).
+    intersect with the other side. One common name pairs. Several common
+    names pair on the unique shared _q (PRODUCT output on the same bits
+    is not a second key). 0 names, several shared _q names, or one name
+    on two cells → FAIL(pairing).
     """
     gold_all = {k for ff in gold_flops for k in ff.key_candidates}
     gate_all = {k for ff in gate_flops for k in ff.key_candidates}
@@ -340,12 +365,19 @@ def assign_pairing_keys(
                 )
                 continue
             common = sorted(set(cands) & other)
-            if len(common) == 1:
-                ff.key = common[0]
+            picked = pick_shared_pairing_key(common)
+            if picked:
+                ff.key = picked
+                reason = (
+                    "unique"
+                    if len(common) == 1
+                    else f"prefer_q common={','.join(common)}"
+                )
                 print(
                     f"equiv_ref REGPAIR resolve {side} cell={ff.cell} "
                     f"q_port={ff.q_name} d_port={ff.d_name} aliases={aliases} "
-                    f"picked={ff.key} reason=both-sides candidates={','.join(cands)}"
+                    f"picked={ff.key} reason={reason} "
+                    f"candidates={','.join(cands)}"
                 )
                 continue
             ff.key = ""
@@ -818,7 +850,8 @@ def write_named_aig(
         f"read_rtlil {cleaned}\n"
         f"read_verilog {wrap}\n"
         f"hierarchy -check -top {wname}\n"
-        "proc; flatten; opt_expr; opt_clean\n"
+        + ("\n".join(__import__("equiv_blackbox").ys_blackbox_cmds()) + "\n")
+        + "proc; flatten; opt_expr; opt_clean\n"
         "techmap; opt; aigmap; opt\n"
         "setundef -undriven -zero\n"
         "opt_clean\n"
@@ -1453,6 +1486,7 @@ def main() -> int:
         f"equiv_ref REGPAIR pairs={len(pairs)} unmatched={len(unmatched_gold) + len(unmatched_gate)} "
         f"unmatched_gold={len(unmatched_gold)} unmatched_gate={len(unmatched_gate)}"
     )
+    print(f"EQUIV_COMPARE {args.leaf} outputs=0 pairs={len(pairs)}")
     for key, g, t in pairs:
         print(
             f"equiv_ref REGPAIR pair key={key} width={g.width} "

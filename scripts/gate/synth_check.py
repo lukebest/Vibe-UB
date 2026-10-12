@@ -32,6 +32,7 @@ from gatelib import (
     yosys_inc_prefix,
     module_closure,
 )
+from private_leaves import is_private_leaf, private_skip_finding
 
 # HOOKS netlists are lint/CDC only (CODING_STYLE §1). Synth-check is PRODUCT.
 HOOKS_DIR_PARTS = {"hooks", "hooks1"}
@@ -279,6 +280,9 @@ def main() -> int:
     timings: list[tuple[str, float]] = []
     t_job = time.monotonic()
     for unit in modules:
+        if is_private_leaf(unit.module):
+            findings.append(private_skip_finding("synth", unit.module, rel(unit.file)))
+            continue
         if unit.module in skip:
             print(f"synth-check skip top {unit.module}: listed in blackbox.yml (used as -lib)")
             continue

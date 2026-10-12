@@ -8,6 +8,7 @@ source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 jobs=(
   gate-selftest
   spec-leak
+  contract-check
   rtl-emit-consistency
   equiv
   pycircuit-provenance

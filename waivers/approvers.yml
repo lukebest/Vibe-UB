@@ -1,7 +1,12 @@
-# Only these logins may approve a waiver. Role must be the tool gatekeeper
+# Only these identities may approve a waiver. Role must be the tool gatekeeper
 # (verification lead, TEAM.md §4). Scripts ignore any other approver.
+# 验证 is the gatekeeper role name; lukebest is the GitHub login.
 gatekeepers:
   - login: lukebest
     name: Luke Liu
+    role: verification
+    gatekeeper: true
+  - login: 验证
+    name: 验证
     role: verification
     gatekeeper: true

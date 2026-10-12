@@ -1,6 +1,6 @@
 # Vibe-UB 传输层（TP）微架构草案 — B 线
 
-状态：**草案**，供 Xia / 船长评审。基线：repo `lukebest/Vibe-UB` main @ `968747fb`（PR #59 契约补口；叠在 PR #18）。
+状态：**草案**，供 Xia / 船长评审。基线：repo `lukebest/Vibe-UB` main @ `8c2c498e`（PR #63 计时器措辞；叠在 PR #59 / #18）。
 层间口以仓库内 `docs/arch/LAYER_CONTRACTS.md` §2（NW↔TP）、§3（TP↔TA）为权威；本文件只写微架构，不另造口名或口宽。
 规范只引用节号（UB Base Spec Rev 2.0 第 6 章，及 §5、§7、附录 B/D 的相关节）。
 记号：**【设计-B】** 表示本草案的微架构选择（设计-B 所有）；**【未知】** 表示契约或架构师未锁，本文件不填值；**【Xia】** 表示按 Xia 答复记录采纳；**【定】** 表示船长已定。
@@ -240,7 +240,7 @@ PSN 规则（§6.4.1【Xia】）：24 bit，next = (cur+1) mod 2^24；最大已�
 | `RETRY_WAIT_CYC` | 323 | `core_clk` 拍 | ceil(4 µs × 80.566 MHz) = ceil(322.264) = 323【定】 | **DLL**（`ub_dll_retry`，UB-DL §4.7.3.3） |
 | `PROBE_WAIT_CYC` | 323 | `core_clk` 拍 | 同上公式【定】 | **PHY LMSM**（`ub_lmsm`，UB-PHY §3.4.3.2） |
 
-说明：RETRY WAIT 与 Probe.Wait 分属第 4 章与第 3 章，TP 不消费（M-5【Xia】）。本表列出它们只为把船长定的 4 µs / 323 拍公式落在同一处，实现放各自模块的参数表。契约现稿「复用」措辞由独立 docs-only 契约修正 PR 改掉。通用公式：`X_CYC = ceil(T_us × F_CORE_MHz)`，改频率时随 `F_CORE` 重新计算，TB 可用 `*_TMR_SCALE` 缩短。
+说明：RETRY WAIT 与 Probe.Wait 分属第 4 章与第 3 章，TP 不消费（M-5【Xia】；契约 §3 同文）。本表列出它们只为把船长定的 4 µs / 323 拍公式落在同一处，实现放各自模块的参数表。通用公式：`X_CYC = ceil(T_us × F_CORE_MHz)`，改频率时随 `F_CORE` 重新计算，TB 可用 `*_TMR_SCALE` 缩短。
 
 ---
 
@@ -264,7 +264,7 @@ PSN 规则（§6.4.1【Xia】）：24 bit，next = (cur+1) mod 2^24；最大已�
 | M-2 | §3 整操作完成 | `tp2ta_msn_valid/ready` + `tp2ta_tpmsn[23:0]` | **关闭** |
 | M-3 | §3 ROL 目标完成 | `ta2tp_cmp_valid/ready`、`ta2tp_cmp_tassn[15:0]`、`ta2tp_cmp_fail`、`ta2tp_cmp_opcode[7:0]` | **关闭**，但 `ta2tp_cmp_rspst` / `ta2tp_cmp_rspinfo` 宽仍 **未知** |
 | M-4 | §2 / §3 字段 | RTPH 16 B；DstTPN / PSN / TPMSN 各 24 b | 上述已锁。器件级 MTU 仍 **未知**（附录 D.1.13，契约未锁） |
-| M-5 | §3 反压 / 计时器 | 现稿把这两项与 TP 计时器写在同一节，易读成 TP 复用；独立 docs-only 契约修正 PR 将改掉该措辞 | **关闭**【Xia】。`RETRY_WAIT` / `PROBE_WAIT`（323 拍超时）分属 DLL（§4.7.3.3）与 LMSM（§3.4.3.2）；TP 自用重传计时器 RTO 与 ACK 合并（§6.4.2.1）。契约「复用」措辞不在本 PR 改；架构师修正会合入后再 merge main |
+| M-5 | §3 反压 / 计时器 | `RETRY_WAIT_CYC` / `PROBE_WAIT_CYC`（323 拍超时）分别归属 DLL（§4.7.3.3）与 LMSM（§3.4.3.2）；TP 使用本层 RTO 与 ACK 合并（§6.4.2.1） | **关闭**【Xia】。与契约 §3 一致 |
 | M-6 | §2 未决 | GBN 与选择重传两套都有；先做哪一套 **未知** | 仍 **未知**。实现上 GBN 先做，SR 另跟踪（清单回填不在本 PR） |
 | M-7 | §2 ICRC | ICRC 适用于 CFG7；CFG9（bypass）不带 | **关闭** |
 | M-8 | §3 握手 | 提交口 `ready=0`：发送窗满（§6.5.1.4.1）或 `tp2nw_ready=0`；ROL 走 `ta2tp_cmp_*` | **关闭** |

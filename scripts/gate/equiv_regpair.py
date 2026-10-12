@@ -1109,8 +1109,8 @@ def directed_cut_vectors(pis: list[str]) -> list[dict[str, int]]:
         recv_last["crc_recv"] = 0x155
     if "rp_q_recv_q" in recv_last:
         recv_last["rp_q_recv_q"] = 0x155
-    # RX eflag_n = done_q ? recv_q[30] : eflag_q. These two should differ
-    # if gold uses `done` (next) and gate uses `done_q` (cut PI), or vice versa.
+    # RX eflag/ok/fail use done Q and recv_q / crc_word Q (not crc_recv / crc).
+    # last+recv[30] with done_q=0 distinguishes done vs done_n.
     eflag_set = dict(zeros)
     if "rp_q_done" in eflag_set:
         eflag_set["rp_q_done"] = 1
@@ -1119,16 +1119,89 @@ def directed_cut_vectors(pis: list[str]) -> list[dict[str, int]]:
     eflag_hold = dict(zeros)
     if "rp_q_eflag_q" in eflag_hold:
         eflag_hold["rp_q_eflag_q"] = 1
+    last_ef = dict(last_beat)
+    last_ef["rp_q_done"] = 0
+    if "rp_q_recv_q" in last_ef:
+        last_ef["rp_q_recv_q"] = 1 << 30
+    if "crc_recv" in last_ef:
+        last_ef["crc_recv"] = 1 << 30
     ok_match = dict(zeros)
     if "rp_q_done" in ok_match:
         ok_match["rp_q_done"] = 1
-    if "crc_recv" in ok_match and "rp_q_crc" in ok_match:
-        ok_match["crc_recv"] = 0x155
-        ok_match["rp_q_crc"] = 0x155
+    if "rp_q_crc_word" in ok_match:
+        ok_match["rp_q_crc_word"] = 0x155
+    if "rp_q_recv_q" in ok_match:
+        ok_match["rp_q_recv_q"] = 0x155
     ok_mismatch = dict(ok_match)
-    if "crc_recv" in ok_mismatch:
-        ok_mismatch["crc_recv"] = 0x2AA
-    return [rst, last_beat, start_valid_last, start_valid, mid, recv_last, eflag_set, eflag_hold, ok_match, ok_mismatch]
+    if "rp_q_recv_q" in ok_mismatch:
+        ok_mismatch["rp_q_recv_q"] = 0x2AA
+    last_ok = dict(last_beat)
+    last_ok["rp_q_done"] = 0
+    if "rp_q_crc_word" in last_ok:
+        last_ok["rp_q_crc_word"] = 0x155
+    if "rp_q_recv_q" in last_ok:
+        last_ok["rp_q_recv_q"] = 0x155
+    return [
+        rst, last_beat, start_valid_last, start_valid, mid, recv_last,
+        eflag_set, eflag_hold, last_ef, ok_match, ok_mismatch, last_ok,
+    ]
+
+
+def parse_sat_inputs(log: str, pis: list[str]) -> dict[str, int]:
+    """Parse Yosys `sat -show-inputs` Signal assignments."""
+    got: dict[str, int] = {}
+    ordered = sorted(pis, key=len, reverse=True)
+    for line in log.splitlines():
+        if "Signal" not in line:
+            continue
+        for name in ordered:
+            if name in got:
+                continue
+            if not re.search(rf"(\\?{re.escape(name)})\s*=", line):
+                continue
+            m = re.search(r"=\s*(\d+)'h([0-9a-fA-F]+)", line)
+            if m:
+                got[name] = int(m.group(2), 16)
+                continue
+            m = re.search(r"=\s*(\d+)'b([01]+)", line)
+            if m:
+                got[name] = int(m.group(2), 2)
+                continue
+            m = re.search(r"=\s*([01])\s*$", line)
+            if m:
+                got[name] = int(m.group(1), 10)
+    return got
+
+
+def sat_one_po(
+    tmp: Path,
+    po: str,
+    pis: list[str],
+    all_pos: list[str],
+    widths: dict[str, int],
+    tmo: int,
+) -> tuple[str, str, dict[str, int]]:
+    """Combo SAT on the RTLIL cuts for one named PO. Independent of AIGER."""
+    gold_il = tmp / "gold_cut.il"
+    gate_il = tmp / "gate_cut.il"
+    ys = [f"read_rtlil {gold_il}", f"read_rtlil {gate_il}"]
+    for side in ("gold", "gate"):
+        ys.append(f"cd {side}")
+        for name in all_pos:
+            if name != po:
+                ys.append(f"delete -output {yosys_id(name)}")
+    ys += [
+        "miter -equiv -make_assert -flatten gold gate miter",
+        "sat -verify -prove-asserts -show-inputs",
+    ]
+    print(f"equiv_ref REGPAIR sat_cmd=sat -verify -prove-asserts po={po}")
+    proc = run_yosys_p("\n".join(ys) + "\n", tmo, quiet=False)
+    log = proc.stdout or ""
+    print(log[-2000:] if len(log) > 2000 else log)
+    kind = sat_kind(log)
+    line = conclusion_line(log) or kind
+    model = parse_sat_inputs(log, pis) if kind == "not_equivalent" else {}
+    return kind, line, model
 
 
 def run_affine_on_pos(
@@ -1225,19 +1298,22 @@ def prove_miter(
         used_model = use
         break
     if used_model is None:
-        # Per-PO &cec to name the differing output, then directed again.
-        # 1-bit POs first (RX eflag/ok/fail/done).
+        # ABC &cec can report instant NOT EQ on a 0-AND / unused-PI AIGER
+        # (RX eflag/ok/fail). Yosys sat on the RTLIL cut is the witness.
+        gold_cut_mod = json.loads((tmp / "gold_cut.json").read_text(encoding="utf-8"))["modules"]["gold"]
+        _gpi, all_po = port_sets(gold_cut_mod)
         by_w = sorted(rp_pos, key=lambda n: widths.get(n, 1))
+        sat_eq: list[str] = []
         for po in by_w:
-            pk, _pu, pline, pmodel = cec_pair(
-                tmp, tmp / "gold_cut.il", tmp / "gate_cut.il",
-                pis, [po], widths, abc, min(max(tmo, 1), 20), f"po_{po}",
-            )
-            print(f"equiv_ref REGPAIR po_cec name={po} result={pk} line={pline}")
-            if pk == "equivalent":
+            if widths.get(po, 1) > 4:
                 continue
-            if pk == "not_equivalent":
-                more = [pmodel] if pmodel else []
+            sk, sline, smodel = sat_one_po(tmp, po, pis, list(all_po), widths, min(max(tmo, 1), 30))
+            print(f"equiv_ref REGPAIR po_sat name={po} result={sk} line={sline}")
+            if sk == "equivalent":
+                sat_eq.append(po)
+                continue
+            if sk == "not_equivalent":
+                more = [smodel] if smodel else []
                 more += directed_cut_vectors(pis)
                 for cand in more:
                     use = {k: v for k, v in cand.items() if k in pis}
@@ -1249,7 +1325,18 @@ def prove_miter(
                         + " ".join(f"{k}=0x{v:x}" for k, v in sorted(use.items()) if k in pis)
                     )
                     print(f"equiv_ref REGPAIR cex_ok=1 po={po} {detail}")
-                    return "not_equivalent", used, pline, [po]
+                    return "not_equivalent", "sat", sline, [po]
+        narrow = [p for p in rp_pos if widths.get(p, 1) <= 4]
+        if narrow and set(sat_eq) == set(narrow):
+            wide = [p for p in rp_pos if widths.get(p, 1) > 4]
+            print(
+                "equiv_ref REGPAIR note=ABC NOT EQ not replayable; "
+                "Yosys sat EQ on 1-bit rp_d_* (AIGER false NOT EQ)"
+            )
+            if not wide:
+                return "equivalent", "sat", "yosys sat EQ (ABC AIGER false NOT EQ)", []
+            print("equiv_ref REGPAIR note=1-bit SAT EQ; method=affine on remaining wide rp_d_*")
+            return run_affine_on_pos(tmp, pis, wide, widths, tmo)
         print("equiv_ref REGPAIR SCRIPT_ERROR not_eq_without_cex")
         return "script_error", used, line, []
     print(

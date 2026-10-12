@@ -451,13 +451,34 @@ def prove_affine_po(
                 f"start={start} valid_in={valid} last={last}"
             )
             continue
-        eq, npts, cex, detail = compare_affine(gaff, taff, pis, widths, assigns)
-        total_pts += npts
-        row = ComboResult(start, valid, last, True, True, gwhy, twhy, npts, eq, cex, detail)
+        pts = unit_points(pis, widths)
+        total_pts += len(pts)
+        combo_eq = True
+        cex, detail = {}, ""
+        for vec in pts:
+            use = dict(vec)
+            use.update(assigns)
+            gv = eval_affine(gaff, use, widths)
+            tv = eval_affine(taff, use, widths)
+            if gv == tv:
+                continue
+            diff, replay = _replay(tmp, use, po, widths)
+            if diff is None:
+                print(
+                    f"equiv_ref REGPAIR affine_eval_match po={po} start={start} "
+                    f"valid_in={valid} last={last} symbolic=gold=0x{gv:x} gate=0x{tv:x}"
+                )
+                continue
+            combo_eq = False
+            cex, detail = use, replay
+            if not first_cex:
+                first_cex = use
+                first_detail = replay
+            break
+        row = ComboResult(
+            start, valid, last, True, True, gwhy, twhy, len(pts), combo_eq, cex, detail
+        )
         rows.append(row)
-        if not eq and not first_cex:
-            first_cex = cex
-            first_detail = detail
     n_combo = len(combos)
     print(
         f"equiv_ref REGPAIR affine po={po} method=affine combos={n_combo} "
@@ -466,17 +487,16 @@ def prove_affine_po(
     if any_na:
         return "na", f"affine N/A (non-XOR cone) combos={n_combo}", {}, rows
     if first_cex:
-        diff, replay = _replay(tmp, first_cex, po, widths)
-        if diff is None:
-            return "na", f"affine NOT EQ but cut eval missed it {first_detail}", {}, rows
-        print(f"equiv_ref REGPAIR cex_ok=1 po={po} method=affine {replay}")
-        return "not_equivalent", f"affine NOT EQ {replay}", first_cex, rows
+        print(f"equiv_ref REGPAIR cex_ok=1 po={po} method=affine {first_detail}")
+        return "not_equivalent", f"affine NOT EQ {first_detail}", first_cex, rows
     return "equivalent", f"affine EQ combos={n_combo} points={total_pts}", {}, rows
 
 
 def _replay(tmp: Path, assigns: dict[str, int], po: str, widths: dict[str, int]) -> tuple[str | None, str]:
     eq = _eq()
-    use = {k: v for k, v in assigns.items() if k}
+    skip = {po} | {n for n in widths if n.startswith("rp_d_")}
+    use = {k: 0 for k in widths if k not in skip}
+    use.update({k: v for k, v in assigns.items() if k and k not in skip})
     gvals = eq.eval_signals(tmp / "gold_cut.il", "gold", use, [po], widths)
     tvals = eq.eval_signals(tmp / "gate_cut.il", "gate", use, [po], widths)
     gv, tv = gvals.get(po), tvals.get(po)

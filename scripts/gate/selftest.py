@@ -1,0 +1,1997 @@
+#!/usr/bin/env python3
+"""Deliberate-fail fixtures: each new gate check must catch a planted violation."""
+
+from __future__ import annotations
+
+import os
+import re
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from cdc_rdc import analyze_module
+from formal_bind import check_formal_binds, discover_sby_files, sby_run_cwd
+from formal_depth import (
+    INHERIT_STATUS,
+    check_formal_depth,
+    check_formal_inherit,
+    parse_sby_bmc_depth,
+    sby_inherits_hooks_prove,
+)
+from equiv_blackbox import equiv_blackbox_set
+from formal_parent_free import check_formal_parent_free
+from gatelib import (
+    Finding,
+    collect_lock_completeness_findings,
+    discover_pycircuit_leaves,
+    discover_pycircuit_lib_helpers,
+    hooks_extra_for,
+    import_root_shadow_findings,
+    leaf_process_env,
+    leaf_python_argv,
+    mark_deleted_findings,
+    parse_port_decls,
+    print_tool_versions,
+    repo_root_on_sys_path,
+    run_cmd,
+    sha256_file,
+    shutil_which,
+)
+from hooks_port_consistency import compare_ports
+from large_mem_manifest import check_large_mem_manifest
+from lint import lint_module, lint_sources_for, parse_verilator
+from one_module import check_one_module
+from pyc_lib_check import (
+    ALLOWLIST_NOTE,
+    check_pyc_lib,
+    check_pyclib_single,
+    stale_pyclib_copy_allowlist,
+)
+from pycircuit_provenance import static_splice_check
+from private_selftest import run_all as run_private_selftests
+from rtl_emit_consistency import (
+    compare_emitted_rtl,
+    emit_unavailable_findings,
+    run_equiv,
+)
+from tb_selfcheck import parse_junit_counts, pytest_skip_is_fail, required_sim_tools
+
+
+def _fail(name: str, detail: str) -> None:
+    print(f"SELFTEST FAIL {name}: {detail}")
+    raise SystemExit(1)
+
+
+def _expect_rule(name: str, findings: list[Finding], rule: str) -> Finding:
+    hits = [f for f in findings if f.rule == rule]
+    if not hits:
+        got = sorted({f.rule for f in findings}) or ["(none)"]
+        _fail(name, f"expected rule {rule}, got {got}")
+    print(f"SELFTEST PASS {name}: {rule} ({hits[0].message[:80]})")
+    return hits[0]
+
+
+def _v(path: Path, module: str, ports: str, body: str = "") -> None:
+    """Write a tiny netlist. `ports` is a comma-separated `dir name` list."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    decls: list[str] = []
+    names: list[str] = []
+    for chunk in ports.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        parts = chunk.split()
+        if len(parts) >= 2:
+            decls.append(f"  {parts[0]} {parts[1]};")
+            names.append(parts[1])
+        else:
+            decls.append(f"  input {parts[0]};")
+            names.append(parts[0])
+    header = ", ".join(names)
+    extra = f"{body}\n" if body else ""
+    path.write_text(
+        f"module {module} ({header});\n" + "\n".join(decls) + f"\n{extra}endmodule\n",
+        encoding="utf-8",
+    )
+
+
+def test_emit_skip_missing_script() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        missing = Path(tmp) / "scripts" / "emit_rtl.py"
+        hits = emit_unavailable_findings(missing)
+        f = _expect_rule("emit-skip-missing-script", hits, "EMIT_SKIP")
+        if f.bucket != "report":
+            _fail("emit-skip-missing-script", "skip must be report-only")
+
+
+def test_emit_skip_pycc() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        present = Path(tmp) / "emit_rtl.py"
+        present.write_text("# dummy\n", encoding="utf-8")
+        hits = emit_unavailable_findings(
+            present, pycc_ready=False, reason="BLOCKER: apt install failed"
+        )
+        f = _expect_rule("emit-skip-pycc", hits, "EMIT_SKIP")
+        if "apt install failed" not in f.message and "BLOCKER" not in f.message:
+            _fail("emit-skip-pycc", "reason not in message")
+        if f.bucket != "report":
+            _fail("emit-skip-pycc", "skip must be report-only")
+
+
+def test_emit_byte_diff() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        gen = root / "gen" / "pcs"
+        com = root / "com" / "pcs"
+        _v(gen / "foo.v", "foo", "input clk")
+        _v(com / "foo.v", "foo", "input clk, input rst")
+        hits = compare_emitted_rtl(root / "gen", root / "com")
+        _expect_rule("emit-byte-diff", hits, "EMIT_DIFF")
+
+
+def test_lock_incomplete() -> None:
+    hits = collect_lock_completeness_findings(
+        "emit", lock={"llvm_lock": "19.1.1", "mlir_lock": "19.1.1"}
+    )
+    _expect_rule("lock-incomplete", hits, "TOOLCHAIN_LOCK_INCOMPLETE")
+
+
+def test_large_v_committed() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        rtl = Path(tmp) / "rtl"
+        _v(
+            rtl / "cmn" / "ub_cmn_mem_1r1w_d512w64.v",
+            "ub_cmn_mem_1r1w_d512w64",
+            "input core_clk",
+        )
+        hits = check_large_mem_manifest(
+            rtl,
+            generated_rtl=None,
+            emit_available=False,
+            pycc_ready=False,
+            skip_reason="selftest",
+            thresh=4096,
+        )
+        _expect_rule("large-v-committed", hits, "LARGE_V_COMMITTED")
+
+
+def test_manifest_wrong_sha() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        rtl = root / "rtl"
+        gen = root / "gen"
+        name = "ub_cmn_mem_1r1w_d512w64"
+        man = rtl / "cmn" / "manifest.yml"
+        man.parent.mkdir(parents=True)
+        prod = gen / "cmn" / f"{name}.v"
+        hooks = gen / "cmn" / "hooks" / f"{name}.v"
+        _v(prod, name, "input core_clk")
+        _v(hooks, name + "_hooks", "input core_clk")
+        # rewrite hooks with same module body except name for byte-except-name
+        hooks.write_text(prod.read_text(encoding="utf-8").replace(name, name), encoding="utf-8")
+        hooks.write_text(
+            prod.read_text(encoding="utf-8").replace(
+                f"module {name}", f"module {name}"
+            ),
+            encoding="utf-8",
+        )
+        # Make hooks differ only by module name so BODY check passes.
+        hooks.write_text(
+            prod.read_text(encoding="utf-8").replace(
+                f"module {name} ", f"module {name}_h "
+            ),
+            encoding="utf-8",
+        )
+        man.write_text(
+            "\n".join(
+                [
+                    "variants:",
+                    f"  - name: {name}",
+                    "    params:",
+                    "      DEPTH: 512",
+                    "      WIDTH: 64",
+                    "    pycc: pyc4.0",
+                    "    product_sha256: deadbeef" + "0" * 56,
+                    f"    hooks_sha256: {sha256_file(hooks)}",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        hits = check_large_mem_manifest(
+            rtl,
+            generated_rtl=gen,
+            emit_available=True,
+            pycc_ready=True,
+            thresh=4096,
+        )
+        _expect_rule("manifest-wrong-sha", hits, "MANIFEST_SHA")
+
+
+def test_manifest_unproducible() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        rtl = Path(tmp) / "rtl"
+        gen = Path(tmp) / "gen"
+        gen.mkdir()
+        man = rtl / "cmn" / "manifest.yml"
+        man.parent.mkdir(parents=True)
+        man.write_text(
+            "\n".join(
+                [
+                    "variants:",
+                    "  - name: ub_cmn_mem_1r1w_d1024w64",
+                    "    params: {DEPTH: 1024, WIDTH: 64}",
+                    "    pycc: pyc4.0",
+                    "    product_sha256: " + "ab" * 32,
+                    "    hooks_sha256: " + "cd" * 32,
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        hits = check_large_mem_manifest(
+            rtl,
+            generated_rtl=gen,
+            emit_available=True,
+            pycc_ready=True,
+            thresh=4096,
+        )
+        _expect_rule("manifest-unproducible", hits, "MANIFEST_UNPRODUCIBLE")
+
+
+def test_stray_pyc_reg() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        rtl = Path(tmp) / "rtl"
+        _v(rtl / "pcs" / "pyc_reg.v", "pyc_reg", "input clk")
+        hits = check_pyc_lib(rtl, lock_src=None)
+        _expect_rule("stray-pyc-reg", hits, "PYC_PRIMITIVE_STRAY")
+
+
+def test_pyc_lib_skip_missing_dir() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        rtl = Path(tmp) / "rtl"
+        rtl.mkdir()
+        hits = check_pyc_lib(rtl, lock_src=None)
+        f = _expect_rule("pyc-lib-skip-missing", hits, "PYC_LIB_SKIP")
+        if f.bucket != "report":
+            _fail("pyc-lib-skip-missing", "missing rtl/pyc_lib must not fail")
+        if any(h.bucket == "new" for h in hits):
+            _fail("pyc-lib-skip-missing", "must not introduce blocking findings")
+
+
+def test_pyc_lib_missing_hard_after_main() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        rtl = root / "rtl"
+        rtl.mkdir(parents=True)
+        _write_gate_yml(root, "pyc_lib_on_main", True)
+        hits = check_pyc_lib(rtl, lock_src=None)
+        hit = _expect_rule("pyc-lib-missing-hard", hits, "PYC_LIB_MISSING")
+        if hit.bucket != "new":
+            _fail("pyc-lib-missing-hard", "must block once origin/main has rtl/pyc_lib")
+
+
+def _write_gate_yml(root: Path, key: str, value: bool) -> None:
+    yml = root / "scripts" / "gate" / "private_leaves.yml"
+    yml.parent.mkdir(parents=True, exist_ok=True)
+    prev = yml.read_text(encoding="utf-8") if yml.is_file() else "leaves: []\n"
+    yml.write_text(prev + f"{key}: {str(value).lower()}\n", encoding="utf-8")
+
+
+def test_pyclib_single_copy_and_ok() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        rtl = root / "rtl"
+        _v(rtl / "pyc_lib" / "pyc_reg.v", "pyc_reg", "input clk")
+        _v(rtl / "pcs" / "ub_pcs_leaf.v", "ub_pcs_leaf", "input core_clk")
+        _write_gate_yml(root, "pyclib_single_required", True)
+        hits = check_pyclib_single(root, rtl)
+        if any(f.rule in {"PYCLIB_COPY", "PYCLIB_FETCH"} for f in hits):
+            _fail("pyclib-single-ok", f"clean tree must pass, got {hits}")
+        print("SELFTEST PASS pyclib-single-ok: no PYCLIB_COPY/FETCH")
+
+        _v(root / "formal" / "cmn" / "pyc_reg.v", "pyc_reg", "input clk")
+        hit = _expect_rule("pyclib-copy-name", check_pyclib_single(root, rtl), "PYCLIB_COPY")
+        if "formal/cmn/pyc_reg.v" not in hit.file:
+            _fail("pyclib-copy-name", f"expected formal copy, got {hit.file}")
+        if hit.bucket != "new":
+            _fail("pyclib-copy-name", "must be blocking when required")
+
+        (root / "formal" / "cmn" / "pyc_reg.v").unlink()
+        _v(rtl / "common" / "alias.v", "pyc_reg", "input clk")
+        hit = _expect_rule("pyclib-copy-module", check_pyclib_single(root, rtl), "PYCLIB_COPY")
+        if "defines module pyc_reg" not in hit.message:
+            _fail("pyclib-copy-module", hit.message)
+
+
+def test_pyclib_single_fetch_and_report() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        rtl = root / "rtl"
+        _v(rtl / "pyc_lib" / "pyc_reg.v", "pyc_reg", "input clk")
+        script = root / "scripts" / "impl" / "pull_lib.sh"
+        script.parent.mkdir(parents=True)
+        script.write_text(
+            "git show origin/main:rtl/pyc_lib/pyc_reg.v > rtl/pyc_lib/pyc_reg.v\n",
+            encoding="utf-8",
+        )
+        hit = _expect_rule("pyclib-fetch-report", check_pyclib_single(root, rtl), "PYCLIB_FETCH")
+        if hit.bucket != "report":
+            _fail("pyclib-fetch-report", "must be report-only until #47 is on main")
+        _write_gate_yml(root, "pyclib_single_required", True)
+        hit = _expect_rule("pyclib-fetch-block", check_pyclib_single(root, rtl), "PYCLIB_FETCH")
+        if hit.bucket != "new":
+            _fail("pyclib-fetch-block", "must be blocking when required")
+        if "git show" not in hit.message:
+            _fail("pyclib-fetch-block", hit.message)
+
+        fixture = root / "scripts" / "gate" / "selftest.py"
+        fixture.parent.mkdir(parents=True, exist_ok=True)
+        fixture.write_text(
+            'ok = _git_show("deadbeef", "rtl/pyc_lib/pyc_reg.v", "out.v")\n'
+            "git show origin/main:rtl/pyc_lib/pyc_reg.v\n",
+            encoding="utf-8",
+        )
+        hits = [f for f in check_pyclib_single(root, rtl) if f.file.endswith("selftest.py")]
+        if hits:
+            _fail("pyclib-fetch-skip-selftest", "gate selftest fixtures are excluded")
+        print("SELFTEST PASS pyclib-fetch-skip-selftest: scripts/gate selftest ignored")
+
+
+def test_pyclib_copy_allowlist_transitional() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        rtl = root / "rtl"
+        _v(rtl / "pyc_lib" / "pyc_reg.v", "pyc_reg", "input clk")
+        _v(rtl / "common" / "pyc_reg.v", "pyc_reg", "input clk")
+        _write_gate_yml(root, "pyclib_single_required", True)
+        yml = root / "scripts" / "gate" / "private_leaves.yml"
+        yml.write_text(
+            yml.read_text(encoding="utf-8")
+            + "pyclib_copy_on_main:\n  rtl/common/pyc_reg.v: true\n",
+            encoding="utf-8",
+        )
+        hit = _expect_rule(
+            "pyclib-allowlist-report",
+            check_pyclib_single(root, rtl),
+            "PYCLIB_COPY",
+        )
+        if hit.file != "rtl/common/pyc_reg.v":
+            _fail("pyclib-allowlist-report", hit.file)
+        if hit.bucket != "report":
+            _fail("pyclib-allowlist-report", "allowlisted copy must stay report-only")
+        if ALLOWLIST_NOTE not in hit.message:
+            _fail("pyclib-allowlist-report", hit.message)
+        if stale_pyclib_copy_allowlist(root):
+            _fail("pyclib-allowlist-report", "entry is live on this fixture main")
+
+        yml.write_text(
+            "leaves: []\npyclib_single_required: true\n"
+            "pyclib_copy_on_main:\n  rtl/common/pyc_reg.v: false\n",
+            encoding="utf-8",
+        )
+        stale = stale_pyclib_copy_allowlist(root)
+        if "rtl/common/pyc_reg.v" not in stale:
+            _fail(
+                "pyclib-allowlist-stale",
+                "missing file on main must remind to delete the allowlist entry",
+            )
+        hit = _expect_rule(
+            "pyclib-allowlist-stale-blocks",
+            check_pyclib_single(root, rtl),
+            "PYCLIB_COPY",
+        )
+        if hit.bucket != "new":
+            _fail("pyclib-allowlist-stale-blocks", "gone from main → normal blocking")
+        print("SELFTEST PASS pyclib-allowlist-stale: delete entry after #5")
+
+
+def test_pyc_lib_byte_diff() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        rtl = Path(tmp) / "rtl"
+        src = Path(tmp) / "pyCircuit"
+        _v(rtl / "pyc_lib" / "pyc_reg.v", "pyc_reg", "input clk, input d")
+        _v(src / "lib" / "pyc_reg.v", "pyc_reg", "input clk")
+        hits = check_pyc_lib(rtl, lock_src=src)
+        _expect_rule("pyc-lib-byte-diff", hits, "PYC_LIB_DIFF")
+
+
+def test_unlisted_tb_obs() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        prod = Path(tmp) / "prod.v"
+        hooks = Path(tmp) / "hooks.v"
+        _v(prod, "ub_foo", "input clk")
+        _v(hooks, "ub_foo", "input clk, output tb_foo_obs_hit")
+        hits = compare_ports("ub_foo", prod, hooks, None)
+        _expect_rule("unlisted-tb-obs", hits, "HOOKS_PORT_UNEXPECTED")
+
+
+def test_obs_must_be_output() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        prod = Path(tmp) / "prod.v"
+        hooks = Path(tmp) / "hooks.v"
+        extra = ["tb_test_mode", "tb_mem_tlb_obs_hit"]
+        _v(prod, "ub_mem_tlb", "input clk")
+        _v(
+            hooks,
+            "ub_mem_tlb",
+            "input clk, input tb_test_mode, input tb_mem_tlb_obs_hit",
+        )
+        hits = compare_ports("ub_mem_tlb", prod, hooks, extra)
+        _expect_rule("obs-must-be-output", hits, "HOOKS_PORT_DIR")
+
+
+def test_sby_bind_missing_signal() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        net = repo / "rtl" / "cmn" / "ub_toy.v"
+        sby = repo / "formal" / "cmn" / "toy.sby"
+        ass = repo / "formal" / "cmn" / "toy_assert.sv"
+        _v(net, "ub_toy", "input core_clk")
+        sby.parent.mkdir(parents=True)
+        sby.write_text(
+            "\n".join(
+                [
+                    "[options]",
+                    "mode bmc",
+                    "[script]",
+                    "read -sv rtl/cmn/ub_toy.v",
+                    "read -sv formal/cmn/toy_assert.sv",
+                    "prep -top ub_toy",
+                    "[files]",
+                    "rtl/cmn/ub_toy.v",
+                    "formal/cmn/toy_assert.sv",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        ass.write_text(
+            "\n".join(
+                [
+                    "module toy_assert(input core_clk, input ghost_sig);",
+                    "endmodule",
+                    "bind ub_toy toy_assert u_a (",
+                    "  .core_clk(core_clk),",
+                    "  .ghost_sig(ghost_sig)",
+                    ");",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        hits = check_formal_binds(repo)
+        _expect_rule("sby-bind-missing-signal", hits, "BIND_SIGNAL_MISSING")
+
+
+def test_lint_pyc_lib_not_passed_twice() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        lib = Path(tmp) / "rtl" / "pyc_lib" / "pyc_reg.v"
+        leaf = Path(tmp) / "rtl" / "cmn" / "ub_leaf.v"
+        lib.parent.mkdir(parents=True)
+        leaf.parent.mkdir(parents=True)
+        lib.write_text(
+            "module pyc_reg(input clk, input d, output q);\n"
+            "  assign q = d;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        leaf.write_text(
+            '`include "pyc_reg.v"\n'
+            "module ub_leaf(input core_clk, input d, output q);\n"
+            "  pyc_reg u_r(.clk(core_clk), .d(d), .q(q));\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        srcs = lint_sources_for(leaf, [leaf, lib])
+        if any(p.resolve() == lib.resolve() for p in srcs):
+            _fail("lint-pyc-lib-filter", "pyc_lib primitive must not be a second source")
+        if leaf.resolve() not in {p.resolve() for p in srcs}:
+            _fail("lint-pyc-lib-filter", "leaf itself must stay in the source list")
+        print("SELFTEST PASS lint-pyc-lib-filter: include-only, no second source")
+        if shutil_which("verilator"):
+            hits = lint_module("ub_leaf", leaf, [leaf, lib], [lib.parent])
+            if any(f.rule == "MODDUP" for f in hits):
+                _fail("lint-pyc-lib-include", hits[0].message)
+            print("SELFTEST PASS lint-pyc-lib-include: no MODDUP with -I rtl/pyc_lib")
+
+
+def test_lint_moddup_still_caught() -> None:
+    text = (
+        "%Warning-MODDUP: rtl/cmn/dup.v:1:1: Duplicate declaration of module: 'ub_dup'"
+    )
+    hits = parse_verilator(text, "ub_dup", "rtl/cmn/dup.v")
+    _expect_rule("lint-moddup-parse", hits, "MODDUP")
+    if shutil_which("verilator"):
+        with tempfile.TemporaryDirectory() as tmp:
+            a = Path(tmp) / "a.v"
+            b = Path(tmp) / "b.v"
+            body = "module ub_dup(input core_clk);\nendmodule\n"
+            a.write_text(body, encoding="utf-8")
+            b.write_text(body, encoding="utf-8")
+            hits = lint_module("ub_dup", a, [a, b], [])
+            _expect_rule("lint-moddup-live", hits, "MODDUP")
+
+
+def test_cdc_pyc_lib_clk_not_core() -> None:
+    rules = {
+        "clock_port_regex": r"(^clk$|_clk$|^clock$)",
+        "allowed_clocks": ["core_clk"],
+        "forbidden_clocks": ["pma_clk"],
+        "require_single_clock": True,
+        "library_primitive_dirs": ["rtl/pyc_lib"],
+        "async_reset_whitelist_cells": ["ub_rst_sync"],
+        "sync_cells": [],
+        "async_input_regex": [],
+    }
+    lib = Path("/tmp/cdc-lib/rtl/pyc_lib/pyc_reg.v")
+    prod = Path("/tmp/cdc-lib/rtl/cmn/ub_foo.v")
+    lib_text = "input clk;\ninput d;\noutput q;\n"
+    prod_text = "input clk;\noutput q;\n"
+    lib_hits = analyze_module("pyc_reg", lib, lib_text, rules)
+    if any(f.rule == "CLOCK_NOT_CORE" for f in lib_hits):
+        _fail("cdc-pyc-lib-clk", "rtl/pyc_lib clk must not be CLOCK_NOT_CORE")
+    print("SELFTEST PASS cdc-pyc-lib-clk: primitive clk ignored")
+    prod_hits = analyze_module("ub_foo", prod, prod_text, rules)
+    _expect_rule("cdc-product-clk", prod_hits, "CLOCK_NOT_CORE")
+
+
+def test_setup_sby_refuses_missing_z3_note() -> None:
+    setup = Path(__file__).resolve().parent / "setup_sby.sh"
+    text = setup.read_text(encoding="utf-8")
+    if "SBY_REF" not in text or "z3" not in text:
+        _fail("setup-sby", "setup_sby.sh must pin a sby ref and require z3")
+    print("SELFTEST PASS setup-sby: pin + z3 required")
+
+
+def test_sby_relative_and_missing() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        sby = repo / "formal" / "cmn" / "cmn.sby"
+        props = repo / "formal" / "cmn" / "ub_if_props.sv"
+        sby.parent.mkdir(parents=True)
+        props.write_text("module ub_if_props;\nendmodule\n", encoding="utf-8")
+        sby.write_text(
+            "\n".join(
+                [
+                    "[options]",
+                    "mode bmc",
+                    "[script]",
+                    "read -sv ub_if_props.sv",
+                    "[files]",
+                    "ub_if_props.sv",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        if sby_run_cwd(sby) != sby.parent.resolve():
+            _fail("sby-cwd", f"expected {sby.parent}, got {sby_run_cwd(sby)}")
+        hits = check_formal_binds(repo)
+        if any(f.rule == "SBY_FILE_MISSING" for f in hits):
+            _fail("sby-relative-found", hits[0].message)
+        print("SELFTEST PASS sby-relative-found: sibling [files] token resolves")
+        sby.write_text(
+            "\n".join(
+                [
+                    "[options]",
+                    "mode bmc",
+                    "[files]",
+                    "ub_cmn_mem_1r1w_if_props.sv",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        hits = check_formal_binds(repo)
+        _expect_rule("sby-file-missing", hits, "SBY_FILE_MISSING")
+        work = repo / "formal" / "cmn" / "cmn_bmc"
+        work.mkdir()
+        (work / "config.sby").write_text("[files]\nmissing.sv\n", encoding="utf-8")
+        found = {p.resolve() for p in discover_sby_files(repo)}
+        if (work / "config.sby").resolve() in found:
+            _fail("sby-skip-workdir", "sby workdir config.sby must not be discovered")
+        hits = check_formal_binds(repo)
+        if any("cmn_bmc/config.sby" in (f.file or "") for f in hits):
+            _fail("sby-skip-workdir", "workdir config.sby must not produce findings")
+        print("SELFTEST PASS sby-skip-workdir: only formal/<iface>/*.sby")
+
+
+def test_formal_bmc_vs_cover_depth() -> None:
+    if parse_sby_bmc_depth("[options]\nbmc: depth 40\ndepth 8\n") != 40:
+        _fail("formal-depth-parse", "bmc: depth must win over generic depth")
+    if parse_sby_bmc_depth("[options]\ndepth 20\n") != 20:
+        _fail("formal-depth-parse", "unprefixed depth must be the BMC depth")
+    print("SELFTEST PASS formal-depth-parse: bmc: depth wins")
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        sby = repo / "formal" / "cmn" / "toy.sby"
+        sby.parent.mkdir(parents=True)
+        sby.write_text(
+            "[tasks]\nbmc\ncover\n[options]\nbmc: mode bmc\nbmc: depth 10\n"
+            "cover: mode cover\ncover: depth 20\n",
+            encoding="utf-8",
+        )
+        cover = repo / "formal" / "cmn" / "toy_cover"
+        eng = cover / "engine_0"
+        eng.mkdir(parents=True)
+        (eng / "logfile.txt").write_text(
+            "SBY [toy_cover] engine_0: Reached cover statement at "
+            "toy.sv:4.3-4.20 (step 8).\n",
+            encoding="utf-8",
+        )
+        hits = check_formal_depth(repo)
+        hit = _expect_rule("formal-bmc-shallow", hits, "FORMAL_BMC_SHALLOW")
+        if hit.bucket != "report":
+            _fail("formal-bmc-shallow", "GATE-FORMAL-DEPTH (3) must be report-only")
+        if "8" not in hit.message or "10" not in hit.message:
+            _fail("formal-bmc-shallow", hit.message)
+        sby.write_text(
+            "[options]\nmode bmc\ndepth 20\n",
+            encoding="utf-8",
+        )
+        hits = check_formal_depth(repo)
+        if any(f.rule == "FORMAL_BMC_SHALLOW" for f in hits):
+            _fail("formal-bmc-ok", "depth 20 covers step 8 + 6")
+        print("SELFTEST PASS formal-bmc-ok: bmc >= cover + 6")
+
+
+INHERIT_SBY = """\
+[tasks]
+prove
+product_prove
+[options]
+prove: mode prove
+product_prove: mode prove
+depth 20
+"""
+
+
+def test_formal_inherit_equiv() -> None:
+    if not sby_inherits_hooks_prove(INHERIT_SBY):
+        _fail("formal-inherit-parse", "default prove + product_prove must inherit")
+    if sby_inherits_hooks_prove("[tasks]\nprove\nbmc\n[options]\nprove: mode prove\n"):
+        _fail("formal-inherit-parse", "prove-only must not inherit")
+    print("SELFTEST PASS formal-inherit-parse: product_prove is the inherit pattern")
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        sby = repo / "formal" / "mem" / "ub_mem_parent.sby"
+        sby.parent.mkdir(parents=True)
+        sby.write_text(INHERIT_SBY, encoding="utf-8")
+        pos = check_formal_inherit(
+            repo,
+            {
+                "ub_mem_parent": {
+                    "status": "PASS",
+                    "outputs": ["q"],
+                    "blackboxes": [],
+                }
+            },
+        )
+        if any(f.rule == "FORMAL_INHERIT_NO_EQUIV" for f in pos):
+            _fail("formal-inherit-ok", "PASS equiv must allow inherit")
+        print(f"SELFTEST PASS formal-inherit-ok: {INHERIT_STATUS}")
+        for bad in (None, {"status": "SKIP"}, {"status": "PRIVATE_SKIP"}, {"status": "FAIL"}):
+            status = {} if bad is None else {"ub_mem_parent": bad}
+            hit = _expect_rule(
+                f"formal-inherit-{bad and bad.get('status') or 'missing'}",
+                check_formal_inherit(repo, status),
+                "FORMAL_INHERIT_NO_EQUIV",
+            )
+            if hit.bucket != "report":
+                _fail("formal-inherit-neg", "rule 4 must stay report-only")
+        boxed = check_formal_inherit(
+            repo,
+            {
+                "ub_mem_parent": {
+                    "status": "PASS",
+                    "outputs": ["q"],
+                    "blackboxes": [],
+                }
+            },
+        )
+        # no contracts/instances in the fixture → PASS still inherits
+        if any(f.rule == "FORMAL_INHERIT_NO_EQUIV" for f in boxed):
+            _fail("formal-inherit-nobox", "no private instances → no blackbox required")
+        (repo / "docs" / "arch" / "mem" / "contracts").mkdir(parents=True)
+        (repo / "docs" / "arch" / "mem" / "contracts" / "toy.md").write_text(
+            "---\nleaf: ub_mem_toy_dec\nports:\n  - {name: out, dir: out, width: 1}\n---\n",
+            encoding="utf-8",
+        )
+        parent = repo / "formal" / "mem" / "ub_mem_parent.v"
+        parent.write_text(
+            "module ub_mem_parent(input clk, output q);\n"
+            "  wire s;\n"
+            "  ub_mem_toy_dec u(.clk(clk), .out(s));\n"
+            "  assign q = s;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        sby.write_text(
+            INHERIT_SBY + "[files]\nub_mem_parent.v\n",
+            encoding="utf-8",
+        )
+        miss = _expect_rule(
+            "formal-inherit-need-blackbox",
+            check_formal_inherit(
+                repo,
+                {
+                    "ub_mem_parent": {
+                        "status": "PASS",
+                        "outputs": ["q"],
+                        "blackboxes": [],
+                    }
+                },
+            ),
+            "FORMAL_INHERIT_NO_EQUIV",
+        )
+        if "EQUIV_BLACKBOX" not in miss.message:
+            _fail("formal-inherit-need-blackbox", "message must name EQUIV_BLACKBOX")
+        ok = check_formal_inherit(
+            repo,
+            {
+                "ub_mem_parent": {
+                    "status": "PASS",
+                    "outputs": ["q"],
+                    "blackboxes": ["ub_mem_toy_dec"],
+                }
+            },
+        )
+        if any(f.rule == "FORMAL_INHERIT_NO_EQUIV" for f in ok):
+            _fail("formal-inherit-boxed", "PASS + EQUIV_BLACKBOX must inherit")
+        print("SELFTEST PASS formal-inherit-boxed: blackbox lines required")
+
+
+def test_equiv_private_blackbox_hides_const_stub() -> None:
+    """Flattening a const-0 stub hides a HOOKS/PRODUCT parent mismatch."""
+    if not shutil_which("yosys"):
+        _fail("equiv-blackbox", "yosys required")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        stub = root / "ub_mem_toy_dec.v"
+        product = root / "ub_mem_parent.v"
+        hooks = root / "ub_mem_parent_hooks.v"
+        stub.write_text(
+            "module ub_mem_toy_dec(input clk, output out);\n"
+            "  assign out = 1'b0;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        product.write_text(
+            "module ub_mem_parent(input clk, output q);\n"
+            "  wire s;\n"
+            "  ub_mem_toy_dec u_leaf(.clk(clk), .out(s));\n"
+            "  assign q = s;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        hooks.write_text(
+            "module ub_mem_parent(input clk, output q);\n"
+            "  wire s;\n"
+            "  ub_mem_toy_dec u_leaf(.clk(clk), .out(s));\n"
+            "  assign q = 1'b0;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        flat = run_equiv(
+            "ub_mem_parent",
+            product,
+            hooks,
+            None,
+            extra_rtl=[stub],
+            blackboxes=[],
+        )
+        if flat is not None and flat.rule == "EQUIV_FAIL":
+            _fail("equiv-flatten-hides", "flattened const stub must hide the parent mismatch")
+        boxed = run_equiv(
+            "ub_mem_parent",
+            product,
+            hooks,
+            None,
+            extra_rtl=[stub],
+            blackboxes=["ub_mem_toy_dec"],
+        )
+        if boxed is None or boxed.rule != "EQUIV_FAIL":
+            _fail(
+                "equiv-blackbox-shows",
+                "blackboxed stub outputs must be free; mismatch must FAIL",
+            )
+        print("SELFTEST PASS equiv-blackbox-shows: const stub no longer hides parent diff")
+
+
+def test_one_module_per_file() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        parent = repo / "rtl" / "mem" / "ub_mem_ptw.v"
+        parent.parent.mkdir(parents=True)
+        parent.write_text(
+            "module ub_mem_ptw(input clk, output q);\n"
+            "  assign q = 1'b0;\n"
+            "endmodule\n"
+            "module ub_mem_ptw_desc_dec(input clk, output d);\n"
+            "  assign d = 1'b0;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        (repo / "docs" / "arch" / "mem" / "contracts").mkdir(parents=True)
+        (repo / "docs" / "arch" / "mem" / "contracts" / "desc.md").write_text(
+            "---\nleaf: ub_mem_ptw_desc_dec\nports:\n  - {name: d, dir: out, width: 1}\n---\n",
+            encoding="utf-8",
+        )
+        hits = check_one_module(repo)
+        priv = _expect_rule("one-module-private", hits, "PRIVATE_IN_PARENT")
+        if priv.bucket != "report":
+            _fail("one-module-private", "PRIVATE_IN_PARENT must stay report-only until #47")
+        two = repo / "rtl" / "pcs" / "ub_pcs_two.v"
+        two.parent.mkdir(parents=True)
+        two.write_text(
+            "module ub_pcs_a(input clk, output q);\n  assign q = 1'b0;\nendmodule\n"
+            "module ub_pcs_b(input clk, output r);\n  assign r = 1'b1;\nendmodule\n",
+            encoding="utf-8",
+        )
+        # drop the private pair so only MULTI_MODULE remains from ub_pcs_two
+        parent.write_text(
+            "module ub_mem_ptw(input clk, output q);\n  assign q = 1'b0;\nendmodule\n",
+            encoding="utf-8",
+        )
+        multi = _expect_rule("one-module-multi", check_one_module(repo), "MULTI_MODULE")
+        if multi.bucket != "report":
+            _fail("one-module-multi", "MULTI_MODULE is report-only")
+        lib = repo / "rtl" / "pyc_lib" / "pyc_two.v"
+        lib.parent.mkdir(parents=True)
+        lib.write_text(
+            "module pyc_a(input clk, output q);\n  assign q = 1'b0;\nendmodule\n"
+            "module pyc_b(input clk, output r);\n  assign r = 1'b1;\nendmodule\n",
+            encoding="utf-8",
+        )
+        two.write_text(
+            "module ub_pcs_a(input clk, output q);\n  assign q = 1'b0;\nendmodule\n",
+            encoding="utf-8",
+        )
+        if any(f.rule in {"MULTI_MODULE", "PRIVATE_IN_PARENT"} for f in check_one_module(repo)):
+            _fail("one-module-ok", "pyc_lib helpers and single-module files must pass")
+        print("SELFTEST PASS one-module-ok: pyc_lib excluded, single module clean")
+
+
+def test_equiv_blackbox_set_union() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        (repo / "scripts" / "gate").mkdir(parents=True)
+        (repo / "scripts" / "gate" / "blackbox.yml").write_text(
+            "entries:\n  - {module: ub_cmn_mem_1r1w, file: rtl/cmn/ub_cmn_mem_1r1w.v}\n",
+            encoding="utf-8",
+        )
+        (repo / "docs" / "arch" / "mem" / "contracts").mkdir(parents=True)
+        (repo / "docs" / "arch" / "mem" / "contracts" / "toy.md").write_text(
+            "---\nleaf: ub_mem_toy_dec\nports:\n  - {name: out, dir: out, width: 1}\n---\n",
+            encoding="utf-8",
+        )
+        names = equiv_blackbox_set(repo)
+        if "ub_mem_toy_dec" not in names:
+            _fail("equiv-blackbox-set", f"contract leaf missing: {names}")
+        # yml module is included when the file parses; stub_modules() reads REPO_ROOT yml
+        print(f"SELFTEST PASS equiv-blackbox-set: {names}")
+
+
+def _parent_free_tree(root: Path, *, assume_default: bool, assume_diag: bool) -> Path:
+    """#45-shaped: contract leaf + parent that instantiates it."""
+    yml = root / "scripts" / "gate" / "private_leaves.yml"
+    yml.parent.mkdir(parents=True, exist_ok=True)
+    yml.write_text("leaves: []\nparent_free_required: true\n", encoding="utf-8")
+    contract = root / "docs" / "arch" / "mem" / "contracts" / "ub_mem_toy_dec.md"
+    contract.parent.mkdir(parents=True, exist_ok=True)
+    contract.write_text(
+        "```yaml\n"
+        "leaf: ub_mem_toy_dec\n"
+        "parent: ub_mem_ptw\n"
+        "clock: {name: core_clk, period_ns: 12.412, reset: rst_pyc, reset_type: sync}\n"
+        "latency: {kind: registered, cycles: 1, max_cycles: 1}\n"
+        "ports:\n"
+        "  - {name: core_clk, dir: in, width: 1, desc: clk}\n"
+        "  - {name: rst_pyc, dir: in, width: 1, desc: rst}\n"
+        "  - {name: desc_v, dir: out, width: 1, desc: decoded valid}\n"
+        "params: []\n"
+        "ill_cause_width: 4\n"
+        "assertions: [AP_TOY_CLK]\n"
+        "status: draft\n"
+        "```\n\n# toy\n`AP_TOY_CLK`\n",
+        encoding="utf-8",
+    )
+    parent = root / "formal" / "mem" / "parent.sv"
+    props = root / "formal" / "mem" / "props.sv"
+    diag = root / "formal" / "mem" / "assume_diag.sv"
+    sby = root / "formal" / "mem" / "parent.sby"
+    parent.parent.mkdir(parents=True, exist_ok=True)
+    parent.write_text(
+        "module ub_mem_ptw(input core_clk, input rst_pyc, input desc_v);\n"
+        "  ub_mem_toy_dec u_dec (.core_clk(core_clk), .rst_pyc(rst_pyc), .desc_v(desc_v));\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+    assume_line = (
+        "  a_leaf: assume property (@(posedge core_clk) desc_v == 1'b1);\n"
+        if assume_default
+        else "  a_legal: assert property (@(posedge core_clk) desc_v === desc_v);\n"
+    )
+    props.write_text(
+        "module props(input core_clk, input desc_v);\n" + assume_line + "endmodule\n",
+        encoding="utf-8",
+    )
+    diag.write_text(
+        "module assume_diag(input core_clk, input desc_v);\n"
+        + (
+            "  a_leaf: assume property (@(posedge core_clk) desc_v == 1'b1);\n"
+            if assume_diag
+            else ""
+        )
+        + "endmodule\n",
+        encoding="utf-8",
+    )
+    sby.write_text(
+        "[tasks]\nbmc\ndiag\n"
+        "[options]\nbmc: mode bmc\ndiag: mode bmc\n"
+        "[script]\nread -sv parent.sv\nread -sv props.sv\n"
+        "diag: read -sv assume_diag.sv\nprep -top ub_mem_ptw\n"
+        "[files]\nparent.sv\nprops.sv\ndiag: assume_diag.sv\n",
+        encoding="utf-8",
+    )
+    return sby
+
+
+def test_formal_parent_free() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _parent_free_tree(root, assume_default=False, assume_diag=True)
+        hits = check_formal_parent_free(root)
+        if any(f.rule == "FORMAL_PRIVATE_ASSUME" for f in hits):
+            _fail("parent-free-ok", f"diag-only assume must pass: {hits[0].message}")
+        print("SELFTEST PASS parent-free-ok: assume only in named diag task")
+
+        _parent_free_tree(root, assume_default=True, assume_diag=False)
+        hit = _expect_rule("parent-free-neg", check_formal_parent_free(root), "FORMAL_PRIVATE_ASSUME")
+        if hit.bucket != "new":
+            _fail("parent-free-neg", "must be blocking when parent_free_required")
+        if "desc_v" not in hit.message or "ub_mem_toy_dec" not in hit.message:
+            _fail("parent-free-neg", hit.message)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _parent_free_tree(root, assume_default=True, assume_diag=False)
+        yml = root / "scripts" / "gate" / "private_leaves.yml"
+        yml.write_text("leaves: []\n", encoding="utf-8")
+        hit = _expect_rule(
+            "parent-free-report",
+            check_formal_parent_free(root),
+            "FORMAL_PRIVATE_ASSUME",
+        )
+        if hit.bucket != "report":
+            _fail("parent-free-report", "must be report-only until #47 is on main")
+
+
+def test_tb_selfcheck_sh_drops_pycircuit_venv() -> None:
+    text = (Path(__file__).resolve().parent / "tb_selfcheck.sh").read_text(
+        encoding="utf-8"
+    )
+    if ".pycircuit-venv" not in text or "deactivate" not in text:
+        _fail("tb-drop-pyc-venv", "tb_selfcheck.sh must leave the pycc venv")
+    print("SELFTEST PASS tb-drop-pyc-venv: provenance venv is not used for TB")
+
+
+def test_tb_requires_verilator() -> None:
+    missing = required_sim_tools(
+        which=lambda name: "/usr/bin/iverilog" if name == "iverilog" else None
+    )
+    if "verilator" not in missing:
+        _fail("tb-requires-verilator", "missing verilator must be reported")
+    if "iverilog" in missing:
+        _fail("tb-requires-verilator", "present iverilog must not be reported")
+    print("SELFTEST PASS tb-requires-verilator: Verilator absence is a hard fail")
+
+
+def test_tb_skip_is_fail() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        xml = Path(tmp) / "skip.xml"
+        xml.write_text(
+            """<?xml version="1.0" encoding="utf-8"?>
+<testsuite name="tb.cmn.tests.test_sim" tests="2" failures="0" skipped="1" errors="0">
+  <testcase classname="tb.cmn.tests.test_sim" name="test_rtl_positive_all_variants[product]"/>
+  <testcase classname="tb.cmn.tests.test_sim" name="test_rtl_positive_all_variants[hooks]">
+    <skipped message="Verilator not on PATH"/>
+  </testcase>
+</testsuite>
+""",
+            encoding="utf-8",
+        )
+        counts = parse_junit_counts(xml)
+        if int(counts["collected"]) != 2 or int(counts["skipped"]) != 1:
+            _fail("tb-skip-is-fail", f"bad counts {counts}")
+        if not pytest_skip_is_fail(counts):
+            _fail("tb-skip-is-fail", "a skipped RTL sim must fail the job")
+        print("SELFTEST PASS tb-skip-is-fail: skipped pytest is a gate fail")
+        xml.write_text(
+            """<?xml version="1.0" encoding="utf-8"?>
+<testsuite name="model.tests" tests="28" failures="0" skipped="0" errors="0">
+  <testcase classname="model.tests.test_ub" name="test_ok"/>
+</testsuite>
+""",
+            encoding="utf-8",
+        )
+        ok = parse_junit_counts(xml)
+        if pytest_skip_is_fail(ok) or int(ok["skipped"]) != 0:
+            _fail("tb-skip-is-fail", "clean junit must pass")
+        print("SELFTEST PASS tb-junit-clean: 0 fail / 0 skip accepted")
+
+
+def test_deleted_roster_not_error() -> None:
+    # pycircuit/ is empty on current main; migrate roster paths are gone.
+    planted = Finding(
+        check="provenance",
+        module="ub_dll_bcrc",
+        file="pycircuit/dll/ub_dll_bcrc.py",
+        rule="NO_PYCIRCUIT_IMPORT",
+        message="leaf missing",
+    )
+    keep, deleted = mark_deleted_findings([planted])
+    if keep:
+        _fail("deleted-roster", f"missing roster file must leave keep empty, got {keep}")
+    if not deleted or "已删除" not in deleted[0].message:
+        _fail("deleted-roster", "expected 已删除 marker")
+    print("SELFTEST PASS deleted-roster: 已删除 excluded from totals")
+
+
+def _write_fake_layer(root: Path, *, helper_at_root: bool = False) -> Path:
+    """Fake pycircuit/<layer> with lib/ helper and a leaf that imports it."""
+    layer = root / "pycircuit" / "toy"
+    lib = layer / "lib"
+    lib.mkdir(parents=True)
+    (layer / "__init__.py").write_text("", encoding="utf-8")
+    (lib / "__init__.py").write_text("# helpers only\n", encoding="utf-8")
+    (lib / "helper.py").write_text(
+        "def mark():\n    return 'helper-ok'\n",
+        encoding="utf-8",
+    )
+    (layer / "ub_toy.py").write_text(
+        "from pycircuit import Circuit\n"
+        "from toy.lib import helper\n"
+        "FLAG = helper.mark()\n",
+        encoding="utf-8",
+    )
+    (root / "pycircuit" / "__init__.py").write_text("", encoding="utf-8")
+    if helper_at_root:
+        (layer / "at_root_helper.py").write_text(
+            "from pycircuit import Circuit\nROOT_HELPER = True\n",
+            encoding="utf-8",
+        )
+    return layer
+
+
+def test_layer_lib_discovered_and_emit() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _write_fake_layer(root)
+        leaves = discover_pycircuit_leaves(root / "pycircuit")
+        names = {leaf["leaf"] for leaf in leaves}
+        if "ub_toy" not in names:
+            _fail("layer-lib-discover", f"leaf ub_toy not found: {names}")
+        if "helper" in names or "lib" in names:
+            _fail("layer-lib-discover", f"lib/ helper must not be a leaf: {names}")
+        helpers = discover_pycircuit_lib_helpers(root / "pycircuit")
+        if not any(p.name == "helper.py" for p in helpers):
+            _fail("layer-lib-discover", f"lib helper not scanned: {helpers}")
+        emit = root / "scripts" / "emit_rtl.py"
+        emit.parent.mkdir(parents=True)
+        emit.write_text(
+            "from toy.lib import helper\nprint(helper.mark())\n",
+            encoding="utf-8",
+        )
+        proc = run_cmd(
+            leaf_python_argv(emit),
+            cwd=root,
+            env=leaf_process_env(root),
+            timeout=30,
+        )
+        if proc.returncode != 0 or "helper-ok" not in (proc.stdout or ""):
+            _fail(
+                "layer-lib-emit",
+                f"emit with PYTHONPATH=<repo>/pycircuit failed: {proc.stdout!r}",
+            )
+        print("SELFTEST PASS layer-lib-discover+emit: from toy.lib works; lib/ not a leaf")
+
+
+def test_helper_at_layer_root_is_leaf() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _write_fake_layer(root, helper_at_root=True)
+        names = {leaf["leaf"] for leaf in discover_pycircuit_leaves(root / "pycircuit")}
+        if "at_root_helper" not in names:
+            _fail(
+                "helper-at-layer-root",
+                f"file at pycircuit/<layer>/*.py must be a leaf: {names}",
+            )
+        if "helper" in names:
+            _fail("helper-at-layer-root", "lib/helper.py must still be skipped")
+        print("SELFTEST PASS helper-at-layer-root: layer-root .py is a leaf")
+
+
+def test_repo_root_on_path_shadows() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _write_fake_layer(root)
+        if not repo_root_on_sys_path([str(root)], root):
+            _fail("import-root-shadow", "repo root on sys.path must be detected")
+        if repo_root_on_sys_path([str(root / "pycircuit")], root):
+            _fail(
+                "import-root-shadow",
+                "<repo>/pycircuit on PYTHONPATH is the import root, not a shadow",
+            )
+        hits = import_root_shadow_findings([str(root)], "provenance", root)
+        _expect_rule("import-root-shadow", hits, "IMPORT_ROOT_SHADOW")
+        # Reproduce #27: cwd/repo root on path → import pycircuit binds to the tree.
+        bad_env = {
+            **leaf_process_env(root),
+            "PYTHONPATH": str(root),
+            "PYTHONSAFEPATH": "0",
+        }
+        probe = (
+            "import sys, pathlib\n"
+            "print('path0=' + sys.path[0])\n"
+            "try:\n"
+            "    import pycircuit, inspect\n"
+            "    loc = pathlib.Path(inspect.getfile(pycircuit)).resolve()\n"
+            "    print('loc=' + str(loc))\n"
+            "    tree = pathlib.Path(" + repr(str(root / 'pycircuit')) + ").resolve()\n"
+            "    print('SHADOW_TREE' if loc == tree or loc.parent == tree else 'OTHER')\n"
+            "except Exception as exc:\n"
+            "    print('IMPORT_FAIL ' + type(exc).__name__ + ': ' + str(exc))\n"
+        )
+        proc = run_cmd(
+            [sys.executable, "-c", probe],
+            cwd=root,
+            env=bad_env,
+            timeout=30,
+        )
+        text = proc.stdout or ""
+        if "SHADOW_TREE" not in text and "IMPORT_FAIL" not in text:
+            _fail("import-root-shadow-repro", f"expected tree shadow or fail, got {text!r}")
+        # Without <repo>/pycircuit on PYTHONPATH, from <layer>.lib fails (#27 mem).
+        empty = {**leaf_process_env(root), "PYTHONPATH": ""}
+        miss = run_cmd(
+            [sys.executable, "-P", "-c", "from toy.lib import helper"],
+            cwd=root,
+            env=empty,
+            timeout=30,
+        )
+        if miss.returncode == 0:
+            _fail("import-root-shadow-repro", "from toy.lib must fail without import root")
+        print(
+            "SELFTEST PASS import-root-shadow: repo root shadows install; "
+            "missing import root → No module named layer"
+        )
+
+
+def test_lib_helper_splice() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        helper = Path(tmp) / "bad.py"
+        helper.write_text('VERILOG = "module sneak(); endmodule"\n', encoding="utf-8")
+        hits = static_splice_check(helper, "bad")
+        _expect_rule("lib-helper-splice", hits, "VERILOG_SPLICE")
+
+
+def _write_ansi_csr_shape(path: Path, *, extra: str = "", addr_w: str = "[15:0]") -> None:
+    """pycc-style ANSI list (one port per line). Old regex ate the next `input`."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    extra_decl = f",\n  {extra}" if extra else ""
+    path.write_text(
+        "module ub_csr_toy (\n"
+        "  input core_clk,\n"
+        f"  input {addr_w} csr_addr,\n"
+        "  output port_rst_pulse,\n"
+        "  output csr_irq_en,\n"
+        "  output [31:0] csr_port_cna"
+        + extra_decl
+        + "\n);\nendmodule\n",
+        encoding="utf-8",
+    )
+
+
+def test_yosys_ansi_ports() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        prod = Path(tmp) / "prod.v"
+        _write_ansi_csr_shape(prod)
+        ports = parse_port_decls(prod, module="ub_csr_toy")
+        names = [n for _k, n, _p in ports]
+        if any(n in {"input", "output", "inout"} for n in names):
+            _fail("yosys-ansi-ports", f"direction token eaten as name: {names}")
+        for need in ("port_rst_pulse", "csr_irq_en", "csr_port_cna", "csr_addr"):
+            if need not in names:
+                _fail("yosys-ansi-ports", f"missing {need}: {names}")
+        addr = next(t for t in ports if t[1] == "csr_addr")
+        if addr[2] != "[15:0]":
+            _fail("yosys-ansi-ports", f"csr_addr packed {addr}")
+        print("SELFTEST PASS yosys-ansi-ports: Yosys port table keeps names+widths")
+
+
+def test_hooks_missing_port() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        prod = Path(tmp) / "prod.v"
+        hooks = Path(tmp) / "hooks.v"
+        _write_ansi_csr_shape(prod)
+        hooks.write_text(
+            "module ub_csr_toy (\n"
+            "  input core_clk,\n"
+            "  input [15:0] csr_addr,\n"
+            "  output port_rst_pulse,\n"
+            "  output csr_irq_en\n"
+            ");\nendmodule\n",
+            encoding="utf-8",
+        )
+        hits = compare_ports("ub_csr_toy", prod, hooks, None)
+        _expect_rule("hooks-missing-port", hits, "HOOKS_PORT_MISMATCH")
+
+
+def test_hooks_wrong_width() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        prod = Path(tmp) / "prod.v"
+        hooks = Path(tmp) / "hooks.v"
+        _write_ansi_csr_shape(prod)
+        _write_ansi_csr_shape(hooks, addr_w="[7:0]")
+        hits = compare_ports("ub_csr_toy", prod, hooks, None)
+        _expect_rule("hooks-wrong-width", hits, "HOOKS_PORT_WIDTH")
+
+
+def _wide_combo(path: Path, module: str, width: int, flip_bit: int | None = None) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    expr = f"data_in"
+    if flip_bit is not None:
+        expr = f"{{data_in[{width - 1}:{flip_bit + 1}], ~data_in[{flip_bit}], data_in[{flip_bit - 1}:0]}}" if flip_bit else f"{{data_in[{width - 1}:1], ~data_in[0]}}"
+    path.write_text(
+        f"module {module} (\n"
+        f"  input [{width - 1}:0] data_in,\n"
+        f"  output [{width - 1}:0] data_out\n"
+        ");\n"
+        f"  assign data_out = {expr};\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+
+
+def _write_lane_dist_x8(path: Path, flip_bit: int | None = None) -> None:
+    """8-lane 256-bit splitter (SPEC x8 / PMA_W=32). No hook ports."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lanes = ", ".join(f"lane{i}" for i in range(8))
+    if flip_bit == 0:
+        assigns = (
+            "  wire [255:0] src;\n"
+            "  assign src = {data_in[255:1], ~data_in[0]};\n"
+            + "\n".join(
+                f"  assign lane{i} = src[{i * 32 + 31}:{i * 32}];" for i in range(8)
+            )
+        )
+    else:
+        assigns = "\n".join(
+            f"  assign lane{i} = data_in[{i * 32 + 31}:{i * 32}];" for i in range(8)
+        )
+    path.write_text(
+        "module ub_pcs_lane_dist_x8 (\n"
+        "  input [255:0] data_in,\n"
+        f"  output [31:0] {lanes}\n"
+        ");\n"
+        f"{assigns}\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+
+
+def test_equiv_wide_bus_and_flip() -> None:
+    """160-bit (BCRC-style) and 256-bit (lane_dist_x8-style) through the wrapper."""
+    cases = [
+        ("ub_dll_bcrc_bus", 160),
+        ("ub_pcs_lane_dist_x8_bus", 256),
+    ]
+    for module, width in cases:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            prod = root / f"{module}.v"
+            hooks = root / "hooks.v"
+            fake = root / "fake.v"
+            _wide_combo(prod, module, width)
+            _wide_combo(hooks, module, width)
+            _wide_combo(fake, module, width, flip_bit=0)
+            hit = run_equiv(module, prod, hooks, None)
+            if hit is not None:
+                _fail(f"equiv-{module}", f"identical wide bus must prove: {hit.message}")
+            print(f"SELFTEST PASS equiv-{module}: PRODUCT≡HOOKS via wrapper")
+            bad = run_equiv(module, prod, fake, None)
+            if bad is None:
+                _fail(f"equiv-{module}-flip", "one flipped bus bit must fail")
+            if bad.rule != "EQUIV_FAIL":
+                _fail(f"equiv-{module}-flip", f"expected EQUIV_FAIL, got {bad.rule}")
+            print(f"SELFTEST PASS equiv-{module}-flip: fake bit fail")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        prod = root / "ub_pcs_lane_dist_x8.v"
+        hooks = root / "hooks.v"
+        fake = root / "fake.v"
+        _write_lane_dist_x8(prod)
+        _write_lane_dist_x8(hooks)
+        _write_lane_dist_x8(fake, flip_bit=0)
+        ph = compare_ports("ub_pcs_lane_dist_x8", prod, hooks, None)
+        if ph:
+            _fail("ports-ub_pcs_lane_dist_x8", ph[0].message)
+        print("SELFTEST PASS ports-ub_pcs_lane_dist_x8: Yosys PRODUCT/HOOKS")
+        hit = run_equiv("ub_pcs_lane_dist_x8", prod, hooks, None)
+        if hit is not None:
+            _fail("equiv-ub_pcs_lane_dist_x8", f"x8 leaf must prove: {hit.message}")
+        print("SELFTEST PASS equiv-ub_pcs_lane_dist_x8: 256-bit / 8-lane through wrapper")
+        bad = run_equiv("ub_pcs_lane_dist_x8", prod, fake, None)
+        if bad is None:
+            _fail("equiv-ub_pcs_lane_dist_x8-flip", "one flipped bus bit must fail")
+        print("SELFTEST PASS equiv-ub_pcs_lane_dist_x8-flip: fake bit fail")
+
+
+def _ensure_git_rev(rev: str) -> None:
+    probe = run_cmd(["git", "cat-file", "-e", f"{rev}^{{commit}}"], timeout=15)
+    if probe.returncode == 0:
+        return
+    run_cmd(["git", "fetch", "--no-tags", "--depth=1", "origin", rev], timeout=90)
+
+
+def _git_show(rev: str, rel_path: str, dest: Path) -> bool:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    _ensure_git_rev(rev)
+    proc = run_cmd(["git", "show", f"{rev}:{rel_path}"], timeout=30)
+    if proc.returncode != 0 or not (proc.stdout or "").strip():
+        return False
+    dest.write_text(proc.stdout or "", encoding="utf-8")
+    return True
+
+
+def _extract_selftest_rtl(root: Path) -> dict[str, Path] | None:
+    """Pull #11 CSR / #27 TLB / #21 pyc_reg when those objects exist locally."""
+    pyc = root / "pyc_lib"
+    ok = True
+    ok &= _git_show("1293a5bf", "rtl/pyc_lib/pyc_reg.v", pyc / "pyc_reg.v")
+    files = {
+        "csr_prod": root / "csr" / "ub_csr_product_x4_vl2.v",
+        "csr_hooks": root / "csr" / "hooks" / "ub_csr_product_x4_vl2.v",
+        "tlb_prod": root / "mem" / "ub_mem_tlb.v",
+        "tlb_hooks": root / "mem" / "hooks" / "ub_mem_tlb.v",
+        "bcrc": root / "dll" / "ub_dll_bcrc.v",
+        "pyc_reg": pyc / "pyc_reg.v",
+    }
+    ok &= _git_show("bfcd0b0", "rtl/csr/ub_csr_product_x4_vl2.v", files["csr_prod"])
+    ok &= _git_show(
+        "bfcd0b0", "rtl/csr/hooks/ub_csr_product_x4_vl2.v", files["csr_hooks"]
+    )
+    ok &= _git_show("19e9f292", "rtl/mem/ub_mem_tlb.v", files["tlb_prod"])
+    ok &= _git_show("19e9f292", "rtl/mem/hooks/ub_mem_tlb.v", files["tlb_hooks"])
+    if not _git_show("cc0013c", "rtl/dll/ub_dll_bcrc.v", files["bcrc"]):
+        _git_show("e65ff5e", "rtl/gen/dll/ub_dll_bcrc.v", files["bcrc"])
+    if not files["csr_prod"].is_file() or not files["pyc_reg"].is_file():
+        return None
+    stub = root / "cmn" / "ub_cmn_mem_1r1w_d64w109.v"
+    stub.parent.mkdir(parents=True)
+    # Body (not blackbox) so SAT can import the cell. Same stub on both sides.
+    stub.write_text(
+        "module ub_cmn_mem_1r1w_d64w109 (\n"
+        "  input core_clk, input we, input [5:0] waddr, input [108:0] wdata,\n"
+        "  input re, input [5:0] raddr, output reg [108:0] rdata\n"
+        ");\n"
+        "  always @(posedge core_clk) if (re) rdata <= wdata;\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+    files["cmn_stub"] = stub
+    return files
+
+
+def _fake_hooks_xor_bit(
+    dest: Path,
+    module: str,
+    gold_src: Path,
+    ports: list[tuple[str, str, str]],
+    bus: str,
+    extra_inputs: list[str],
+) -> None:
+    """HOOKS wrapper around a renamed gold that xors one bit of *bus*."""
+    gold = gold_src.read_text(encoding="utf-8").replace(
+        f"module {module}", f"module {module}_gold", 1
+    )
+    names = [n for _k, n, _p in ports] + extra_inputs
+    lines = [
+        gold,
+        f"module {module} (",
+        "  " + ",\n  ".join(names),
+        ");",
+    ]
+    for kind, name, packed in ports:
+        rng = f"{packed} " if packed else ""
+        lines.append(f"  {kind} {rng}{name};")
+    for name in extra_inputs:
+        lines.append(f"  input {name};")
+    conns: list[str] = []
+    packed_bus = next((p for _k, n, p in ports if n == bus), "")
+    if packed_bus:
+        hi = packed_bus.strip("[]").split(":")[0]
+        conns.append(f".{bus}({{{bus}[{hi}:1], ~{bus}[0]}})")
+    else:
+        conns.append(f".{bus}(~{bus})")
+    for _k, name, _p in ports:
+        if name != bus:
+            conns.append(f".{name}({name})")
+    lines.append(f"  {module}_gold u_g (")
+    lines.append("    " + ",\n    ".join(conns))
+    lines.append("  );")
+    lines.append("endmodule")
+    dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_equiv_real_csr_tlb() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        files = _extract_selftest_rtl(Path(tmp))
+        if files is None:
+            print(
+                "SELFTEST SKIP equiv-real-csr-tlb: "
+                "#11/#21/#27 blobs not in this clone"
+            )
+            return
+        inc = [files["pyc_reg"].parent]
+        csr_hits = compare_ports(
+            "ub_csr_product_x4_vl2",
+            files["csr_prod"],
+            files["csr_hooks"],
+            ["tb_test_mode"],
+            incdirs=inc,
+        )
+        if csr_hits:
+            _fail("ports-csr-#11", csr_hits[0].message)
+        print("SELFTEST PASS ports-csr-#11: Yosys PRODUCT/HOOKS (no eaten input/output)")
+        csr = run_equiv(
+            "ub_csr_product_x4_vl2",
+            files["csr_prod"],
+            files["csr_hooks"],
+            ["tb_test_mode"],
+            incdirs=inc,
+        )
+        if csr is not None:
+            _fail("equiv-csr-#11", csr.message)
+        print("SELFTEST PASS equiv-csr-#11: PRODUCT≡HOOKS (tb_test_mode tied)")
+        ports = parse_port_decls(
+            files["csr_prod"], incdirs=inc, module="ub_csr_product_x4_vl2"
+        )
+        fake = Path(tmp) / "csr_fake.v"
+        _fake_hooks_xor_bit(
+            fake,
+            "ub_csr_product_x4_vl2",
+            files["csr_prod"],
+            ports,
+            "csr_addr",
+            ["tb_test_mode"],
+        )
+        bad = run_equiv(
+            "ub_csr_product_x4_vl2",
+            files["csr_prod"],
+            fake,
+            ["tb_test_mode"],
+            incdirs=inc,
+        )
+        if bad is None:
+            _fail("equiv-csr-#11-flip", "csr_addr[0] flipped HOOKS must fail")
+        print("SELFTEST PASS equiv-csr-#11-flip: fake bus bit fail")
+
+        if files.get("bcrc") and files["bcrc"].is_file():
+            bcrc_hooks = Path(tmp) / "bcrc_hooks.v"
+            bcrc_hooks.write_text(files["bcrc"].read_text(encoding="utf-8"), encoding="utf-8")
+            bp = compare_ports(
+                "ub_dll_bcrc", files["bcrc"], bcrc_hooks, None, incdirs=inc
+            )
+            if bp:
+                _fail("ports-bcrc", bp[0].message)
+            print("SELFTEST PASS ports-bcrc: Yosys PRODUCT/HOOKS data_in[159:0]")
+            bhit = run_equiv("ub_dll_bcrc", files["bcrc"], bcrc_hooks, None, incdirs=inc)
+            if bhit is not None:
+                _fail("equiv-bcrc", bhit.message)
+            print("SELFTEST PASS equiv-bcrc: 160-bit data_in through wrapper")
+            bports = parse_port_decls(files["bcrc"], incdirs=inc, module="ub_dll_bcrc")
+            if not any(n == "data_in" and p == "[159:0]" for _k, n, p in bports):
+                _fail("equiv-bcrc", f"expected data_in[159:0], got {bports}")
+            bfake = Path(tmp) / "bcrc_fake.v"
+            # Same module shape (no extra hierarchy) so equiv_simple sees crc_word[0].
+            text = files["bcrc"].read_text(encoding="utf-8")
+            flipped = text.replace(
+                "assign crc_word = word_q;",
+                "assign crc_word = {word_q[31:1], ~word_q[0]};",
+                1,
+            )
+            if flipped == text:
+                _fail("equiv-bcrc-flip", "could not plant crc_word[0] invert")
+            bfake.write_text(flipped, encoding="utf-8")
+            bbad = run_equiv("ub_dll_bcrc", files["bcrc"], bfake, None, incdirs=inc)
+            if bbad is None:
+                _fail("equiv-bcrc-flip", "crc_word[0] flipped HOOKS must fail")
+            print("SELFTEST PASS equiv-bcrc-flip: fake bus bit fail")
+
+        if files["tlb_prod"].is_file() and files["tlb_hooks"].is_file():
+            tlb_extra = hooks_extra_for("ub_mem_tlb")
+            th = compare_ports(
+                "ub_mem_tlb",
+                files["tlb_prod"],
+                files["tlb_hooks"],
+                tlb_extra,
+                incdirs=inc,
+            )
+            if th:
+                _fail("ports-tlb-#27", th[0].message)
+            print("SELFTEST PASS ports-tlb-#27: Yosys PRODUCT/HOOKS")
+            tports = parse_port_decls(
+                files["tlb_prod"], incdirs=inc, module="ub_mem_tlb"
+            )
+            names = [n for _k, n, _p in tports]
+            if "lk_page" not in names:
+                _fail("ports-tlb-#27", f"missing lk_page: {names[:12]}")
+            # SAT BMC on #27 HOOKS vs PRODUCT exceeds the selftest budget
+            # (structurally different pycc + mem stub). Ports are the gate.
+
+
+def _shuffle_bcrc_ports(src: Path, dest: Path) -> None:
+    """Same gold body, port list reordered so order-based cec would see a different AIGER."""
+    text = src.read_text(encoding="utf-8")
+    shuffled = (
+        "module ub_dll_bcrc (\n"
+        "  output reg          done,\n"
+        "  input  wire         last,\n"
+        "  output reg  [31:0]  crc_word,\n"
+        "  input  wire [159:0] data_in,\n"
+        "  input  wire         valid_in,\n"
+        "  input  wire         start,\n"
+        "  input  wire         rst_pyc,\n"
+        "  input  wire         core_clk\n"
+        ");"
+    )
+    new, n = re.subn(
+        r"module\s+ub_dll_bcrc\s*\([^)]*\);",
+        shuffled,
+        text,
+        count=1,
+        flags=re.S,
+    )
+    if n != 1:
+        raise SystemExit(f"shuffle rewrite failed n={n}")
+    dest.write_text(new, encoding="utf-8")
+
+
+def _regpair_flop(cell: str, cands: tuple[str, ...], width: int = 8) -> object:
+    from equiv_regpair import Flop
+
+    return Flop(
+        cell=cell,
+        ftype="$dff",
+        width=width,
+        q_name=cands[0],
+        d_name=f"{cands[0]}_d",
+        key="",
+        kind="sync",
+        polarity=1,
+        value=0,
+        q_aliases=cands,
+        key_candidates=tuple(sorted(cands)),
+    )
+
+
+def test_regpair_prefer_q_alias() -> None:
+    """Architectural _q + PRODUCT output on the same Q bits pair by _q."""
+    from equiv_regpair import (
+        assign_pairing_keys,
+        extract_flops,
+        group_by_key,
+        pick_shared_pairing_key,
+    )
+
+    if pick_shared_pairing_key(["pfn_q", "fill_pfn"]) != "pfn_q":
+        _fail("regpair-prefer-q-pick", "expected pfn_q among fill_pfn/pfn_q")
+    if pick_shared_pairing_key(["foo_q", "bar_q"]) is not None:
+        _fail("regpair-prefer-q-two-q", "two _q names must not pick")
+    if pick_shared_pairing_key(["fill_pfn", "pfn"]) is not None:
+        _fail("regpair-prefer-q-no-q", "no _q among aliases must not pick")
+    if pick_shared_pairing_key(["uba_q"]) != "uba_q":
+        _fail("regpair-prefer-q-unique", "single common name must pair")
+
+    gold = [
+        _regpair_flop("g_pfn", ("pfn_q", "fill_pfn"), 36),
+        _regpair_flop("g_uba", ("uba_q",), 36),
+        _regpair_flop("g_evt", ("evt_code", "evt_code_q"), 4),
+    ]
+    gate = [
+        _regpair_flop("t_pfn", ("pfn_q", "fill_pfn"), 36),
+        _regpair_flop("t_uba", ("uba_q",), 36),
+        _regpair_flop("t_evt", ("evt_code", "evt_code_q"), 4),
+    ]
+    err = assign_pairing_keys(gold, gate)
+    if err:
+        _fail("regpair-prefer-q-assign", f"unexpected pairing errors: {err}")
+    got = {ff.key for ff in gold + gate}
+    if got != {"pfn_q", "uba_q", "evt_code_q"}:
+        _fail("regpair-prefer-q-assign", f"keys={got}")
+    gmap, gamb = group_by_key(gold)
+    tmap, tamb = group_by_key(gate)
+    if gamb or tamb or set(gmap) != {"pfn_q", "uba_q", "evt_code_q"}:
+        _fail("regpair-prefer-q-group", f"g={list(gmap)} amb={gamb}+{tamb}")
+    print("SELFTEST PASS regpair-prefer-q-ok: _q wins over PRODUCT output alias")
+
+    two_q_g = [_regpair_flop("g", ("foo_q", "bar_q"), 8)]
+    two_q_t = [_regpair_flop("t", ("foo_q", "bar_q"), 8)]
+    if not assign_pairing_keys(two_q_g, two_q_t):
+        _fail("regpair-prefer-q-two-q-assign", "two shared _q names must FAIL(pairing)")
+    print("SELFTEST PASS regpair-prefer-q-two-q: multiple _q names rejected")
+
+    dup_g = [_regpair_flop("g1", ("foo_q",), 1), _regpair_flop("g2", ("foo_q",), 1)]
+    dup_t = [_regpair_flop("t1", ("foo_q",), 1), _regpair_flop("t2", ("foo_q",), 1)]
+    _ = assign_pairing_keys(dup_g, dup_t)
+    _, amb = group_by_key(dup_g)
+    if not amb:
+        _fail("regpair-prefer-q-dup-cell", "same _q on two cells must be ambiguous")
+    print("SELFTEST PASS regpair-prefer-q-dup-cell: shared name on two cells rejected")
+
+    # Flatten extract: assign fill_pfn = pfn_q on both sides.
+    rtl = (
+        "module leaf(input clk, input rst, input [3:0] d, output [3:0] fill_pfn);\n"
+        "  reg [3:0] pfn_q;\n"
+        "  always @(posedge clk) begin\n"
+        "    if (rst) pfn_q <= 4'b0;\n"
+        "    else pfn_q <= d;\n"
+        "  end\n"
+        "  assign fill_pfn = pfn_q;\n"
+        "endmodule\n"
+    )
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / "leaf.v"
+        js = Path(td) / "leaf.json"
+        src.write_text(rtl, encoding="utf-8")
+        ys = run_cmd(
+            [
+                "yosys",
+                "-q",
+                "-p",
+                f"read_verilog {src}; hierarchy -check -top leaf; "
+                f"rename -top gold; proc; flatten; write_json {js}",
+            ],
+            timeout=30,
+        )
+        if ys.returncode != 0 or not js.is_file():
+            _fail("regpair-prefer-q-extract", (ys.stdout or "")[-300:])
+        import json
+
+        mod = json.loads(js.read_text(encoding="utf-8"))["modules"]["gold"]
+        flops = extract_flops(mod)
+        if len(flops) != 1:
+            _fail("regpair-prefer-q-extract", f"expected 1 flop, got {len(flops)}")
+        cands = set(flops[0].key_candidates)
+        if "pfn_q" not in cands or "fill_pfn" not in cands:
+            _fail("regpair-prefer-q-extract", f"candidates={sorted(cands)}")
+        clone = [
+            _regpair_flop("g", tuple(flops[0].key_candidates), flops[0].width),
+            _regpair_flop("t", tuple(flops[0].key_candidates), flops[0].width),
+        ]
+        # assign_pairing_keys needs two lists
+        g_one, t_one = [clone[0]], [clone[1]]
+        if assign_pairing_keys(g_one, t_one) or g_one[0].key != "pfn_q":
+            _fail("regpair-prefer-q-extract", f"picked={g_one[0].key}")
+    print("SELFTEST PASS regpair-prefer-q-extract: flatten aliases pair on pfn_q")
+
+
+def test_equiv_ref_regpair() -> None:
+    """GATE-EQY-004 (4): gold-vs-gold (+ shuffled ports) PASS; fakes and omitted rp_d FAIL."""
+    root = Path(__file__).resolve().parents[2]
+    script = root / "scripts" / "gate" / "equiv_ref.sh"
+    gold = root / "formal" / "dll" / "ref" / "ub_dll_bcrc.sv"
+    extra = root / "formal" / "dll" / "negative" / "bcrc_extra_reg.sv"
+    carry = root / "formal" / "dll" / "negative" / "bcrc_carry_after_last.sv"
+    drop = root / "formal" / "dll" / "negative" / "bcrc_drop_start_flit.sv"
+    flip = root / "formal" / "dll" / "negative" / "bcrc_flip.sv"
+    wrst = root / "formal" / "dll" / "negative" / "bcrc_wrong_reset.sv"
+    if not script.is_file() or not gold.is_file():
+        _fail("equiv-ref-regpair", "equiv_ref.sh or gold missing")
+    env = {**os.environ, "EQUIV_METHODS": "regpair", "EQUIV_TMO": "25", "EQUIV_SEQ_DEPTH": "8"}
+    cex_root = Path(tempfile.mkdtemp(prefix="selftest_cex_"))
+    env["EQUIV_CEX_DIR"] = str(cex_root)
+
+    good = run_cmd([str(script), "ub_dll_bcrc", str(gold)], env=env, timeout=90)
+    if good.returncode != 0 or "equiv_ref PASS" not in (good.stdout or ""):
+        _fail("equiv-ref-regpair-gold", (good.stdout or "")[-400:])
+    if not re.search(r"directed_midblock .*result=match", good.stdout or ""):
+        _fail("equiv-ref-regpair-gold", "expected directed_midblock result=match")
+    print("SELFTEST PASS equiv-ref-regpair-gold: gold vs gold")
+
+    with tempfile.TemporaryDirectory() as td:
+        shuffled = Path(td) / "bcrc_port_shuffle.sv"
+        _shuffle_bcrc_ports(gold, shuffled)
+        shuf = run_cmd([str(script), "ub_dll_bcrc", str(shuffled)], env=env, timeout=90)
+        if shuf.returncode != 0 or "equiv_ref PASS" not in (shuf.stdout or ""):
+            _fail("equiv-ref-regpair-shuffle", (shuf.stdout or "")[-400:])
+    print("SELFTEST PASS equiv-ref-regpair-shuffle: shuffled port order")
+
+    matrix = root / "formal" / "dll" / "positive" / "bcrc_matrix_equiv.sv"
+    if not matrix.is_file():
+        _fail("equiv-ref-regpair-matrix", f"missing {matrix}")
+    mtx = run_cmd([str(script), "ub_dll_bcrc", str(matrix)], env=env, timeout=120)
+    mtx_out = mtx.stdout or ""
+    if mtx.returncode != 0 or "equiv_ref PASS" not in mtx_out:
+        _fail("equiv-ref-regpair-matrix", mtx_out[-600:])
+    if "SCRIPT_ERROR" in mtx_out:
+        _fail("equiv-ref-regpair-matrix", "structurally-different equivalent pair must not hit SCRIPT_ERROR")
+    if "write_aiger -miter" in mtx_out or re.search(r"aiger .*gold_po=0", mtx_out):
+        _fail("equiv-ref-regpair-matrix", "combo CEC must not emit a property AIGER")
+    print("SELFTEST PASS equiv-ref-regpair-matrix: structurally different, same formula")
+
+    omit_env = {**env, "EQUIV_REGPAIR_OMIT_PO": "rp_d_crc", "EQUIV_REGPAIR_OMIT_SIDE": "gold"}
+    omit = run_cmd([str(script), "ub_dll_bcrc", str(gold)], env=omit_env, timeout=90)
+    omit_out = omit.stdout or ""
+    if omit.returncode == 0:
+        _fail("equiv-ref-regpair-omit-po", "omitted rp_d_crc must fail")
+    if "ports=FAIL" not in omit_out or "rp_d_crc" not in omit_out:
+        _fail("equiv-ref-regpair-omit-po", omit_out[-400:])
+    print("SELFTEST PASS equiv-ref-regpair-omit-po: missing rp_d_crc listed")
+
+    bad_extra = run_cmd([str(script), "ub_dll_bcrc", str(extra)], env=env, timeout=90)
+    extra_out = bad_extra.stdout or ""
+    if bad_extra.returncode == 0:
+        _fail("equiv-ref-regpair-extra", "extra-reg fake must fail")
+    if "DEADREG result=FAIL" not in extra_out:
+        _fail("equiv-ref-regpair-extra", f"GATE-SYN-DEADREG must catch extra: {extra_out[-400:]}")
+    if "unmatched" not in extra_out:
+        _fail("equiv-ref-regpair-extra", "expected unmatched register listing")
+    print("SELFTEST PASS equiv-ref-regpair-extra: DEADREG + unmatched flop")
+
+    replay = root / "scripts" / "gate" / "replay_seq_cex.py"
+
+    def _require_bmc_icarus(name: str, net: Path, out: str) -> None:
+        if not re.search(
+            r"was asserted in frame|SAT proof finished - model found|Assert failed|proof did fail|NOT EQUIVALENT",
+            out,
+            re.I,
+        ):
+            _fail(f"equiv-ref-regpair-{name}", f"expected BMC CEX (timeout is not a CEX): {out[-600:]}")
+        if re.search(r"未证完", out) and not re.search(r"was asserted in frame|SAT proof finished", out, re.I):
+            _fail(f"equiv-ref-regpair-{name}", "timeout/未证完 is not a real CEX")
+        prefer = cex_root / f"{net.stem}.csv"
+        csvs = [prefer] if prefer.is_file() else list(cex_root.glob(f"*{net.stem}*.csv"))
+        if not csvs:
+            m = re.search(r"cex_csv=(\S+)", out)
+            if m and Path(m.group(1)).is_file():
+                csvs = [Path(m.group(1))]
+        if not csvs:
+            _fail(f"equiv-ref-regpair-{name}", "BMC CEX produced no CSV sequence")
+        icarus = run_cmd(
+            ["python3", str(replay), "--csv", str(csvs[0]), "--net", str(net), "--leaf", "ub_dll_bcrc"],
+            timeout=60,
+        )
+        icarus_out = icarus.stdout or ""
+        print(icarus_out)
+        if "REPLAY FIRST_DIFF" not in icarus_out:
+            _fail(f"equiv-ref-regpair-{name}", f"Icarus must reproduce a port mismatch: {icarus_out[-400:]}")
+        print(f"SELFTEST PASS equiv-ref-regpair-{name}: BMC CEX + Icarus {re.search(r'REPLAY FIRST_DIFF.*', icarus_out).group(0)}")
+
+    for name, net in (("drop", drop), ("flip", flip), ("wrong_reset", wrst)):
+        if not net.is_file():
+            _fail(f"equiv-ref-regpair-{name}", f"missing {net}")
+        proc = run_cmd([str(script), "ub_dll_bcrc", str(net)], env=env, timeout=180)
+        out = proc.stdout or ""
+        if proc.returncode == 0:
+            _fail(f"equiv-ref-regpair-{name}", "fake must fail")
+        if name == "wrong_reset":
+            if "reset=FAIL" not in out:
+                _fail(f"equiv-ref-regpair-{name}", out[-400:])
+            print(f"SELFTEST PASS equiv-ref-regpair-{name}: reset=FAIL")
+            continue
+        if name == "flip":
+            if "SCRIPT_ERROR" in out and "cex_ok=1" not in out:
+                _fail(f"equiv-ref-regpair-{name}", "NOT EQ without replayable CEX is a script error")
+            if not re.search(r"cex_ok=1|REPLAY FIRST_DIFF|was asserted in frame", out):
+                _fail(f"equiv-ref-regpair-{name}", f"NOT EQ must carry a replayable CEX: {out[-500:]}")
+            _require_bmc_icarus(name, net, out)
+            continue
+        if "SCRIPT_ERROR" in out and "cex_ok=1" not in out and "reset=FAIL" not in out:
+            _fail(f"equiv-ref-regpair-{name}", "NOT EQ without replayable CEX is a script error")
+        if not re.search(
+            r"NOT EQUIVALENT|Assert failed|SAT proof finished - model found|proof did fail|was asserted in frame|cex_ok=1",
+            out,
+            re.I,
+        ):
+            _fail(f"equiv-ref-regpair-{name}", f"expected real CEX: {out[-400:]}")
+        print(f"SELFTEST PASS equiv-ref-regpair-{name}: real compare FAIL")
+
+    bad_carry = run_cmd([str(script), "ub_dll_bcrc", str(carry)], env=env, timeout=180)
+    carry_out = bad_carry.stdout or ""
+    if bad_carry.returncode == 0:
+        _fail("equiv-ref-regpair-carry", "carry-after-last fake must fail")
+    if "SCRIPT_ERROR" in carry_out and "cex_ok=1" not in carry_out:
+        _fail("equiv-ref-regpair-carry", "NOT EQ without replayable CEX is a script error")
+    if "INCONCLUSIVE(state-encoding)" not in carry_out:
+        _fail("equiv-ref-regpair-carry", f"expected INCONCLUSIVE then seq: {carry_out[-400:]}")
+    if not re.search(r"cex_ok=1|was asserted in frame", carry_out):
+        _fail("equiv-ref-regpair-carry", "NOT EQ must carry a replayable CEX")
+    _require_bmc_icarus("carry", carry, carry_out)
+
+
+def test_equiv_ref_affine() -> None:
+    """GATE-EQY-004 (5): AND/mux plants fail precondition; unit-vector plant NOT EQ."""
+    root = Path(__file__).resolve().parents[2]
+    script = root / "scripts" / "gate" / "equiv_ref.sh"
+    and_net = root / "formal" / "dll" / "negative" / "bcrc_affine_and.sv"
+    mux_net = root / "formal" / "dll" / "negative" / "bcrc_affine_mux.sv"
+    bit_net = root / "formal" / "dll" / "negative" / "bcrc_affine_bit.sv"
+    for net in (and_net, mux_net, bit_net):
+        if not net.is_file():
+            _fail("equiv-ref-affine", f"missing {net}")
+    env = {
+        **os.environ,
+        "EQUIV_METHODS": "regpair",
+        "EQUIV_TMO": "40",
+        "EQUIV_REGPAIR_AFFINE_ONLY": "1",
+    }
+
+    and_proc = run_cmd([str(script), "ub_dll_bcrc", str(and_net)], env=env, timeout=180)
+    and_out = and_proc.stdout or ""
+    if and_proc.returncode == 0:
+        _fail("equiv-ref-affine-and", "AND plant must not PASS")
+    if not re.search(r"affine_prereq .*FAIL.*(\$and|non-affine cell)", and_out):
+        _fail("equiv-ref-affine-and", f"precondition must reject $and: {and_out[-800:]}")
+    if re.search(r"po_cec name=rp_d_crc result=equivalent method=affine", and_out):
+        _fail("equiv-ref-affine-and", "AND plant must not prove rp_d_crc via affine")
+    print("SELFTEST PASS equiv-ref-affine-and: leftover $and rejected")
+
+    mux_proc = run_cmd([str(script), "ub_dll_bcrc", str(mux_net)], env=env, timeout=180)
+    mux_out = mux_proc.stdout or ""
+    if mux_proc.returncode == 0:
+        _fail("equiv-ref-affine-mux", "data-bit $mux plant must not PASS")
+    if not re.search(r"affine_prereq .*FAIL.*leftover \$mux", mux_out):
+        _fail("equiv-ref-affine-mux", f"precondition must reject leftover $mux: {mux_out[-800:]}")
+    print("SELFTEST PASS equiv-ref-affine-mux: leftover data-select $mux rejected")
+
+    bit_proc = run_cmd([str(script), "ub_dll_bcrc", str(bit_net)], env=env, timeout=180)
+    bit_out = bit_proc.stdout or ""
+    if bit_proc.returncode == 0:
+        _fail("equiv-ref-affine-bit", "affine one-bit plant must not PASS")
+    if "SCRIPT_ERROR" in bit_out and "cex_ok=1" not in bit_out:
+        _fail("equiv-ref-affine-bit", "NOT EQ without replayable CEX is a script error")
+    if not re.search(r"method=affine", bit_out) or not re.search(r"cex_ok=1", bit_out):
+        _fail("equiv-ref-affine-bit", f"unit vector must NOT EQ with CEX: {bit_out[-800:]}")
+    if not re.search(r"po_cec name=rp_d_crc result=not_equivalent method=affine", bit_out):
+        _fail("equiv-ref-affine-bit", f"rp_d_crc must be affine NOT EQ: {bit_out[-800:]}")
+    print("SELFTEST PASS equiv-ref-affine-bit: unit-vector NOT EQ + replayable CEX")
+
+
+def test_deadreg_extra() -> None:
+    """GATE-SYN-DEADREG: extra-reg fake FAIL; gold PASS."""
+    root = Path(__file__).resolve().parents[2]
+    py = root / "scripts" / "gate" / "deadreg.py"
+    extra = root / "formal" / "dll" / "negative" / "bcrc_extra_reg.sv"
+    gold = root / "formal" / "dll" / "ref" / "ub_dll_bcrc.sv"
+    bad = run_cmd(["python3", str(py), "--v", str(extra), "--top", "ub_dll_bcrc", "--label", "extra"], timeout=60)
+    if bad.returncode == 0 or "DEADREG result=FAIL" not in (bad.stdout or ""):
+        _fail("deadreg-extra", bad.stdout or "no FAIL")
+    if "extra" not in (bad.stdout or ""):
+        _fail("deadreg-extra", "expected dead cell extra")
+    print("SELFTEST PASS deadreg-extra: extra Q does not reach an output")
+    good = run_cmd(["python3", str(py), "--v", str(gold), "--top", "ub_dll_bcrc", "--label", "gold"], timeout=60)
+    if good.returncode != 0 or "DEADREG result=PASS" not in (good.stdout or ""):
+        _fail("deadreg-gold", good.stdout or "gold must PASS")
+    print("SELFTEST PASS deadreg-gold: all FF Q reach outputs")
+
+
+def test_equiv_ref_real_compare() -> None:
+    """Fakes fail from solver/miter lines, not source greps or filenames."""
+    root = Path(__file__).resolve().parents[2]
+    script = root / "scripts" / "gate" / "equiv_ref.sh"
+    cases = [
+        (
+            "equiv",
+            "ub_pcs_lane_dist",
+            root / "formal/pcs/negative/forward_lane_dist.sv",
+            {"EQUIV_METHODS": "equiv", "EQUIV_TMO": "30", "NUM_LANES": "4"},
+            r"ERROR:|unproven|equiv_ref FAIL",
+        ),
+        (
+            "abc-cec",
+            "ub_pyc_rst_adapt",
+            root / "formal/common/negative/rst_adapt_wrong_pol.sv",
+            {"EQUIV_METHODS": "abc", "EQUIV_ABC_STAGE": "cec", "EQUIV_TMO": "30"},
+            r"NOT EQUIVALENT|Verification failed",
+        ),
+        (
+            "dedist-equiv",
+            "ub_pcs_lane_dedist",
+            root / "formal/pcs/negative/forward_lane_dedist.sv",
+            {"EQUIV_METHODS": "equiv", "EQUIV_TMO": "30", "NUM_LANES": "4"},
+            r"ERROR:|unproven|equiv_ref FAIL|NOT EQUIVALENT",
+        ),
+    ]
+    real = re.compile(
+        r"NOT EQUIVALENT|Verification failed|Assert failed|SAT proof finished|"
+        r"ERROR:|unproven \$equiv|equiv_ref FAIL|unmatched|ports=FAIL",
+        re.I,
+    )
+    for name, leaf, net, extra, _pat in cases:
+        if not net.is_file():
+            _fail(f"real-compare-{name}", f"missing {net}")
+        env = {**os.environ, **extra}
+        proc = run_cmd([str(script), leaf, str(net)], env=env, timeout=60)
+        out = proc.stdout or ""
+        if proc.returncode == 0:
+            _fail(f"real-compare-{name}", "fake must fail")
+        if not real.search(out):
+            _fail(f"real-compare-{name}", f"no real compare line: {out[-400:]}")
+        if re.search(r"grep .*POLY|filename match", out, re.I):
+            _fail(f"real-compare-{name}", "grep/filename verdict")
+        print(f"SELFTEST PASS real-compare-{name}: {real.search(out).group(0)}")
+
+
+
+def main() -> int:
+    print_tool_versions(["python", "yosys", "icarus"])
+    if not shutil_which("iverilog"):
+        print(
+            "ERROR: iverilog is not on PATH; gate-selftest flip/carry replay "
+            "needs Icarus (TOOLCHAIN.lock icarus_lock)"
+        )
+        return 1
+    tests = [
+        test_emit_skip_missing_script,
+        test_emit_skip_pycc,
+        test_emit_byte_diff,
+        test_lock_incomplete,
+        test_large_v_committed,
+        test_manifest_wrong_sha,
+        test_manifest_unproducible,
+        test_stray_pyc_reg,
+        test_pyc_lib_skip_missing_dir,
+        test_pyc_lib_missing_hard_after_main,
+        test_pyc_lib_byte_diff,
+        test_pyclib_single_copy_and_ok,
+        test_pyclib_single_fetch_and_report,
+        test_pyclib_copy_allowlist_transitional,
+        test_unlisted_tb_obs,
+        test_obs_must_be_output,
+        test_sby_bind_missing_signal,
+        test_lint_pyc_lib_not_passed_twice,
+        test_lint_moddup_still_caught,
+        test_cdc_pyc_lib_clk_not_core,
+        test_setup_sby_refuses_missing_z3_note,
+        test_sby_relative_and_missing,
+        test_formal_bmc_vs_cover_depth,
+        test_formal_inherit_equiv,
+        test_equiv_private_blackbox_hides_const_stub,
+        test_one_module_per_file,
+        test_equiv_blackbox_set_union,
+        test_formal_parent_free,
+        test_tb_selfcheck_sh_drops_pycircuit_venv,
+        test_tb_requires_verilator,
+        test_tb_skip_is_fail,
+        test_deleted_roster_not_error,
+        test_layer_lib_discovered_and_emit,
+        test_helper_at_layer_root_is_leaf,
+        test_repo_root_on_path_shadows,
+        test_lib_helper_splice,
+        test_yosys_ansi_ports,
+        test_hooks_missing_port,
+        test_hooks_wrong_width,
+        test_equiv_wide_bus_and_flip,
+        test_equiv_real_csr_tlb,
+        test_deadreg_extra,
+        test_regpair_prefer_q_alias,
+        test_equiv_ref_regpair,
+        test_equiv_ref_affine,
+        test_equiv_ref_real_compare,
+        run_private_selftests,
+    ]
+    for fn in tests:
+        fn()
+    print(f"gate selftest: PASS ({len(tests)} deliberate-fail cases)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

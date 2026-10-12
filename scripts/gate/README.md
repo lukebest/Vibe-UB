@@ -1,0 +1,43 @@
+# Tool-gate scripts
+
+CI (`.github/workflows/gate.yml`) and `make gate` call the same wrappers.
+Do not put extra logic only in the workflow.
+
+Lists live in this directory (`legacy.txt`, `handwritten.yml`, `blackbox.yml`,
+`hooks_ports.yml`, `pycircuit_migrate.txt`).
+
+| Script | Job |
+| --- | --- |
+| `selftest.sh` | Deliberate-fail fixtures for the new checks |
+| `spec_leak.sh` | Private-spec leak scan (allowlist `leak_allow.yml`) |
+| `contract_check.sh` | S-01(b) contracts + stub hash + `reports/private/<layer>/<leaf>.yml` + role dirs + GATE-OWNED-PATHS |
+| `rtl_emit_consistency.sh` | Line A: `scripts/emit_rtl.py` only (temp dir, byte-compare `rtl/<layer>/` + hooks); skip if missing / pycc uninstallable; large-mem manifest; `rtl/pyc_lib/` compare-or-skip; GATE-PYCLIB-SINGLE |
+| `equiv.sh` | PRODUCT≡HOOKS per variant (Yosys `equiv_*` primary; eqy if present; large cmn mem = bytes except name + ports) |
+| `pycircuit_provenance.sh` | AST provenance (no homemade pycc argv; regen is emit_rtl.py); import-root + `lib/` splice-scan |
+| `setup_pycircuit.sh` | Design spike recipe (clone pin, apt LLVM 19, `pyc build`, venv) |
+| `hooks_port_consistency.sh` | Independent HOOKS vs PRODUCT ports |
+| `lint.sh` | Verilator `--lint-only -Wall` + unlisted stub/macro |
+| `synth_check.sh` | Yosys synth, latch / multi-drive / combo-loop; `-lib` for blackbox.yml; combo depth report; combo-only SCC; runs `synth_selftest.py` (async-FF vs latch / combo-loop / async+combo-loop fixtures) |
+| `cdc_rdc.sh` | Structural CDC / RDC (`cdc_rules.yml`; `valid_outside` for unreset arrays) |
+| `formal.sh` | bind-existence on `formal/**/*.sby` then `sby -f` from the `.sby` directory (includes `formal/cmn/`); GATE-FORMAL-DEPTH (3) and GATE-PRIVATE-PARENT-FREE are report-only until their marks land on main |
+| `regmap_consistency.sh` | `python3 scripts/gen_regmap.py --check` |
+| `tb_selfcheck.sh` | Auto-discover pytest + cocotb under `tb/` and `model/`; require Verilator; fail on pytest skip |
+
+Three lines, every hierarchy level auto-discovered (`pycircuit/*/`, `rtl/*/`, `formal/*/`; `cmn` always enumerated; no hard-coded `pcs`/`dll`/`lmsm`/`csr`):
+
+- **A** emit / hooks / ports / eqy / provenance
+- **B** lint / synth-check / cdc-rdc on `rtl/<layer>/` (+ `hooks/`)
+- **C** `formal/<iface>/*.sby`
+
+Xia: `ub_cmn_mem_1r1w` is a normal leaf (`pycircuit/cmn/` → `rtl/cmn/`).
+`blackbox.yml` `kind` is `stub` | `macro` only.
+
+Import root: `PYTHONPATH` starts with `<repo>/pycircuit` so leaves can
+`from <layer>.lib import ...`. The repo root must not be on `sys.path`
+(the `pycircuit/` tree would shadow the installed package). Invoke by
+script path with `python -P`, never `python -m`. Leaf discovery is
+`pycircuit/<layer>/*.py` only (`lib/` and `__init__.py` skipped; `lib/`
+is splice-scanned, not emitted).
+
+Rules, fail criteria, and the waiver flow:
+[docs/rules/verif_gate.md](../../docs/rules/verif_gate.md).

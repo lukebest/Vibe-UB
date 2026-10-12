@@ -1,0 +1,242 @@
+# Tool-gate CI. Jobs call scripts/gate/* so local `make gate` matches CI.
+# Do not add QoR compare here — scripts/impl/quick_synth.sh is implementation-owned.
+
+name: gate
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUNBUFFERED: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  gate-selftest:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Yosys + Icarus + Verilator + gate Python
+        run: |
+          sudo apt-get update
+          # Icarus pin is TOOLCHAIN.lock icarus_lock (12.0); flip/carry BMC CEX replay.
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys iverilog verilator
+          pip install -r scripts/gate/requirements.txt
+      - name: gate self-tests (deliberate-fail fixtures)
+        run: scripts/gate/selftest.sh
+
+  spec-leak:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch origin/main for PR-diff scan
+        run: git fetch origin main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install gate Python
+        run: pip install -r scripts/gate/requirements.txt
+      - name: spec-leak
+        run: scripts/gate/spec_leak.sh
+
+  contract-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch origin/main for role-dir + owned-paths scan
+        run: git fetch origin main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install gate Python
+        run: pip install -r scripts/gate/requirements.txt
+      - name: contract-check
+        env:
+          GATE_PR_TITLE: ${{ github.event.pull_request.title }}
+          GATE_PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: scripts/gate/contract_check.sh
+
+  rtl-emit-consistency:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Yosys + gate Python
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys
+          pip install -r scripts/gate/requirements.txt
+      - name: rtl-emit-consistency
+        run: scripts/gate/rtl_emit_consistency.sh
+
+  equiv:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Yosys (eqy is not packaged here)
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys
+          pip install -r scripts/gate/requirements.txt
+      - name: equiv (Yosys equiv_*; eqy if present)
+        run: scripts/gate/equiv.sh
+      - name: Upload equiv status for formal inherit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: equiv-status
+          path: scripts/gate/out/equiv_status.json
+          if-no-files-found: ignore
+
+  pycircuit-provenance:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache pyc / pycc build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .pycircuit-src
+            .pycircuit_out
+            .pycircuit-venv
+          key: pyc-${{ runner.os }}-${{ hashFiles('TOOLCHAIN.lock', 'scripts/gate/setup_pycircuit.sh') }}
+      - name: Install gate Python
+        run: pip install -r scripts/gate/requirements.txt
+      - name: pycircuit-provenance
+        run: scripts/gate/pycircuit_provenance.sh
+
+  hooks-port-consistency:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Yosys + gate Python
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys
+          pip install -r scripts/gate/requirements.txt
+      - name: hooks-port-consistency
+        run: scripts/gate/hooks_port_consistency.sh
+
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Verilator + gate Python
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y verilator
+          pip install -r scripts/gate/requirements.txt
+      - name: lint
+        run: scripts/gate/lint.sh
+
+  synth-check:
+    runs-on: ubuntu-24.04
+    # Observed 8.5–12.5 min on main; 25 min leaves headroom for the 180s/module cap.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Yosys + gate Python
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys
+          pip install -r scripts/gate/requirements.txt
+      - name: synth-check
+        run: scripts/gate/synth_check.sh
+
+  cdc-rdc:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install gate Python
+        run: pip install -r scripts/gate/requirements.txt
+      - name: cdc-rdc
+        run: scripts/gate/cdc_rdc.sh
+
+  formal:
+    needs: [equiv]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download equiv status
+        uses: actions/download-artifact@v4
+        with:
+          name: equiv-status
+          path: scripts/gate/out
+        continue-on-error: true
+      - name: Install Yosys + z3 + SymbiYosys
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys z3
+          pip install -r scripts/gate/requirements.txt
+          scripts/gate/setup_sby.sh
+          echo "$GITHUB_WORKSPACE/.sby-src" >> "$GITHUB_PATH"
+      - name: formal
+        run: scripts/gate/formal.sh
+
+  regmap-consistency:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install gate Python
+        run: pip install -r scripts/gate/requirements.txt
+      - name: regmap-consistency
+        run: scripts/gate/regmap_consistency.sh
+
+  tb-selfcheck:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Icarus + Verilator + TB Python
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iverilog verilator
+          pip install -r scripts/gate/requirements.txt
+          pip install -r tb/requirements.txt
+      - name: tb-selfcheck
+        run: scripts/gate/tb_selfcheck.sh

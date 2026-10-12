@@ -14,6 +14,7 @@ module ub_mem_ptw_hooks_inv (
   input  wire        rst_pyc,
   input  wire [5:0]  tb_mem_ptw_obs_st,
   input  wire        tb_mem_ptw_obs_rd_pend,
+  input  wire        mem2host_rd_rsp_ready,
   input  wire        dec_out_valid,
   input  wire        desc_v,
   input  wire [1:0]  desc_kind,
@@ -51,6 +52,14 @@ module ub_mem_ptw_hooks_inv (
       // (b) rd_pend implies the table-read encoding.
       a_rd_pend_st: assert (
         !tb_mem_ptw_obs_rd_pend || (tb_mem_ptw_obs_st == ST_RD)
+      );
+      // (c) rd_valid_q and rd_sent are mutex in RTL (enter_rd sets
+      // valid / clears sent; rd_accept clears valid / sets sent).
+      // rsp_ready = st_rd & rd_sent (PRODUCT port). Induction CEX
+      // started with both rd_pend and rsp_ready, then took an error
+      // response into ST_FLT while holding rd_pend.
+      a_rd_pend_mutex: assert (
+        !tb_mem_ptw_obs_rd_pend || !mem2host_rd_rsp_ready
       );
     end
   end

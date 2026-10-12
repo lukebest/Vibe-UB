@@ -150,6 +150,7 @@ module ub_mem_ptw_hooks_harness (
     .rst_pyc(rst_pyc),
     .tb_mem_ptw_obs_st(tb_mem_ptw_obs_st),
     .tb_mem_ptw_obs_rd_pend(tb_mem_ptw_obs_rd_pend),
+    .mem2host_rd_rsp_ready(mem2host_rd_rsp_ready),
     .dec_out_valid(1'b0),
     .desc_v(1'b0),
     .desc_kind(2'b00),

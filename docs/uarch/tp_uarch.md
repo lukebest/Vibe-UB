@@ -240,7 +240,7 @@ PSN 规则（§6.4.1【Xia】）：24 bit，next = (cur+1) mod 2^24；最大已�
 | `RETRY_WAIT_CYC` | 323 | `core_clk` 拍 | ceil(4 µs × 80.566 MHz) = ceil(322.264) = 323【定】 | **DLL**（`ub_dll_retry`，UB-DL §4.7.3.3） |
 | `PROBE_WAIT_CYC` | 323 | `core_clk` 拍 | 同上公式【定】 | **PHY LMSM**（`ub_lmsm`，UB-PHY §3.4.3.2） |
 
-说明：RETRY WAIT 与 Probe.Wait 两个超时在规范中分属第 4 章与第 3 章，TP 不消费。本表列出它们只为把船长定的 4 µs 公式落在同一处，实现放各自模块的参数表；见 M-5。通用公式：`X_CYC = ceil(T_us × F_CORE_MHz)`，改频率时随 `F_CORE` 重新计算，TB 可用 `*_TMR_SCALE` 缩短。
+说明：本表归属列为设计-B 提案（DLL / LMSM），**不**作为已关项；是否由 TP 复用见 M-5，待架构师确认。323 拍公式【定】仍写在此，便于对照。通用公式：`X_CYC = ceil(T_us × F_CORE_MHz)`，改频率时随 `F_CORE` 重新计算，TB 可用 `*_TMR_SCALE` 缩短。
 
 ---
 
@@ -264,7 +264,7 @@ PSN 规则（§6.4.1【Xia】）：24 bit，next = (cur+1) mod 2^24；最大已�
 | M-2 | §3 整操作完成 | `tp2ta_msn_valid/ready` + `tp2ta_tpmsn[23:0]` | **关闭** |
 | M-3 | §3 ROL 目标完成 | `ta2tp_cmp_valid/ready`、`ta2tp_cmp_tassn[15:0]`、`ta2tp_cmp_fail`、`ta2tp_cmp_opcode[7:0]` | **关闭**，但 `ta2tp_cmp_rspst` / `ta2tp_cmp_rspinfo` 宽仍 **未知** |
 | M-4 | §2 / §3 字段 | RTPH 16 B；DstTPN / PSN / TPMSN 各 24 b | 上述已锁。器件级 MTU 仍 **未知**（附录 D.1.13，契约未锁） |
-| M-5 | §3 反压 / 计时器 | `RETRY_WAIT_CYC` 归 DLL `ub_dll_retry`（§4.7.3.3）；`PROBE_WAIT_CYC` 归 LMSM `ub_lmsm`（§3.4.3.2）；均为 323 拍【定】 | **关闭**。TP 自有计时器只有 RTO 与 ACK 合并 |
+| M-5 | §3 反压 / 计时器 | 契约写 `RETRY_WAIT_CYC` 归 DLL、`PROBE_WAIT_CYC` 归 LMSM，同时把这两项与 TP 计时器写在同一节 | PENDING architect confirmation: whether RETRY_WAIT/PROBE_WAIT belong to DLL/LMSM (design-B proposal: TP's own timers are RTO and ACK coalescing) or are reused by TP as LAYER_CONTRACTS currently states. |
 | M-6 | §2 未决 | GBN 与选择重传两套都有；先做哪一套 **未知** | 仍 **未知**。实现上 GBN 先做，SR 另跟踪（清单回填不在本 PR） |
 | M-7 | §2 ICRC | ICRC 适用于 CFG7；CFG9（bypass）不带 | **关闭** |
 | M-8 | §3 握手 | 提交口 `ready=0`：发送窗满（§6.5.1.4.1）或 `tp2nw_ready=0`；ROL 走 `ta2tp_cmp_*` | **关闭** |
@@ -292,7 +292,7 @@ PSN 规则（§6.4.1【Xia】）：24 bit，next = (cur+1) mod 2^24；最大已�
 6. **Q-6** RTB `DEPTH=4096`、宽 160 b（比 64 KB 净荷份额多 16 KB 头/碎片余量）。
 7. **Q-7** 描述符按「信道 × 32 + PSN 低 5 位」直接寻址；单信道窗参数化为 32。
 11. **Q-11** 1 µs 节拍由 TP 自建 Q16 分频（§7），不依赖尚未存在的共享 tick。
-12. **Q-12** 关闭（M-5）：`RETRY_WAIT_CYC` / `PROBE_WAIT_CYC`（323 拍）属 `ub_dll_retry` / `ub_lmsm`；TP 只持 RTO 与 ACK 合并。
+12. **Q-12** 同 M-5，待架构师确认：`RETRY_WAIT_CYC` / `PROBE_WAIT_CYC` 归 DLL/LMSM，还是由 TP 复用。设计-B 提案：TP 只持 RTO 与 ACK 合并。
 13. **Q-13** `TP_ATOMIC_EN` 默认 0；本层只影响长度检查与 TPMSN 计数，不另开通路。
 14. **Q-14** 收到 F=1：按普通包做 PSN 检查，丢净荷、计数；按 A 位回 TPACK。obs 计数口名不在本草案另起。
 15. **Q-15** HOOKS：DSC 进 SPEC §10 点名存储（`tb_<inst>_bd_*`）；RTB 不进。

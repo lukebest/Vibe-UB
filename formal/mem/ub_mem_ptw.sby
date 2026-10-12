@@ -16,8 +16,9 @@
 #   cover — reach event, MATT_WD complete, read+rsp, fill,
 #           backpressured table-read then accept
 #   bmc   — port safety (Q-A08 / Q-C07) + AP_TBLRD_REQ_HOLD (SPEC §14)
-# prove is defined but not tagged `default`, so the gate does not run
-# it yet. Manual: `sby -f ub_mem_ptw.sby prove` (k-induction, yices).
+#           depth 24 (two full walks + margin; >= deepest cover + 6)
+# prove is defined but not tagged `default` (gatekeeper: not fully
+# proven — not a waiver). Manual: `sby -f ub_mem_ptw.sby prove`.
 # k=20: basecase PASS, induction FAIL (step 0). CEX start is unreachable
 # (st_dec && rd_valid_q; rd_addr_q != addr_q). Yosys 0.33 hierarchical
 # refs to DUT regs are implicit undriven wires; port-level one-hot
@@ -37,7 +38,7 @@ depth 16
 --
 bmc:
 mode bmc
-depth 16
+depth 24
 --
 prove:
 mode prove
@@ -46,7 +47,7 @@ depth 20
 
 [engines]
 # Same engine as formal/mem/ub_mem_tlb.sby. Walker has no $mem arrays;
-# yices at depth 16 is well inside the CI budget.
+# yices at BMC depth 24 is well inside the CI budget.
 smtbmc yices
 
 [script]

@@ -7,6 +7,12 @@
 - `pycircuit/cmn/ub_cmn_mem_1r1w.py` → `rtl/cmn/` 与 `rtl/cmn/hooks/` 的 `ub_cmn_mem_1r1w_{d5w8,d8w16,d64w64m16}.v`：pycc 固定网表（SPEC §2.2，`d<DEPTH>w<WIDTH>`，N>1 加 `m<WMASK_W>`）。PRODUCT=`TEST_HOOKS=0`，HOOKS=`TEST_HOOKS=1`；§10 无 `tb_*`，两套端口与模块名相同。时钟 `core_clk`；无复位口（业务叶标准名 `rst_pyc`，本原语不引出）。生成参数 `WMASK_W`（默认 = `WIDTH`，整字写；`WIDTH` 须整除）；N=`WIDTH/WMASK_W`>1 时多 `wmask[N-1:0]`，bit i 写段 i，其余段保持；同址同拍 per-segment read-old。1R1W、读 1 拍；阵列与 `rdata` 无复位 / 无零初始化；越界不截断。`scripts/emit_rtl.py` / `make emit` 再现。较大 C 线变体（如 `d512w512m64`）不在本登记表，可经清单流后补。pycc 运行时原语（`pyc_reg.v`）只放 `rtl/pyc_lib/`，从 TOOLCHAIN 钉住的 pyCircuit（`43cc5918`）原样拷贝；层目录不再放 `pyc_*`。
 - `model/ub_cmn_mem_1r1w.py` + `formal/cmn/`：1R1W 存储原语参考模型与接口断言（CODING_STYLE §10 / PR #20 时序提案；`ASSERT_NO_UNINIT_READ` 默认 1；formal 用 anyconst 单地址抽象）。
 - `scripts/gate/handwritten.yml`：`HW-PYC-REG`（`rtl/pyc_lib/pyc_reg.v`，批准人 验证）；免 emit-consistency / hooks / equiv，仍走 lint 与 Yosys。
+- `docs/arch/pcs/UARCH.md`：线 A 本批三叶（`ub_pcs_nullblk_det` / `ub_pcs_amctl_rx` / `ub_pcs_amctl_cw_dec`）。§3 表头与列同 `docs/arch/mem/UARCH.md`，供契约门禁认 `parent`（#47 `PARENT_UNKNOWN`）。
+- `docs/arch/pcs/contracts/ub_pcs_amctl_cw_dec.md`：YAML 头按 main 上 `docs/arch/mem/contracts/README.md` §8 固定键（#43 已合入 `5b0b9fc3`）。船长确认走 C 线 S-01(b)。单 lane、1 拍寄存、无 `comb_budget_ns`。口与项目枚举、`pcs_rx_sdf_seen` t/t+1/t+2 见契约与清单。
+- `docs/arch/MODULE_INVENTORY.md`：`ub_pcs_amctl_rx` 对私有叶输出的稳健性——任意 `cw_dec` 输出须保持合法状态；formal 把 `cw_dec` 出口当自由输入，默认任务无契约 assume。限定场/`*_ok` 仅 `amctl_vld=1` 采用；`amctl_vld=1` 且 `ctrl_ok=0` 或 `lid_ok=0` 视为非 AMCTL（不置 SDF/EDF、不更新 LID）。
+- `docs/arch/MODULE_INVENTORY.md`：Xia 裁定 2026-10-12 关闭 `ub_pcs_amctl_rx` 三条 MISSING。M1：无分 lane valid，锁定按 UB-PHY §3.2.4.4 在叶内做，`pcs_am_locked` = 已配置 lane 全锁定。M2：公开只写识别/场语义（表 3-7、「AMCTL Identification Mechanism」）；码字解码进私有叶 `ub_pcs_amctl_cw_dec`（S-01(b)，船长已确认）。M3：SDF/EDF 按 `CTRL_TYPE`/`CTRL_DETAIL`（§3.2.4.2「AMCTL Controlling」）。`pcs_rx_lid[3:0]` 公开只称 `LID_NULL`。不抄码字/CW/符号下标。
+- `docs/arch/MODULE_INVENTORY.md`：`ub_pcs_amctl_rx` 完备性核对表（端口 / AMCTL 识别 / SDF / 已配置 lane / `pcs_rx_lid[3:0]`+`pcs_rx_lid_vld`）。scrambler placeholder 期 LID 口 Tie，waiver `placeholder, D20`。
+- `docs/arch/MODULE_INVENTORY.md` + SPEC §3.3.4 / §6.1 / A-23：登记 `ub_pcs_nullblk_det`（线 A 设计）。Xia 裁定 2026-10-12：旁路观察 `pcs2dll_*` / `dll2pcs_*`；`ub_pcs_amctl_rx` 出寄存电平 `pcs_rx_sdf_seen`；新增 `lmsm2pcs_nb_phase`；Null 判别 UB-DL §4.3.3.2 + `CLENGTH==5'b00000`；每拍至多一个 block（§3.3.1 / §3.3.2），保持 1-bit 脉冲；RX 门控在寄存前，TX 无门控；t→t+1，LMSM 计 ≥s+1。参考模型待写。
 - `docs/arch/MODULE_INVENTORY.md`：登记 `ub_pcs_nullblk_det`（线 A；出 `pcs2lmsm_null_blk` / `pcs2lmsm_rx_nonnull_blk` / `pcs2lmsm_tx_null_blk`，SPEC §3.3.4 / §6.1 / §13 A-23）。C 线六片解码叶子按 `docs/arch/mem/contracts/README.md` 对齐：`ub_mem_ptw_desc_dec` / `ub_mem_dec_ent_dec` / `ub_mem_tecte_dec` / `ub_mem_tcte_dec` / `ub_mem_l1tct_dec` / `ub_mem_mapte_dec`（S-01(b) 私有叶子，所有权 设计-C，契约 架构 Xia）。合计 **84** 模块，S19 / M34 / L31；M1 覆盖 21。
 - 门禁 S-01(b)：`scripts/gate/contract_check.py` 扫 `docs/arch/*/contracts/*.md`；`contract_hash.py` 对 YAML 映射做规范 sha256；`gen_private_stub.py` 写 `pycircuit/<layer>/stub/` 并经 pycc 出 `rtl/<layer>/stub/`；公开 attest 路径 `reports/private/<layer>/<leaf>.yml`。规则 `docs/rules/verif_gate.md` §12 GATE-CONTRACT-* / GATE-PRIV-*。
 - `docs/SPEC.md` §14：线 C 第 9 章（UMMU / 译码器）首轮裁定写入 MEM 章（船长 2026-10-12 09:05 / D20；S-01 落地见同日 09:20）。每条引用规范节与决策 ID。§10.5 按 C-D1 撤 `mem_dec_b0`…`mem_dec_b7`。docs-only。
@@ -35,6 +41,8 @@
 
 ### Changed
 
+- SPEC §2.4 / §3.3.4 / §9 / §10.2：`pcs_am_locked` / `tb_inj_am_lock` 改为 1 bit（已配置 RX lane 全锁定）；`ub_pcs_amctl_rx` 含 §3.2.4.4 分 lane 锁定，码字解码在 `ub_pcs_amctl_cw_dec`。Xia 裁定 2026-10-12。
+- `docs/arch/pcs/contracts/ub_pcs_amctl_cw_dec.md`：YAML 增补必填 `assertions:`（正文 8 条 `AP_CWDEC_*`，去重排序）。schema 源 main `73cfa6e1`（#49）。
 - `docs/arch/mem/contracts/ub_mem_ptw_desc_dec.md`：`AP_PTW_KIND` 改为 `desc_v ⇔ desc_kind≠0`（`desc_v=1` 当且仅当 `desc_kind` 非 0；`desc_v=0` 时 `desc_kind` 必须为 0）。编码仍为 0 = invalid / 1 = table / 2 = block / 3 = page。芯片开发PM 2026-10-12。
 - SPEC §14 Q-A11：TCTE 范围表的 2 MB 颗粒度配置只由 `ub_mem_tcte_dec` 解码并报 `ILL_MAP_2MB`；L1 的 1 GB 与 L2 的 2 MB 页表块描述符合法（`desc_kind=2`，`desc_illegal=0`），遍历器将其拆成 4 KB TLB 回填。
 - 门禁 hooks：`HOOKS-UB-MEM-PTW` 登记 `tb_mem_ptw_obs_st` / `tb_mem_ptw_obs_rd_pend`（只读、不受 `tb_test_mode`；批准人验证）。

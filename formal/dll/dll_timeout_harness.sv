@@ -1,5 +1,5 @@
 // DLL / LMSM timeout harness. No product RTL. Combo-of-cyc.
-// RETRY_WAIT is DLL (UB-DL §4.7.3.3); PROBE_WAIT is LMSM (UB-PHY §3.4.3.2).
+// RETRY_WAIT_CYC is DLL (§4.7.3.3); PROBE_WAIT_CYC is LMSM (§3.4.3.2).
 `default_nettype none
 
 module dll_timeout_harness (

@@ -43,7 +43,8 @@
 
 ### Changed
 
-- 验证-B（#61）：按 #59 `LAYER_CONTRACTS` §2 / §3 终表把契约占位换成实断言（160 b / 1 flit；TP→NW `sl/nlp/bypass/dcna/lbf/rt/cci`；NW→TP `err/icrc_err/flush/drop/nw_link_up`；TP→TA `msn_valid/ready`+`tpmsn[23:0]`；ROL `ta2tp_cmp_*`）。契约标未知的字段不断言。`timeout_322/323` 迁到 `formal/dll`（DLL/LMSM 所有）；TP 只留 RTO / ACK 合并 cover。VERIF_PLAN §8.9.5 十四问：关 4（DCNA 16 b、ICRC CFG7/非 CFG9、CFG 4 b 取值 6/7/9、LPH.RT 2 b），其余 10 标未知并引用契约。assume 只在 `*_assume_diag`。BMC ≥ 最深 cover+6。
+- 验证-B（#61）：按 #59 / #63 `LAYER_CONTRACTS` §2 / §3 终表把契约占位换成实断言（160 b / 1 flit；TP→NW `sl/nlp/bypass/dcna/lbf/rt/cci`；NW→TP `err/icrc_err/flush/drop/nw_link_up`；TP→TA `msn_valid/ready`+`tpmsn[23:0]`；ROL `ta2tp_cmp_*`）。契约标未知的字段不断言。`timeout_322/323` 在 `formal/dll`（`RETRY_WAIT_CYC` 属 DLL §4.7.3.3，`PROBE_WAIT_CYC` 属 LMSM §3.4.3.2）；TP 只留 RTO / ACK 合并 cover（§6.4.2.1）。VERIF_PLAN §8.9.5 十四问：关 4（DCNA 16 b、ICRC CFG7/非 CFG9、CFG 4 b 取值 6/7/9、LPH.RT 2 b），其余 10 标未知并引用契约。assume 只在 `*_assume_diag`。BMC ≥ 最深 cover+6。
+- `docs/arch/LAYER_CONTRACTS.md` §3：`RETRY_WAIT_CYC` / `PROBE_WAIT_CYC`（323 拍超时）分别归属 DLL（§4.7.3.3）与 LMSM（§3.4.3.2）；TP 使用本层重传超时（RTO）与 ACK 合并计时器（§6.4.2.1）。
 - `docs/arch/LAYER_CONTRACTS.md` §2 / §3：对照 PR #58 M-1..M-9 与 PR #61 §8.9.5 / §14.6 十四问。补 TP→NW 边带 DCNA/LBF/RT/CCI、`tp2ta_msn_*`、ROL `ta2tp_cmp_*`；RTPH 16 B、DstTPN/PSN/TPMSN 24；ICRC 按 CFG9/7；CFG 取值 6/7/9（§4.3.2.2.2、§6.3.2）；SCNA/DCNA 规范两档、优先通路 16 b；发送窗 §6.5.1.4.1。其余（NLP→TAH 码点、LPH.RT 位切片、`ta2tp_mode`、flush 拍数、未决上限、长度宽、NAK 原因、GBN vs SR、共享信道、包上限、RTPH 其余宽）标 **未知**。
 - `scripts/impl/quick_synth.*`：`rtl/pyc_lib/` 缺失改为硬失败（目录来自 PR #21，必须存在）；去掉回退 `rtl/common` 的临时 WARN。attest 的 `contract_sha256` 只调用 main 上 `scripts/gate/contract_hash.py`；自测假仓库拷该文件，不再自带副本。
 - SPEC §2.4 / §3.3.4 / §9 / §10.2：`pcs_am_locked` / `tb_inj_am_lock` 改为 1 bit（已配置 RX lane 全锁定）；`ub_pcs_amctl_rx` 含 §3.2.4.4 分 lane 锁定，码字解码在 `ub_pcs_amctl_cw_dec`。Xia 裁定 2026-10-12。

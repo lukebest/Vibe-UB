@@ -10,7 +10,8 @@ import math
 from typing import Any, Mapping
 
 # SPEC §4.1: F_CORE = 2.578125e9 / 32. User/plan pin 80.566 MHz.
-# 322/323 covers are owned by DLL (RETRY_WAIT) / LMSM (PROBE_WAIT).
+# LAYER_CONTRACTS §3: 322/323 RETRY_WAIT_CYC / PROBE_WAIT_CYC are
+# DLL (§4.7.3.3) / LMSM (§3.4.3.2). TP timers are RTO / ACK-coal.
 F_CORE_HZ = 80.566e6
 TIMEOUT_US = 4.0
 TIMEOUT_DEFAULT_CYC = math.ceil(TIMEOUT_US * 1e-6 * F_CORE_HZ)  # 323
@@ -87,7 +88,7 @@ PENDING_XIA = UNKNOWN_XIA
 def timeout_cycles(wait_cyc: int | None = None) -> int:
     """SPEC §4.1 / §6.1 / §6.3: 0 folds to the reset default 323.
 
-    Owned by DLL (RETRY_WAIT) / LMSM (PROBE_WAIT), not TP.
+    Owned by DLL RETRY_WAIT_CYC / LMSM PROBE_WAIT_CYC (LAYER_CONTRACTS §3).
     """
     if wait_cyc is None or wait_cyc == 0:
         return TIMEOUT_DEFAULT_CYC

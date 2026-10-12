@@ -20,8 +20,9 @@ that file is only read by the named `assume_diag` sby (see
 `docs/rules/verif_gate.md` GATE-PRIVATE-PARENT-FREE and GATE-FORMAL-DEPTH
 §5 rule 3).
 
-DLL `RETRY_WAIT` and LMSM `PROBE_WAIT` 322/323 covers live in
-`formal/dll/` (`dll.sby`). They are not TP covers.
+`RETRY_WAIT_CYC` / `PROBE_WAIT_CYC` (323-cycle) 322/323 covers live in
+`formal/dll/` (`dll.sby`): DLL §4.7.3.3 and LMSM §3.4.3.2
+(LAYER_CONTRACTS §3). They are not TP covers. TP keeps RTO / ACK-coal.
 
 ## `formal/cmn/` — `ub_cmn_mem_1r1w`
 

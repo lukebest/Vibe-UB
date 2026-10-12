@@ -1,5 +1,5 @@
-# DLL RETRY_WAIT + LMSM PROBE_WAIT 322/323 covers.
-# Not a TP formal (LAYER_CONTRACTS §3). No assume.
+# DLL RETRY_WAIT_CYC + LMSM PROBE_WAIT_CYC 322/323 covers
+# (LAYER_CONTRACTS §3). Not a TP formal. No assume.
 # Deepest cover is probe_323 (step 6) → BMC 12 ≥ 6+6.
 [tasks]
 cover

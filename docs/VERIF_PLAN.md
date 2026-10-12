@@ -808,8 +808,8 @@ FEC / BCRC 错由 D3 PMA 模型改符号，无对应钩子。
 | TP-UNIT-TP-013 | UB-TP §6.8；MODULE_INVENTORY `ub_tp` | MTU ∈ {1024,4096,8192}，默认 4096 | 三档 + 非法 | `mtu_ok` | cp_tp_mtu | M1 | 计划 |
 | TP-UNIT-TP-014 | LAYER_CONTRACTS §3；UB-TP §6.4.2.1 | TP 计时器：RTO。`formal/contracts/nw_tp` 只留 `c_rto` | RTO 事件 | `tp_timer_ok("rto")` | cp_tp_rto | M1 | 计划 |
 | TP-UNIT-TP-015 | LAYER_CONTRACTS §3；UB-TP §6.4.2.1 | TP 计时器：ACK 合并。`formal/contracts/nw_tp` 只留 `c_ack_coal` | ACK 合并事件 | `tp_timer_ok("ack_coal")` | cp_tp_ack_coal | M1 | 计划 |
-| TP-UNIT-TP-016 | SPEC §4.1、§6.3；LAYER_CONTRACTS §3 | DLL `RETRY_WAIT` 322/323。**DLL 所有**（`formal/dll` `c_timeout_322/323`）；不在 nw_tp | elapsed=322/323 | `timed_out` | cp_dll_retry_323 | M1 | 计划 |
-| TP-UNIT-TP-017 | SPEC §4.1、§6.1；LAYER_CONTRACTS §3 | LMSM `PROBE_WAIT` 同 323 规则。**LMSM 所有**（`formal/dll` `c_probe_322/323`）；不在 nw_tp | elapsed=322/323 | 同 323 | cp_lmsm_probe_323 | M1 | 计划 |
+| TP-UNIT-TP-016 | SPEC §4.1、§6.3；LAYER_CONTRACTS §3 | `RETRY_WAIT_CYC`（323 拍）属 DLL（§4.7.3.3）。`formal/dll` `c_timeout_322/323`；不在 nw_tp | elapsed=322/323 | `timed_out` | cp_dll_retry_323 | M1 | 计划 |
+| TP-UNIT-TP-017 | SPEC §4.1、§6.1；LAYER_CONTRACTS §3 | `PROBE_WAIT_CYC`（323 拍）属 LMSM（§3.4.3.2）。`formal/dll` `c_probe_322/323`；不在 nw_tp | elapsed=322/323 | 同 323 | cp_lmsm_probe_323 | M1 | 计划 |
 | TP-UNIT-TP-018 | MODULE_INVENTORY `ub_tp` / `ub_tp_bypass` | 优先通路：至少一种模式 + bypass；LS 先走 bypass | 叶 TB | bypass 使能 | cp_tp_leaf_byp | M1 | RTL未就绪 |
 | TP-UNIT-TP-019 | MODULE_INVENTORY `ub_tp_retry`；UB-TP §6.4.2 | 重传窗 SRAM `ub_cmn_mem_1r1w`，`ASSERT_NO_UNINIT_READ=1`；GBN vs SR **待 Xia** | 未初始化读 | 无 X | cp_tp_retry_mem | 后续 | RTL未就绪 |
 | TP-UNIT-TP-020 | MODULE_INVENTORY `ub_tp_rtp`；UB-TP §6.4 / §6.5.1.4 | 重排窗 SRAM 同上 | 乱序递交 | 无 X | cp_tp_reord_mem | 后续 | RTL未就绪 |
@@ -901,7 +901,7 @@ FEC / BCRC 错由 D3 PMA 模型改符号，无对应钩子。
 | UB-TA §7.4.2 / §7.4.2.3 | Read/Write；atomic 第二波 | TP-UNIT-TA-012、016 |
 | UB-TA §7.4.3–5 | 消息 / 维护 / 管理 | TP-UNIT-TA-017 |
 | SPEC §3.1 | valid/ready 同拍、保持 | TP-UNIT-TP-002；TP-UNIT-TA-009 |
-| SPEC §4.1 / §6.1 / §6.3 | `F_CORE`；DLL RETRY / LMSM Probe wait 323 | TP-UNIT-TP-016–017（DLL/LMSM 所有） |
+| SPEC §4.1 / §6.1 / §6.3；LAYER_CONTRACTS §3 | `RETRY_WAIT_CYC` 属 DLL；`PROBE_WAIT_CYC` 属 LMSM；323 拍 | TP-UNIT-TP-016–017（不在 nw_tp） |
 | UB-TP §6.4.2.1 | TP RTO 与 ACK 合并 | TP-UNIT-TP-014–015 |
 | LAYER_CONTRACTS §2 | NW↔TP 口、bypass、err 对齐 | TP-UNIT-TP-001–012；TP-SUB-TPTA-001/002/006 |
 | LAYER_CONTRACTS §3 | TP↔TA 口、done/fail、flush | TP-UNIT-TA-001–011；TP-SUB-TPTA-003/004/007 |

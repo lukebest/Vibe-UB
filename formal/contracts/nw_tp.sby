@@ -1,7 +1,8 @@
 # NW↔TP contract asserts. Default tasks have no assume
 # (GATE-PRIVATE-PARENT-FREE). BMC depth ≥ deepest cover + 6
 # (GATE-FORMAL-DEPTH §5 rule 3). Measured deepest cover 14
-# (c_ack_coal / c_psn_wrap). timeout_322/323 are in formal/dll.
+# (c_ack_coal / c_psn_wrap). timeout_322/323 are in formal/dll
+# (LAYER_CONTRACTS §3: RETRY_WAIT_CYC / PROBE_WAIT_CYC).
 [tasks]
 cover
 bmc

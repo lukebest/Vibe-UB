@@ -1,8 +1,8 @@
 """DLL RETRY_WAIT / LMSM PROBE_WAIT 322/323. Not TP-owned.
 
-LAYER_CONTRACTS §3: TP timers are RTO and ACK coalescing only.
-RETRY_WAIT is DLL (SPEC §6.3 / UB-DL §4.7.3.3).
-PROBE_WAIT is LMSM (SPEC §6.1 / UB-PHY §3.4.3.2).
+LAYER_CONTRACTS §3: RETRY_WAIT_CYC (323-cycle) is DLL (§4.7.3.3);
+PROBE_WAIT_CYC is LMSM (§3.4.3.2). TP uses RTO and ACK-coalescing
+timers only (§6.4.2.1).
 """
 
 from __future__ import annotations

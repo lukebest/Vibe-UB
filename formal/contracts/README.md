@@ -14,8 +14,9 @@ shared file of those tasks.
 
 `GATE-FORMAL-DEPTH` §5 rule 3: BMC depth ≥ deepest reachable cover step + 6.
 
-322/323 RETRY/PROBE covers live in `formal/dll/` (DLL / LMSM owned).
-TP `nw_tp` keeps only `c_rto` and `c_ack_coal`.
+322/323 `RETRY_WAIT_CYC` / `PROBE_WAIT_CYC` covers live in `formal/dll/`
+(LAYER_CONTRACTS §3: DLL §4.7.3.3 / LMSM §3.4.3.2).
+TP `nw_tp` keeps only `c_rto` and `c_ack_coal` (§6.4.2.1).
 
 Measured (`sby` + Yosys 0.33 / z3; harness-driven, no assume):
 

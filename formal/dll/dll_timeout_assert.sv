@@ -1,6 +1,6 @@
-// DLL RETRY_WAIT + LMSM PROBE_WAIT 322/323 covers (SPEC §4.1 / §6.1 / §6.3).
-// Moved out of formal/contracts/nw_tp (LAYER_CONTRACTS §3: those timers
-// are not TP). TP formal keeps only RTO / ACK-coalesce covers.
+// DLL RETRY_WAIT_CYC + LMSM PROBE_WAIT_CYC 322/323 covers
+// (LAYER_CONTRACTS §3; SPEC §4.1 / §6.1 / §6.3). Not TP.
+// TP formal keeps only RTO / ACK-coalesce covers (§6.4.2.1).
 // Immediate asserts for Yosys 0.33. No assume.
 `default_nettype none
 

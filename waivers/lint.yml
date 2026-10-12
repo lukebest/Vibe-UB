@@ -1,0 +1,6 @@
+# Approved lint waivers only. Scripts ignore entries without a gatekeeper
+# approver. Do not self-approve. Drafts go in waivers/pending/.
+#
+# Fields: id, check, module, file, rule, message, reason, approver,
+#         approved_date, review_when (expiry or revisit condition)
+waivers: []

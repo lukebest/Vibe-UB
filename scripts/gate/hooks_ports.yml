@@ -1,0 +1,157 @@
+# Allowed extra HOOKS ports vs PRODUCT (Xia ruling, SPEC §11 (f)).
+# Same approval rules as waivers/: only a verification gatekeeper
+# in approver is loaded. Empty / TODO / non-gatekeeper → ignored.
+#
+# Module not listed: HOOKS ports must equal PRODUCT (no tb_test_mode).
+# Module listed: HOOKS ports = PRODUCT ports + extra_ports (must include
+# tb_test_mode and the SPEC §10 tb_* for that module).
+#
+# Xia backdoor naming (HOOKS only, gated by tb_test_mode):
+#   tb_<inst>_bd_*        storage / array backdoor
+#   tb_<inst>_bd_vld_*    valid-preload companion for that backdoor
+# Both classes must be listed here (SPEC §10). Any other tb_* is blocked.
+# PRODUCT netlists must not carry tb_* ports.
+# eqy ties tb_test_mode / tb_inj_* / tb_<inst>_bd_* / tb_<inst>_bd_vld_* low.
+#
+# CODEOWNERS: /scripts/gate/ is gatekeeper-owned. Do not self-approve drafts.
+
+entries:
+  - id: HOOKS-UB-LMSM
+    module: ub_lmsm
+    extra_ports:
+      - tb_test_mode
+      - tb_inj_am_lock
+      - tb_inj_lid_bad
+      - tb_obs_link_ready
+      - tb_obs_link_up
+      - tb_obs_lmsm_st
+    reason: SPEC §10.2 / §11 (f) — LMSM named test hooks
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 hook list for ub_lmsm changes
+
+  - id: HOOKS-UB-DLL-CREDIT
+    module: ub_dll_credit
+    extra_ports:
+      - tb_test_mode
+      - tb_inj_crd_cells
+      - tb_obs_crd_cells
+      - tb_obs_crd_pend
+      - tb_obs_crd_low
+      - tb_obs_crd_bp
+      - tb_obs_crd_to
+    reason: SPEC §10.2 / §11 (f) — credit named test hooks
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 hook list for ub_dll_credit changes
+
+  - id: HOOKS-UB-DLL
+    module: ub_dll
+    extra_ports:
+      - tb_test_mode
+      - tb_obs_dll_sm_st
+      - tb_obs_consume_flits
+    reason: SPEC §10.2 / §11 (f) — DLL named test hooks
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 hook list for ub_dll changes
+
+  - id: HOOKS-UB-CONTROLLER
+    module: ub_controller
+    extra_ports:
+      - tb_test_mode
+      - tb_inj_am_lock
+      - tb_inj_lid_bad
+      - tb_inj_crd_cells
+      - tb_obs_link_ready
+      - tb_obs_link_up
+      - tb_obs_lmsm_st
+      - tb_obs_crd_cells
+      - tb_obs_crd_pend
+      - tb_obs_crd_low
+      - tb_obs_crd_bp
+      - tb_obs_crd_to
+      - tb_obs_dll_sm_st
+      - tb_obs_consume_flits
+    reason: SPEC §10.2 / §11 (f) — top-level hook ports
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 top-level hook list changes
+
+  # CSR TEST window (SPEC §3.2.3 / §10 / §11). Names from #11 bfcd0b0
+  # hooks_ports.yml / HOOKS netlist — extra is only tb_test_mode.
+  # Variant module names are listed because hooks_extra_for rsplit-once
+  # cannot reduce ub_csr_product_x4_vl2 → ub_csr.
+  - id: HOOKS-UB-CSR
+    module: ub_csr
+    extra_ports:
+      - tb_test_mode
+    reason: SPEC §3.2.3 / §10 / §11 — TEST window gated by tb_test_mode
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 TEST window hook list for ub_csr changes
+
+  - id: HOOKS-UB-CSR-PRODUCT-X4-VL2
+    module: ub_csr_product_x4_vl2
+    extra_ports:
+      - tb_test_mode
+    reason: SPEC §3.2.3 / §10 / §11 — TEST window gated by tb_test_mode
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 TEST window hook list for ub_csr changes
+
+  - id: HOOKS-UB-CSR-PRODUCT-X8-VL2
+    module: ub_csr_product_x8_vl2
+    extra_ports:
+      - tb_test_mode
+    reason: SPEC §3.2.3 / §10 / §11 — TEST window gated by tb_test_mode
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 TEST window hook list for ub_csr changes
+
+  # SPEC §10 (main) + #27 19e9f292 HOOKS netlist: observe + way-0..3
+  # backdoors. Valid preload is tb_<inst>_bd_vld_we / bd_vld_wdata
+  # (not bd_vld_n). tb_<inst>_obs_* are read-only outputs.
+  - id: HOOKS-UB-MEM-TLB
+    module: ub_mem_tlb
+    extra_ports:
+      - tb_test_mode
+      - tb_mem_tlb_obs_lkup_v
+      - tb_mem_tlb_obs_hit
+      - tb_mem_tlb_obs_vld
+      - tb_mem_tlb_obs_tag_w0
+      - tb_mem_tlb_obs_tag_w1
+      - tb_mem_tlb_obs_tag_w2
+      - tb_mem_tlb_obs_tag_w3
+      - tb_mem_tlb_w0_bd_we
+      - tb_mem_tlb_w0_bd_addr
+      - tb_mem_tlb_w0_bd_wdata
+      - tb_mem_tlb_w0_bd_re
+      - tb_mem_tlb_w0_bd_rdata
+      - tb_mem_tlb_w0_bd_vld_we
+      - tb_mem_tlb_w0_bd_vld_wdata
+      - tb_mem_tlb_w1_bd_we
+      - tb_mem_tlb_w1_bd_addr
+      - tb_mem_tlb_w1_bd_wdata
+      - tb_mem_tlb_w1_bd_re
+      - tb_mem_tlb_w1_bd_rdata
+      - tb_mem_tlb_w1_bd_vld_we
+      - tb_mem_tlb_w1_bd_vld_wdata
+      - tb_mem_tlb_w2_bd_we
+      - tb_mem_tlb_w2_bd_addr
+      - tb_mem_tlb_w2_bd_wdata
+      - tb_mem_tlb_w2_bd_re
+      - tb_mem_tlb_w2_bd_rdata
+      - tb_mem_tlb_w2_bd_vld_we
+      - tb_mem_tlb_w2_bd_vld_wdata
+      - tb_mem_tlb_w3_bd_we
+      - tb_mem_tlb_w3_bd_addr
+      - tb_mem_tlb_w3_bd_wdata
+      - tb_mem_tlb_w3_bd_re
+      - tb_mem_tlb_w3_bd_rdata
+      - tb_mem_tlb_w3_bd_vld_we
+      - tb_mem_tlb_w3_bd_vld_wdata
+    reason: SPEC §10 / §10.5 — ub_mem_tlb observe + mem_tlb_w0..w3 backdoors
+    approver: lukebest
+    approved_date: 2026-10-10
+    review_when: SPEC §10 ub_mem_tlb hook list changes

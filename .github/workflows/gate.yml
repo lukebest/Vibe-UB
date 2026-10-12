@@ -28,10 +28,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install Yosys + gate Python
+      - name: Install Yosys + Verilator + gate Python
         run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys verilator
           pip install -r scripts/gate/requirements.txt
       - name: gate self-tests (deliberate-fail fixtures)
         run: scripts/gate/selftest.sh
@@ -168,12 +168,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install Yosys / sby (best effort)
+      - name: Install Yosys + z3 + SymbiYosys
         run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys || true
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y sby || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y yosys z3
           pip install -r scripts/gate/requirements.txt
+          scripts/gate/setup_sby.sh
+          echo "$GITHUB_WORKSPACE/.sby-src" >> "$GITHUB_PATH"
       - name: formal
         run: scripts/gate/formal.sh
 
@@ -196,10 +197,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install Icarus + TB Python
+      - name: Install Icarus + Verilator + TB Python
         run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iverilog
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iverilog verilator
           pip install -r scripts/gate/requirements.txt
           pip install -r tb/requirements.txt
       - name: tb-selfcheck

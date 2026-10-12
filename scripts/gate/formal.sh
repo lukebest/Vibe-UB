@@ -9,7 +9,8 @@ source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
 python3 -P "$GATE_DIR/formal_bind.py"
 
-mapfile -t SBY_FILES < <(find "$REPO_ROOT/formal" -type f -name '*.sby' 2>/dev/null | sort || true)
+# Only formal/<iface>/*.sby (GATE-FOR-002). Do not recurse into sby workdirs.
+mapfile -t SBY_FILES < <(find "$REPO_ROOT/formal" -mindepth 2 -maxdepth 2 -type f -name '*.sby' 2>/dev/null | sort || true)
 
 if [[ ${#SBY_FILES[@]} -eq 0 ]]; then
   echo "no assertions yet"
@@ -25,8 +26,12 @@ fi
 
 fail=0
 for sby in "${SBY_FILES[@]}"; do
-  echo "=== sby -f ${sby#"$REPO_ROOT/"} ==="
-  if ! sby -f "$sby"; then
+  sby_dir=$(dirname "$sby")
+  sby_base=$(basename "$sby")
+  rel_sby=${sby#"$REPO_ROOT/"}
+  echo "=== sby -f ${rel_sby} (cwd ${sby_dir#"$REPO_ROOT/"}) ==="
+  # [files] tokens are sibling-relative, same as `make -C formal` (`cd iface && sby`).
+  if ! (cd "$sby_dir" && sby -f --sequential "$sby_base"); then
     echo "formal FAIL: $sby"
     fail=1
   fi

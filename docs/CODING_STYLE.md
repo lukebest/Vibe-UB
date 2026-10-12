@@ -56,7 +56,7 @@
   5. **例外（叶子只读观察）：** SPEC §10 **按叶子登记**的 `tb_<inst>_obs_*`。仅 HOOKS；只出不进；**不受** `tb_test_mode` 门控；不回灌功能。等价检查只比 PRODUCT 已有端口，观察口不参加。PRODUCT 与 quick-synth 不受影响。禁止用 keep 类属性钉内部名。未在 §10 登记的 `tb_*` 门禁拒绝。
 - 禁止 force / deposit FSM 当前态或非法态。默认分支用 **具名 waiver** 覆盖（见 §7）。到达 `Link_Active` 必须走真实转移，用 `LMSM_TMR_SCALE` 缩短超时。
 - 叶子内部（CRC / FEC / deskew / 缓冲）走叶子端口或 wrapper 共仿真，不加产品钩子。**除此例外外，不得**再给叶子内部缓冲加钩子。
-- PCS RX unpack `n==0 && have`：**待定**（验证确认端口可达性，否则删分支或 waiver）。
+- PCS RX unpack `n==0 && have`：实现后回填（验证确认端口可达性后保留、删除或 waiver；SPEC §13 A-16）。
 
 ---
 

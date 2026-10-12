@@ -22,8 +22,8 @@
 // event with evt_code == EVT_MATT_WD_MISS. evt_ready may stall; "exactly
 // one" counts accepted event handshakes, not cycles of evt_valid.
 //
-// Decoder: after hierarchy the .sby deletes the inlined stub and
-// splices ub_mem_ptw_desc_dec_cut.sv ($anyseq on every output). These
+// Decoder: after hierarchy the .sby reads cut/ub_mem_ptw_desc_dec.sv
+// ($anyseq on every output). These
 // properties do not read decode outputs; fill / block / page covers
 // are reachable only because those outputs are unconstrained.
 

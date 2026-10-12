@@ -6,7 +6,7 @@
 # Encoding values: SPEC §10 table (not yet on #50); interim values from
 # #48. Cite SPEC §10 in the localparam block.
 #
-# Decoder is only ub_mem_ptw_desc_dec_cut.sv (fully free $anyseq).
+# Decoder is only cut/ub_mem_ptw_desc_dec.sv (fully free $anyseq).
 # Never the PRODUCT stub. After #48 52dfc26 the walker file defines
 # only ub_mem_ptw — no leftover $abstract stub, no delete needed.
 # #48 98818fc catch-all: desc_v=1 with kind not table/block/page →
@@ -47,7 +47,7 @@ read -formal ub_mem_ptw.v
 read -formal ub_mem_ptw_if_props.sv
 read -formal ub_mem_ptw_hooks_inv.sv
 read -formal ub_mem_ptw_hooks_harness.sv
-read -formal ub_mem_ptw_desc_dec_cut.sv
+read -formal ub_mem_ptw_desc_dec.sv
 hierarchy -check -top ub_mem_ptw_hooks_harness
 proc
 flatten
@@ -71,6 +71,6 @@ opt -purge
 ub_mem_ptw_if_props.sv
 ub_mem_ptw_hooks_inv.sv
 ub_mem_ptw_hooks_harness.sv
-ub_mem_ptw_desc_dec_cut.sv
+cut/ub_mem_ptw_desc_dec.sv
 ../../rtl/pyc_lib/pyc_reg.v
 ../../rtl/mem/hooks/ub_mem_ptw.v

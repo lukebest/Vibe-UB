@@ -2,7 +2,7 @@
 # Stacked on PR #48. Bind / harness uses PRODUCT netlist ports only
 # (rtl/mem/ub_mem_ptw.v). No internals, no tb_* observation ports.
 #
-# ub_mem_ptw_desc_dec is supplied only by ub_mem_ptw_desc_dec_cut.sv
+# ub_mem_ptw_desc_dec is supplied only by cut/ub_mem_ptw_desc_dec.sv
 # ($anyseq on every output). Never the PRODUCT stub. After #48
 # 52dfc26 the walker file defines only ub_mem_ptw, so there is no
 # leftover $abstract stub AST and no delete is needed. The cut is
@@ -58,8 +58,9 @@ read -formal ub_mem_ptw_if_props.sv
 read -formal ub_mem_ptw_harness.sv
 # Only definition of ub_mem_ptw_desc_dec is the cut. Walker file
 # instantiates it but does not define it (#48 52dfc26). Read the
-# cut, then hierarchy once. Do not blackbox (sby prep flatten errors).
-read -formal ub_mem_ptw_desc_dec_cut.sv
+# cut (sby copies [files] by basename), then hierarchy once.
+# Do not blackbox (sby prep flatten errors).
+read -formal ub_mem_ptw_desc_dec.sv
 hierarchy -check -top ub_mem_ptw_harness
 proc
 flatten
@@ -70,6 +71,6 @@ opt -purge
 [files]
 ub_mem_ptw_if_props.sv
 ub_mem_ptw_harness.sv
-ub_mem_ptw_desc_dec_cut.sv
+cut/ub_mem_ptw_desc_dec.sv
 ../../rtl/pyc_lib/pyc_reg.v
 ../../rtl/mem/ub_mem_ptw.v

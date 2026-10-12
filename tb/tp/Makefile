@@ -1,6 +1,5 @@
-# Dual-netlist scoreboard for ub_tp_bypass (SPEC §11, LAYER_CONTRACTS §2 / §3).
+# Dual-netlist port self-check for ub_tp_bypass (SPEC §11).
 #   make selfcheck-both SIM=icarus
-#   make selfcheck SIM=verilator TEST_HOOKS=0
 
 REPO_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../..)
 TB_ROOT   := $(REPO_ROOT)/tb
@@ -27,8 +26,6 @@ export COCOTB_REDUCED_LOG_FMT ?= 1
 export COCOTB_HDL_TIMEUNIT ?= 1ns
 export COCOTB_HDL_TIMEPRECISION ?= 1ps
 export TP_SEED ?= 1
-export TP_CASE ?= all
-export TP_NETLIST ?= $(if $(filter 1,$(TEST_HOOKS)),hooks,product)
 
 ifeq ($(SIM),verilator)
 EXTRA_ARGS += --timescale 1ns/1ps -Wno-fatal -I$(REPO_ROOT)/rtl/pyc_lib

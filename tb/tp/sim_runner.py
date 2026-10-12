@@ -11,7 +11,7 @@ from tb.tp.ports import HOOKS, LEAF, PRODUCT, check_ports
 
 TB_TP = Path(__file__).resolve().parent
 REPO_ROOT = TB_TP.parents[1]
-SIM_MODULE = "tb.tp.sim_cocotb"
+SIM_MODULE = "tb.tp.sim_scoreboard_cocotb"
 _LAYER_PYC_MARKERS = ("/rtl/tp/pyc_", "/rtl/tp/hooks/pyc_")
 
 

@@ -40,7 +40,15 @@ def _parse_eval_hex(line: str) -> int:
 
 def yosys_batch_eval(read_cmd: str, top: str, jobs: list[tuple[str, str]]) -> list[dict[str, int]]:
     """jobs: list of (eval_args, show_names space-separated). One Yosys process."""
-    parts = [read_cmd, f"hierarchy -check -top {top}", "proc; flatten; opt_expr; opt_clean", f"cd {top}"]
+    from equiv_blackbox import ys_blackbox_cmds
+
+    parts = [
+        read_cmd,
+        f"hierarchy -check -top {top}",
+        *ys_blackbox_cmds(),
+        "proc; flatten; opt_expr; opt_clean",
+        f"cd {top}",
+    ]
     for args, _shows in jobs:
         parts.append(f"eval {args}")
     script = "\n".join(parts)

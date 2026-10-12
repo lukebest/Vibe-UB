@@ -101,6 +101,13 @@ jobs:
           pip install -r scripts/gate/requirements.txt
       - name: equiv (Yosys equiv_*; eqy if present)
         run: scripts/gate/equiv.sh
+      - name: Upload equiv status for formal inherit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: equiv-status
+          path: scripts/gate/out/equiv_status.json
+          if-no-files-found: ignore
 
   pycircuit-provenance:
     runs-on: ubuntu-24.04
@@ -182,12 +189,20 @@ jobs:
         run: scripts/gate/cdc_rdc.sh
 
   formal:
+    needs: [equiv]
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Download equiv status
+        uses: actions/download-artifact@v4
+        with:
+          name: equiv-status
+          path: scripts/gate/out
+        continue-on-error: true
       - name: Install Yosys + z3 + SymbiYosys
         run: |
           sudo apt-get update

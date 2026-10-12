@@ -13,7 +13,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cdc_rdc import analyze_module
 from formal_bind import check_formal_binds, discover_sby_files, sby_run_cwd
-from formal_depth import check_formal_depth, parse_sby_bmc_depth
+from formal_depth import (
+    INHERIT_STATUS,
+    check_formal_depth,
+    check_formal_inherit,
+    parse_sby_bmc_depth,
+    sby_inherits_hooks_prove,
+)
 from formal_parent_free import check_formal_parent_free
 from gatelib import (
     Finding,
@@ -628,6 +634,169 @@ def test_formal_bmc_vs_cover_depth() -> None:
         if any(f.rule == "FORMAL_BMC_SHALLOW" for f in hits):
             _fail("formal-bmc-ok", "depth 20 covers step 8 + 6")
         print("SELFTEST PASS formal-bmc-ok: bmc >= cover + 6")
+
+
+INHERIT_SBY = """\
+[tasks]
+prove
+product_prove
+[options]
+prove: mode prove
+product_prove: mode prove
+depth 20
+"""
+
+
+def test_formal_inherit_equiv() -> None:
+    if not sby_inherits_hooks_prove(INHERIT_SBY):
+        _fail("formal-inherit-parse", "default prove + product_prove must inherit")
+    if sby_inherits_hooks_prove("[tasks]\nprove\nbmc\n[options]\nprove: mode prove\n"):
+        _fail("formal-inherit-parse", "prove-only must not inherit")
+    print("SELFTEST PASS formal-inherit-parse: product_prove is the inherit pattern")
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        sby = repo / "formal" / "mem" / "ub_mem_parent.sby"
+        sby.parent.mkdir(parents=True)
+        sby.write_text(INHERIT_SBY, encoding="utf-8")
+        pos = check_formal_inherit(
+            repo,
+            {
+                "ub_mem_parent": {
+                    "status": "PASS",
+                    "outputs": ["q"],
+                    "blackboxes": [],
+                }
+            },
+        )
+        if any(f.rule == "FORMAL_INHERIT_NO_EQUIV" for f in pos):
+            _fail("formal-inherit-ok", "PASS equiv must allow inherit")
+        print(f"SELFTEST PASS formal-inherit-ok: {INHERIT_STATUS}")
+        for bad in (None, {"status": "SKIP"}, {"status": "PRIVATE_SKIP"}, {"status": "FAIL"}):
+            status = {} if bad is None else {"ub_mem_parent": bad}
+            hit = _expect_rule(
+                f"formal-inherit-{bad and bad.get('status') or 'missing'}",
+                check_formal_inherit(repo, status),
+                "FORMAL_INHERIT_NO_EQUIV",
+            )
+            if hit.bucket != "report":
+                _fail("formal-inherit-neg", "rule 4 must stay report-only")
+        boxed = check_formal_inherit(
+            repo,
+            {
+                "ub_mem_parent": {
+                    "status": "PASS",
+                    "outputs": ["q"],
+                    "blackboxes": [],
+                }
+            },
+        )
+        # no contracts/instances in the fixture → PASS still inherits
+        if any(f.rule == "FORMAL_INHERIT_NO_EQUIV" for f in boxed):
+            _fail("formal-inherit-nobox", "no private instances → no blackbox required")
+        (repo / "docs" / "arch" / "mem" / "contracts").mkdir(parents=True)
+        (repo / "docs" / "arch" / "mem" / "contracts" / "toy.md").write_text(
+            "---\nleaf: ub_mem_toy_dec\nports:\n  - {name: out, dir: out, width: 1}\n---\n",
+            encoding="utf-8",
+        )
+        parent = repo / "formal" / "mem" / "ub_mem_parent.v"
+        parent.write_text(
+            "module ub_mem_parent(input clk, output q);\n"
+            "  wire s;\n"
+            "  ub_mem_toy_dec u(.clk(clk), .out(s));\n"
+            "  assign q = s;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        sby.write_text(
+            INHERIT_SBY + "[files]\nub_mem_parent.v\n",
+            encoding="utf-8",
+        )
+        miss = _expect_rule(
+            "formal-inherit-need-blackbox",
+            check_formal_inherit(
+                repo,
+                {
+                    "ub_mem_parent": {
+                        "status": "PASS",
+                        "outputs": ["q"],
+                        "blackboxes": [],
+                    }
+                },
+            ),
+            "FORMAL_INHERIT_NO_EQUIV",
+        )
+        if "EQUIV_BLACKBOX" not in miss.message:
+            _fail("formal-inherit-need-blackbox", "message must name EQUIV_BLACKBOX")
+        ok = check_formal_inherit(
+            repo,
+            {
+                "ub_mem_parent": {
+                    "status": "PASS",
+                    "outputs": ["q"],
+                    "blackboxes": ["ub_mem_toy_dec"],
+                }
+            },
+        )
+        if any(f.rule == "FORMAL_INHERIT_NO_EQUIV" for f in ok):
+            _fail("formal-inherit-boxed", "PASS + EQUIV_BLACKBOX must inherit")
+        print("SELFTEST PASS formal-inherit-boxed: blackbox lines required")
+
+
+def test_equiv_private_blackbox_hides_const_stub() -> None:
+    """Flattening a const-0 stub hides a HOOKS/PRODUCT parent mismatch."""
+    if not shutil_which("yosys"):
+        _fail("equiv-blackbox", "yosys required")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        stub = root / "ub_mem_toy_dec.v"
+        product = root / "ub_mem_parent.v"
+        hooks = root / "ub_mem_parent_hooks.v"
+        stub.write_text(
+            "module ub_mem_toy_dec(input clk, output out);\n"
+            "  assign out = 1'b0;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        product.write_text(
+            "module ub_mem_parent(input clk, output q);\n"
+            "  wire s;\n"
+            "  ub_mem_toy_dec u_leaf(.clk(clk), .out(s));\n"
+            "  assign q = s;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        hooks.write_text(
+            "module ub_mem_parent(input clk, output q);\n"
+            "  wire s;\n"
+            "  ub_mem_toy_dec u_leaf(.clk(clk), .out(s));\n"
+            "  assign q = 1'b0;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        flat = run_equiv(
+            "ub_mem_parent",
+            product,
+            hooks,
+            None,
+            extra_rtl=[stub],
+            blackboxes=[],
+        )
+        if flat is not None and flat.rule == "EQUIV_FAIL":
+            _fail("equiv-flatten-hides", "flattened const stub must hide the parent mismatch")
+        boxed = run_equiv(
+            "ub_mem_parent",
+            product,
+            hooks,
+            None,
+            extra_rtl=[stub],
+            blackboxes=["ub_mem_toy_dec"],
+        )
+        if boxed is None or boxed.rule != "EQUIV_FAIL":
+            _fail(
+                "equiv-blackbox-shows",
+                "blackboxed stub outputs must be free; mismatch must FAIL",
+            )
+        print("SELFTEST PASS equiv-blackbox-shows: const stub no longer hides parent diff")
 
 
 def _parent_free_tree(root: Path, *, assume_default: bool, assume_diag: bool) -> Path:
@@ -1598,6 +1767,8 @@ def main() -> int:
         test_setup_sby_refuses_missing_z3_note,
         test_sby_relative_and_missing,
         test_formal_bmc_vs_cover_depth,
+        test_formal_inherit_equiv,
+        test_equiv_private_blackbox_hides_const_stub,
         test_formal_parent_free,
         test_tb_selfcheck_sh_drops_pycircuit_venv,
         test_tb_requires_verilator,

@@ -893,6 +893,19 @@ def test_equiv_ref_regpair() -> None:
             _fail("equiv-ref-regpair-shuffle", (shuf.stdout or "")[-400:])
     print("SELFTEST PASS equiv-ref-regpair-shuffle: shuffled port order")
 
+    matrix = root / "formal" / "dll" / "positive" / "bcrc_matrix_equiv.sv"
+    if not matrix.is_file():
+        _fail("equiv-ref-regpair-matrix", f"missing {matrix}")
+    mtx = run_cmd([str(script), "ub_dll_bcrc", str(matrix)], env=env, timeout=120)
+    mtx_out = mtx.stdout or ""
+    if mtx.returncode != 0 or "equiv_ref PASS" not in mtx_out:
+        _fail("equiv-ref-regpair-matrix", mtx_out[-600:])
+    if "SCRIPT_ERROR" in mtx_out:
+        _fail("equiv-ref-regpair-matrix", "structurally-different equivalent pair must not hit SCRIPT_ERROR")
+    if "write_aiger -miter" in mtx_out or re.search(r"aiger .*gold_po=0", mtx_out):
+        _fail("equiv-ref-regpair-matrix", "combo CEC must not emit a property AIGER")
+    print("SELFTEST PASS equiv-ref-regpair-matrix: structurally different, same formula")
+
     omit_env = {**env, "EQUIV_REGPAIR_OMIT_PO": "rp_d_crc", "EQUIV_REGPAIR_OMIT_SIDE": "gold"}
     omit = run_cmd([str(script), "ub_dll_bcrc", str(gold)], env=omit_env, timeout=90)
     omit_out = omit.stdout or ""
@@ -954,10 +967,16 @@ def test_equiv_ref_regpair() -> None:
             print(f"SELFTEST PASS equiv-ref-regpair-{name}: reset=FAIL")
             continue
         if name == "flip":
+            if "SCRIPT_ERROR" in out and "cex_ok=1" not in out:
+                _fail(f"equiv-ref-regpair-{name}", "NOT EQ without replayable CEX is a script error")
+            if not re.search(r"cex_ok=1|REPLAY FIRST_DIFF|was asserted in frame", out):
+                _fail(f"equiv-ref-regpair-{name}", f"NOT EQ must carry a replayable CEX: {out[-500:]}")
             _require_bmc_icarus(name, net, out)
             continue
+        if "SCRIPT_ERROR" in out and "cex_ok=1" not in out and "reset=FAIL" not in out:
+            _fail(f"equiv-ref-regpair-{name}", "NOT EQ without replayable CEX is a script error")
         if not re.search(
-            r"NOT EQUIVALENT|Assert failed|SAT proof finished - model found|proof did fail|was asserted in frame",
+            r"NOT EQUIVALENT|Assert failed|SAT proof finished - model found|proof did fail|was asserted in frame|cex_ok=1",
             out,
             re.I,
         ):
@@ -968,8 +987,12 @@ def test_equiv_ref_regpair() -> None:
     carry_out = bad_carry.stdout or ""
     if bad_carry.returncode == 0:
         _fail("equiv-ref-regpair-carry", "carry-after-last fake must fail")
+    if "SCRIPT_ERROR" in carry_out and "cex_ok=1" not in carry_out:
+        _fail("equiv-ref-regpair-carry", "NOT EQ without replayable CEX is a script error")
     if "INCONCLUSIVE(state-encoding)" not in carry_out:
         _fail("equiv-ref-regpair-carry", f"expected INCONCLUSIVE then seq: {carry_out[-400:]}")
+    if not re.search(r"cex_ok=1|was asserted in frame", carry_out):
+        _fail("equiv-ref-regpair-carry", "NOT EQ must carry a replayable CEX")
     _require_bmc_icarus("carry", carry, carry_out)
 
 

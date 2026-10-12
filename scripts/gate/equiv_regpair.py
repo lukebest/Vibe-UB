@@ -13,9 +13,11 @@ keys. Extra/missing/width: return code 4; caller treats that as
 regpair=NOTAPPLICABLE(set-mismatch) and switches to uncut output seq
 (PM: GATE-EQY-004). Strip clock (and async-reset used by the cut FFs)
 so both sides share one named interface; leftover original ports keep
-their names. Name-set mismatch is FAIL. Prove with a single Yosys
-`miter -equiv` (pairs by port name, not order) plus combo
-`sat -prove-asserts` or ABC on that miter. Reset kind / polarity / value
+their names. Name-set mismatch is FAIL. Combo prove writes each cut side as an
+ordinary AIGER (named PIs/POs, same name order, never `write_aiger
+-miter`) and hands both to ABC `&cec`. A property AIGER (0 PO / 1 bad)
+plus `&cec` is a script error. NOT EQ without a writable `write_cex`
+replay is a script error, not a verdict. Reset kind / polarity / value
 are checked separately (mismatch is FAIL). All must hold.
 """
 
@@ -392,18 +394,15 @@ def reset_port(mod: dict) -> tuple[str | None, int | None]:
 
 def parse_eval_values(text: str, names: list[str]) -> dict[str, int]:
     got: dict[str, int] = {}
+    # Longest name first so rp_d_crc does not steal rp_d_crc_word.
+    ordered = sorted(names, key=len, reverse=True)
     for line in text.splitlines():
         if "Eval result:" not in line:
             continue
-        for name in names:
+        for name in ordered:
             if name in got:
                 continue
-            if not (
-                f"\\{name}" in line
-                or f" {name} " in line
-                or line.endswith(name)
-                or f"{name} =" in line
-            ):
+            if not re.search(rf"(\\?{re.escape(name)})\s*=", line):
                 continue
             m = re.search(r"=\s*(\d+)'h([0-9a-fA-F]+)", line)
             if m:
@@ -585,15 +584,31 @@ def write_cut_script(
         if not ff.d_name:
             raise SystemExit(f"equiv_ref REGPAIR missing D net for key={key} q={ff.q_name}")
         q_pin = "Q" if ff.ftype in FF_TYPES else "q"
+        q_nets: list[str] = []
+        for nm in (ff.q_name, *ff.q_aliases):
+            if nm and nm not in q_nets:
+                q_nets.append(nm)
         lines += [
             f"add -input rp_q_{key} {ff.width}",
             f"add -output rp_d_{key} {ff.width}",
-            # Drive every reader of the FF Q from the cut PI (same net as cell Q).
-            f"connect -unset {yosys_id(ff.q_name)}",
-            f"connect -set {yosys_id(ff.q_name)} rp_q_{key}",
+        ]
+        # Drive every Q alias (pycc may keep crc_word and crc_word_2 on
+        # the same bits; write_verilog would otherwise split an undriven PI).
+        # Replace the FF Q driver, then assign every public alias onto
+        # rp_q_* (-nounset) so a leftover `crc` wire cannot stay undriven
+        # while crc_word's D still reads it.
+        if ff.q_name:
+            lines += [
+                f"connect -unset {yosys_id(ff.q_name)}",
+                f"connect -set {yosys_id(ff.q_name)} rp_q_{key}",
+            ]
+        for nm in q_nets:
+            lines.append(f"connect -nounset -set {yosys_id(nm)} rp_q_{key}")
+        lines += [
             # Export the cell D pin net, not a combo / output alias.
             f"connect -set rp_d_{key} {yosys_id(ff.d_name)}",
-            f"# cut cell={ff.cell} type={ff.ftype} q_pin={q_pin} q_net={ff.q_name} d_net={ff.d_name}",
+            f"# cut cell={ff.cell} type={ff.ftype} q_pin={q_pin} "
+            f"q_net={ff.q_name} d_net={ff.d_name} aliases={'|'.join(q_nets)}",
         ]
     lines += [
         f"delete {DELETE_SEL}",
@@ -714,128 +729,396 @@ def witnesses_from_sat_json(path: Path) -> list[str]:
     return names
 
 
-def find_sat_witness(tmp: Path, tmo: int, abc: str, po_names: list[str]) -> list[str]:
-    """Name-paired per-PO trigger miter + ABC: which POs / rp_d_* differ."""
-    found: list[str] = []
-    for po in po_names:
-        others = [n for n in po_names if n != po]
-        drop_g = "\n".join(f"delete -output {yosys_id(n)}" for n in others)
-        ys = tmp / f"wit_{po}.ys"
-        aig = tmp / f"wit_{po}.aig"
-        g1 = tmp / f"wit_{po}_gold.il"
-        t1 = tmp / f"wit_{po}_gate.il"
-        ys.write_text(
-            f"read_rtlil {tmp / 'gold_cut.il'}\n"
-            "hierarchy -top gold\n"
-            f"cd gold\n{drop_g}\n"
-            f"write_rtlil {g1}\n"
-            "design -reset\n"
-            f"read_rtlil {tmp / 'gate_cut.il'}\n"
-            "hierarchy -top gate\n"
-            f"cd gate\n{drop_g}\n"
-            f"write_rtlil {t1}\n"
-            "design -reset\n"
-            f"read_rtlil {g1}\n"
-            f"read_rtlil {t1}\n"
-            "miter -equiv -flatten -make_assert gold gate wit\n"
-            "hierarchy -top wit\n"
-            "delete t:$assert t:$assume t:$live t:$fair\n"
-            "techmap; opt; aigmap; opt\n"
-            f"write_aiger -symbols -miter {aig}\n",
-            encoding="utf-8",
-        )
-        built = run_yosys_file(ys, tmo)
-        if built.returncode != 0 or not aig.is_file():
-            print(built.stdout or "")
+def port_width(mod: dict, name: str) -> int:
+    bits = ((mod.get("ports") or {}).get(name) or {}).get("bits") or []
+    return len(bits) if bits else 1
+
+
+def _verilog_id(name: str) -> str:
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+        return name
+    return "\\" + name + " "
+
+
+def write_named_aig(
+    il: Path,
+    top: str,
+    aig: Path,
+    pis: list[str],
+    pos: list[str],
+    widths: dict[str, int],
+    tmp: Path,
+    tmo: int,
+) -> tuple[bool, str]:
+    """Ordinary combo AIGER. Architectural ports only, shared name order.
+
+    Never `write_aiger -miter`. Never dump the cut through `write_verilog`
+    (that splits Q aliases and promotes leftover wires to extra PIs so
+    `&cec` sees unequal CI counts). Instantiate the RTLIL cut from a
+    wrapper whose ports are the sorted name list.
+    """
+    keep = set(pis) | set(pos)
+    tag = re.sub(r"[^A-Za-z0-9_]", "_", aig.stem)
+    js = tmp / f"{top}_{tag}_ports.json"
+    cleaned = tmp / f"{top}_{tag}_clean.il"
+    wrap = tmp / f"{top}_{tag}_wrap.v"
+    dumped = run_yosys_p(
+        f"read_rtlil {il}\ncd {top}\nwrite_json {js}\n",
+        tmo,
+        quiet=True,
+    )
+    if dumped.returncode != 0 or not js.is_file():
+        return False, dumped.stdout or "write_json for AIGER ports failed"
+    try:
+        mod = json.loads(js.read_text(encoding="utf-8"))["modules"][top]
+    except (json.JSONDecodeError, KeyError) as exc:
+        return False, f"cut json: {exc}"
+    dels: list[str] = []
+    for name, info in (mod.get("ports") or {}).items():
+        if name in keep:
             continue
-        proc = run_abc(f"&r {aig}; &cec -m -v -T {min(tmo, 15) if tmo else 15}", tmo, abc)
-        log = proc.stdout or ""
-        kind = abc_kind(log)
-        print(f"equiv_ref REGPAIR po_cec name={po} result={kind} line={conclusion_line(log)}")
-        if kind != "equivalent":
-            found.append(po)
-    return found
+        direction = info.get("direction")
+        if direction == "output":
+            dels.append(f"delete -output {yosys_id(name)}")
+        else:
+            dels.append(f"delete -input {yosys_id(name)}")
+    wname = f"wrap_{top}_{tag}"
+    decl: list[str] = []
+    conns: list[str] = []
+    for name in pis:
+        w = max(int(widths.get(name, 1) or 1), 1)
+        vid = _verilog_id(name)
+        decl.append(f"  input wire [{w - 1}:0] {vid}" if w > 1 else f"  input wire {vid}")
+        conns.append(f"    .{vid}({vid})")
+    for name in pos:
+        w = max(int(widths.get(name, 1) or 1), 1)
+        vid = _verilog_id(name)
+        decl.append(f"  output wire [{w - 1}:0] {vid}" if w > 1 else f"  output wire {vid}")
+        conns.append(f"    .{vid}({vid})")
+    wrap.write_text(
+        f"module {wname} (\n" + ",\n".join(decl) + "\n);\n"
+        f"  {top} u (\n" + ",\n".join(conns) + "\n  );\nendmodule\n",
+        encoding="utf-8",
+    )
+    ys = (
+        f"read_rtlil {il}\n"
+        f"cd {top}\n"
+        + ("\n".join(dels) + "\n" if dels else "")
+        + "setundef -undriven -zero\n"
+        "opt_clean\n"
+        f"write_rtlil {cleaned}\n"
+        "design -reset\n"
+        f"read_rtlil {cleaned}\n"
+        f"read_verilog {wrap}\n"
+        f"hierarchy -check -top {wname}\n"
+        "proc; flatten; opt_expr; opt_clean\n"
+        "techmap; opt; aigmap; opt\n"
+        "setundef -undriven -zero\n"
+        "opt_clean\n"
+        # Binary AIGER. ABC `&r` reads ASCII `aag` as 0 ANDs and then
+        # `&cec` reports a false EQ. Never `-miter` (that is a property AIGER).
+        f"write_aiger {aig}\n"
+    )
+    built = run_yosys_p(ys, tmo, quiet=True)
+    if built.returncode != 0 or not aig.is_file():
+        return False, built.stdout or "write_aiger failed"
+    return True, ""
+
+
+def aiger_counts(path: Path) -> tuple[int, int, int]:
+    """Return (pi, latch, po) from an ASCII AIGER header."""
+    if not path.is_file():
+        return 0, 0, 0
+    head = path.read_text(encoding="utf-8", errors="replace").splitlines()[:1]
+    if not head:
+        return 0, 0, 0
+    parts = head[0].split()
+    if len(parts) >= 5 and parts[0] in {"aag", "aig"}:
+        return int(parts[2]), int(parts[3]), int(parts[4])
+    return 0, 0, 0
+
+
+def parse_named_cex(path: Path) -> dict[str, int]:
+    """Parse `write_cex -n` (`name@frame=bit` or `name[i]@frame=bit`)."""
+    if not path.is_file():
+        return {}
+    bits: dict[str, int] = {}
+    buses: dict[str, dict[int, int]] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        m = re.search(r"([A-Za-z0-9_./]+)(?:\[(\d+)\])?@(\d+)=([01])", line)
+        if not m:
+            continue
+        name, idx, _fr, bit = m.group(1), m.group(2), m.group(3), int(m.group(4))
+        if idx is None:
+            bits[name] = bit
+        else:
+            buses.setdefault(name, {})[int(idx)] = bit
+    out = dict(bits)
+    for name, idxmap in buses.items():
+        acc = 0
+        for i, b in idxmap.items():
+            acc |= (b & 1) << i
+        out[name] = acc
+    return out
+
+
+def parse_positional_cex(path: Path, pis: list[str], widths: dict[str, int]) -> dict[str, int]:
+    """Map a nameless ABC bit-string onto the wrapper PI order (LSB first)."""
+    if not path.is_file():
+        return {}
+    text = path.read_text(encoding="utf-8", errors="replace")
+    blob = ""
+    for line in text.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or s.startswith("."):
+            continue
+        bits = re.sub(r"[^01]", "", s)
+        if len(bits) > len(blob):
+            blob = bits
+    if not blob:
+        m = re.search(r"[01]{8,}", text)
+        blob = m.group(0) if m else ""
+    if not blob:
+        return {}
+    out: dict[str, int] = {}
+    cursor = 0
+    for name in pis:
+        w = max(int(widths.get(name, 1) or 1), 1)
+        chunk = blob[cursor:cursor + w]
+        if len(chunk) < w:
+            break
+        acc = 0
+        for i, ch in enumerate(chunk):
+            if ch == "1":
+                acc |= 1 << i
+        out[name] = acc
+        cursor += w
+    return out
+
+
+def parse_pi_pattern(log: str, pis: list[str], widths: dict[str, int]) -> dict[str, int]:
+    """Map `pi224=0 pi160=1 …` from ABC `cec` onto the wrapper PI order."""
+    bits: dict[int, int] = {}
+    for m in re.finditer(r"\bpi(\d+)=([01])", log):
+        bits[int(m.group(1))] = int(m.group(2))
+    if not bits:
+        return {}
+    out: dict[str, int] = {}
+    cursor = 0
+    for name in pis:
+        w = max(int(widths.get(name, 1) or 1), 1)
+        acc = 0
+        for i in range(w):
+            acc |= bits.get(cursor + i, 0) << i
+        out[name] = acc
+        cursor += w
+    return out
+
+
+def cex_model(
+    path: Path,
+    pis: list[str],
+    widths: dict[str, int],
+    log: str = "",
+) -> dict[str, int]:
+    named = parse_named_cex(path)
+    if named:
+        return named
+    pos = parse_positional_cex(path, pis, widths)
+    if pos:
+        return pos
+    return parse_pi_pattern(log, pis, widths)
+
+
+def explain_cex_on_ports(
+    tmp: Path,
+    assigns: dict[str, int],
+    pos: list[str],
+    widths: dict[str, int],
+) -> tuple[str | None, str]:
+    """Eval both cut sides; return (first differing PO, detail)."""
+    use = {k: v for k, v in assigns.items() if k}
+    gvals = eval_signals(tmp / "gold_cut.il", "gold", use, pos, widths)
+    tvals = eval_signals(tmp / "gate_cut.il", "gate", use, pos, widths)
+    for po in pos:
+        gv, tv = gvals.get(po), tvals.get(po)
+        if gv is None or tv is None:
+            continue
+        if gv != tv:
+            return po, f"port={po} gold=0x{gv:x} gate=0x{tv:x}"
+    return None, "eval found no differing PO"
+
+
+def cec_pair(
+    tmp: Path,
+    gold_il: Path,
+    gate_il: Path,
+    pis: list[str],
+    pos: list[str],
+    widths: dict[str, int],
+    abc: str,
+    tmo: int,
+    label: str,
+) -> tuple[str, str, str, dict[str, int]]:
+    """Two ordinary AIGERs, name-aligned, ABC &cec. Never write_aiger -miter."""
+    g_aig = tmp / f"{label}_gold.aig"
+    t_aig = tmp / f"{label}_gate.aig"
+    ok_g, err_g = write_named_aig(gold_il, "gold", g_aig, pis, pos, widths, tmp, tmo)
+    ok_t, err_t = write_named_aig(gate_il, "gate", t_aig, pis, pos, widths, tmp, tmo)
+    if not ok_g or not ok_t:
+        print(err_g + err_t)
+        return "unproven", "aiger-build", "named AIGER build failed", {}
+    g_pi, g_l, g_po = aiger_counts(g_aig)
+    t_pi, t_l, t_po = aiger_counts(t_aig)
+    exp_pi = sum(max(int(widths.get(n, 1) or 1), 1) for n in pis)
+    exp_po = sum(max(int(widths.get(n, 1) or 1), 1) for n in pos)
+    print(
+        f"equiv_ref REGPAIR aiger label={label} "
+        f"gold_pi={g_pi} gold_ff={g_l} gold_po={g_po} "
+        f"gate_pi={t_pi} gate_ff={t_l} gate_po={t_po} "
+        f"expect_pi={exp_pi} expect_po={exp_po} write_aiger=binary (no -ascii -miter)"
+    )
+    if g_l or t_l:
+        print(f"equiv_ref REGPAIR SCRIPT_ERROR aiger_has_latches label={label}")
+        return "script_error", "abc-&cec", "cut AIGER is not combinational", {}
+    if g_po == 0 or t_po == 0:
+        print(f"equiv_ref REGPAIR SCRIPT_ERROR aiger_zero_po label={label} (property AIGER, not combo CEC)")
+        return "script_error", "abc-&cec", "AIGER has 0 POs (write_aiger -miter shape)", {}
+    if g_pi != t_pi or g_po != t_po or g_pi != exp_pi or g_po != exp_po:
+        print(
+            f"equiv_ref REGPAIR SCRIPT_ERROR aiger_pi_po_mismatch label={label} "
+            f"gold={g_pi}/{g_po} gate={t_pi}/{t_po} expect={exp_pi}/{exp_po}"
+        )
+        return "script_error", "abc-&cec", "AIGER PI/PO not name-aligned", {}
+    cex = tmp / f"{label}.cex"
+    # -m means "current network is already a miter". Two named combo AIGERs
+    # must be loaded as a pair: &r gold; &cec gate. Never write_aiger -miter.
+    cmd = f"&r {g_aig}; &cec -v -T {tmo} {t_aig}"
+    print(f"equiv_ref REGPAIR abc_cmd={cmd}")
+    proc = run_abc(cmd, tmo + 5 if tmo > 0 else 0, abc)
+    log = proc.stdout or ""
+    print(log)
+    if not log.strip():
+        print(f"equiv_ref REGPAIR abc_empty rc={proc.returncode}")
+    kind = abc_kind(log)
+    # &cec on a large Gia can time out with no line. Regular `cec -n`
+    # matches CIs by order (wrapper order) and often finishes.
+    if kind == "unproven":
+        cmd2 = f"read {g_aig}; cec -n -v -T {tmo} {t_aig}"
+        print(f"equiv_ref REGPAIR abc_cmd={cmd2}")
+        proc2 = run_abc(cmd2, tmo + 5 if tmo > 0 else 0, abc)
+        log2 = proc2.stdout or ""
+        print(log2)
+        log = (log + "\n" + log2).strip()
+        kind = abc_kind(log2) if log2.strip() else kind
+    line = conclusion_line(log)
+    model: dict[str, int] = {}
+    if kind == "not_equivalent":
+        # &cec sim-disproof does not populate write_cex. Rebuild a miter
+        # and SAT-save the witness, then map bits onto the named PI order.
+        cex_cmd = f"&r {g_aig}; &miter {t_aig}; &sat -m -a; &put; write_cex {cex}"
+        print(f"equiv_ref REGPAIR abc_cex_cmd={cex_cmd}")
+        cproc = run_abc(cex_cmd, min(tmo, 20) + 5 if tmo > 0 else 0, abc)
+        clog = cproc.stdout or ""
+        print(clog)
+        model = cex_model(cex, pis, widths, log + "\n" + clog)
+    return kind, "abc-&cec", line, model
 
 
 def prove_miter(tmp: Path, tmo: int, abc: str, po_names: list[str]) -> tuple[str, str, str, list[str]]:
-    """Name-paired miter, then ABC / sat on that single miter. No order-cec."""
-    build = tmp / "miter_build.ys"
-    build.write_text(
-        f"read_rtlil {tmp / 'gold_cut.il'}\n"
-        f"read_rtlil {tmp / 'gate_cut.il'}\n"
-        "miter -equiv -flatten -make_assert gold gate miter\n"
-        "hierarchy -top miter\n"
-        f"write_rtlil {tmp / 'miter.il'}\n"
-        f"write_json {tmp / 'miter.json'}\n",
-        encoding="utf-8",
-    )
-    built = run_yosys_file(build, tmo)
-    if built.returncode != 0 or not (tmp / "miter.il").is_file():
-        print(built.stdout or "")
-        return "unproven", "miter-build", "miter build failed", []
-    # write_aiger -miter rejects $assert; keep them for sat, strip for ABC.
-    aig_ys = tmp / "miter_aig.ys"
-    aig_ys.write_text(
-        f"read_rtlil {tmp / 'miter.il'}\n"
-        "hierarchy -top miter\n"
-        "delete t:$assert t:$assume t:$live t:$fair\n"
-        "techmap; opt; aigmap; opt\n"
-        f"write_aiger -symbols -miter {tmp / 'miter.aig'}\n",
-        encoding="utf-8",
-    )
-    aig = run_yosys_file(aig_ys, tmo)
-    if aig.returncode != 0:
-        print(aig.stdout or "")
+    """Name-aligned combo CEC of the two cut nets. Option (a): not property AIGER."""
+    gold_mod = json.loads((tmp / "gold_cut.json").read_text(encoding="utf-8"))["modules"]["gold"]
+    gate_mod = json.loads((tmp / "gate_cut.json").read_text(encoding="utf-8"))["modules"]["gate"]
+    gold_pi, gold_po = port_sets(gold_mod)
+    _t_pi, _t_po = port_sets(gate_mod)
+    pis = sorted(gold_pi)
+    # Next-state only. Leftover leaf outputs (crc_word/done) are Q
+    # passthroughs after the cut; pycc may const-0 them and ABC then
+    # reports a trivial "PI vs. constant" NOT EQ that is not a D mismatch.
+    pos = sorted(n for n in gold_po if n in po_names and n.startswith("rp_d_"))
+    if not pos:
+        pos = sorted(n for n in gold_po if n in po_names)
+    widths = {n: port_width(gold_mod, n) for n in pis + pos}
+    for n in pis + pos:
+        widths.setdefault(n, port_width(gate_mod, n))
 
-    last_log = ""
-    last_used = "miter-build"
-    if (tmp / "miter.aig").is_file():
-        abc_cmds = [
-            ("abc-&cec", f"&r {tmp / 'miter.aig'}; &cec -m -v -T {tmo}"),
-            ("abc-iprove", f"read {tmp / 'miter.aig'}; iprove"),
-            ("abc-dprove", f"read {tmp / 'miter.aig'}; dprove"),
-        ]
-        for used, cmd in abc_cmds:
-            proc = run_abc(cmd, tmo, abc)
-            log = proc.stdout or ""
-            print(log)
-            last_log = log
-            last_used = used
-            kind = abc_kind(log)
-            if kind == "unproven" and re.search(r"SATISFIABLE", log, re.I):
-                kind = "not_equivalent"
-            if kind == "equivalent":
-                return kind, used, conclusion_line(log), []
-            if kind == "not_equivalent":
-                wit = witnesses_from_log(log, po_names) or find_sat_witness(tmp, tmo, abc, po_names)
-                return kind, used, conclusion_line(log), wit
-
-    sat_script = (
-        f"read_rtlil {tmp / 'miter.il'}\n"
-        "hierarchy -top miter\n"
-        f"sat -verify -prove-asserts -timeout {tmo} "
-        f"-dump_json {tmp / 'sat_cex.json'}\n"
+    kind, used, line, model = cec_pair(
+        tmp, tmp / "gold_cut.il", tmp / "gate_cut.il", pis, pos, widths, abc, tmo, "all"
     )
-    sat = run_yosys_p(sat_script, tmo + 5 if tmo > 0 else 0)
-    sat_log = sat.stdout or ""
-    print(sat_log)
-    kind = sat_kind(sat_log)
-    if sat.returncode == 124 or re.search(r"time ?out|timed out", sat_log, re.I):
-        kind = "unproven"
-    elif sat.returncode == 0 and kind == "unproven":
-        kind = "equivalent"
-    elif sat.returncode != 0 and kind == "unproven":
-        kind = "not_equivalent"
-    last_log = sat_log
-    last_used = "sat-prove-asserts"
+    rp_pos = [po for po in pos if po.startswith("rp_d_")]
     if kind == "equivalent":
-        return kind, last_used, conclusion_line(sat_log), []
-    if kind == "not_equivalent":
-        wit = witnesses_from_sat_json(tmp / "sat_cex.json") or find_sat_witness(tmp, tmo, abc, po_names)
-        if not wit:
-            wit = witnesses_from_log(sat_log, po_names)
-        return kind, last_used, conclusion_line(sat_log), wit
-    return "unproven", last_used, conclusion_line(last_log), witnesses_from_log(last_log, po_names)
+        # A subset of an equivalent PO set is equivalent. Do not rebuild a
+        # 1-PO AIGER (opt after deleting the other POs can fool &cec).
+        for po in rp_pos:
+            print(f"equiv_ref REGPAIR po_cec name={po} result=equivalent line={line}")
+        return kind, used, line, []
+    if kind == "script_error":
+        print("equiv_ref REGPAIR SCRIPT_ERROR not_eq_or_bad_aiger_without_combo_cec")
+        for po in rp_pos:
+            print(f"equiv_ref REGPAIR po_cec name={po} result=script_error line={line}")
+        return "script_error", used, line, []
+    if kind != "not_equivalent":
+        for po in rp_pos:
+            print(f"equiv_ref REGPAIR po_cec name={po} result={kind} line={line}")
+        return kind, used, line, []
+
+    # NOT EQ is only a verdict when write_cex produced a replayable model
+    # that differs on a named port. Otherwise it is a script error.
+    candidates: list[dict[str, int]] = []
+    if model:
+        candidates.append(model)
+    # Directed cut vectors. ABC write_cex PI order can miss; eval on
+    # named ports is the replay that counts.
+    zeros = {n: 0 for n in pis}
+    init = dict(zeros)
+    if "rp_q_crc" in init:
+        init["rp_q_crc"] = 0x3FFFFFFF
+    last_beat = dict(init)
+    last_beat.update({"valid_in": 1, "last": 1})
+    start_valid_last = dict(last_beat)
+    start_valid_last["start"] = 1
+    start_valid = dict(init)
+    start_valid.update({"start": 1, "valid_in": 1})
+    mid = dict(init)
+    mid.update({"valid_in": 1, "data_in": MIDBLOCK_DATA, "rp_q_crc": MIDBLOCK_CRC})
+    rst = dict(zeros)
+    if "rst_pyc" in rst:
+        rst["rst_pyc"] = 1
+    recv_last = dict(last_beat)
+    if "crc_recv" in recv_last:
+        recv_last["crc_recv"] = 0x155
+    if "rp_q_recv_q" in recv_last:
+        recv_last["rp_q_recv_q"] = 0x155
+    candidates += [rst, last_beat, start_valid_last, start_valid, mid, recv_last]
+    wit: list[str] = []
+    used_model: dict[str, int] | None = None
+    for cand in candidates:
+        use = {k: v for k, v in cand.items() if k in pis}
+        probe = rp_pos or pos
+        diff, detail = explain_cex_on_ports(tmp, use, probe, widths)
+        if diff is None:
+            continue
+        used_model = use
+        break
+    if used_model is None:
+        print("equiv_ref REGPAIR SCRIPT_ERROR not_eq_without_cex")
+        return "script_error", used, line, []
+    print(
+        "equiv_ref REGPAIR cex_inputs "
+        + " ".join(f"{k}=0x{v:x}" for k, v in sorted(used_model.items()) if k in pis)
+    )
+    for po in rp_pos or pos:
+        diff, detail = explain_cex_on_ports(tmp, used_model, [po], widths)
+        if diff is None:
+            print(f"equiv_ref REGPAIR po_cec name={po} result=equivalent line={line}")
+            continue
+        print(f"equiv_ref REGPAIR po_cec name={po} result=not_equivalent line={line}")
+        print(f"equiv_ref REGPAIR cex_ok=1 po={po} {detail}")
+        wit.append(po)
+    if not wit:
+        print("equiv_ref REGPAIR SCRIPT_ERROR cex_not_replayable eval found no differing PO")
+        return "script_error", used, line, []
+    return "not_equivalent", used, line, wit
 
 
 def main() -> int:
@@ -1054,6 +1337,41 @@ def main() -> int:
     )
     gcut = run_yosys_file(tmp / "cut_gold.ys", args.tmo)
     tcut = run_yosys_file(tmp / "cut_gate.ys", args.tmo)
+    if gcut.returncode == 0 and tcut.returncode == 0:
+        # Re-assign Q aliases after opt_clean; pycc often leaves a second
+        # `crc` wire whose bits are no longer rp_q_crc.
+        for side, pairs_side in (
+            ("gold", [(k, g) for k, g, _t in pairs]),
+            ("gate", [(k, t) for k, _g, t in pairs]),
+        ):
+            cut_json = json.loads((tmp / f"{side}_cut.json").read_text(encoding="utf-8"))
+            cmod = cut_json["modules"][side]
+            nets = cmod.get("netnames") or {}
+            rec = [f"read_rtlil {tmp / (side + '_cut.il')}", f"cd {side}"]
+            for key, ff in pairs_side:
+                qn = f"rp_q_{key}"
+                qbits = _bits_tuple((nets.get(qn) or {}).get("bits") or [])
+                for nm in (ff.q_name, *ff.q_aliases):
+                    if not nm:
+                        continue
+                    abits = _bits_tuple((nets.get(nm) or {}).get("bits") or [])
+                    if not abits or abits == qbits:
+                        continue
+                    rec.append(f"connect -nounset -set {yosys_id(nm)} {qn}")
+            rec += [
+                "opt_clean",
+                f"write_rtlil {tmp / (side + '_cut.il')}",
+                f"write_json {tmp / (side + '_cut.json')}",
+            ]
+            rec_ys = tmp / f"reconnect_{side}.ys"
+            rec_ys.write_text("\n".join(rec) + "\n", encoding="utf-8")
+            rproc = run_yosys_file(rec_ys, args.tmo)
+            if rproc.returncode != 0:
+                print(rproc.stdout or "")
+                print("equiv_ref REGPAIR cec_line=reconnect aliases failed")
+                print("equiv_ref REGPAIR method=regpair result=unproven")
+                print("equiv_ref REGPAIR regpair=FAIL(cut)")
+                return 1
     if gcut.returncode != 0 or tcut.returncode != 0:
         print((gcut.stdout or "") + (tcut.stdout or ""))
         print("equiv_ref REGPAIR cec_line=cut failed")
@@ -1106,9 +1424,12 @@ def main() -> int:
     if kind == "equivalent":
         print("equiv_ref REGPAIR regpair=PASS")
         return 0
+    if kind == "script_error":
+        print("equiv_ref REGPAIR regpair=FAIL(script)")
+        return 1
     if kind == "not_equivalent":
         # Same registers / ports / reset, different next-state encoding.
-        # Do not judge RTL wrong and do not pass; caller switches method.
+        # Only with a replayable write_cex. Do not judge RTL wrong and do not pass.
         print("equiv_ref REGPAIR regpair=INCONCLUSIVE(state-encoding)")
         return 3
     print("equiv_ref REGPAIR regpair=FAIL(unproven)")

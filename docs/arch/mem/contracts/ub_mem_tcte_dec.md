@@ -38,6 +38,21 @@ ports:
   - {name: ctx_mattr1, dir: out, width: 32, desc: 第二组属性字节}
 params: []
 ill_cause_width: 4
+assertions:
+  - AP_TCTE_BB_SZ
+  - AP_TCTE_CLK
+  - AP_TCTE_HS_IN
+  - AP_TCTE_HS_OUT
+  - AP_TCTE_ILL_2MB
+  - AP_TCTE_ILL_AD
+  - AP_TCTE_ILL_EQ
+  - AP_TCTE_ILL_PRI
+  - AP_TCTE_ILL_ZERO
+  - AP_TCTE_IN_RDY_RST
+  - AP_TCTE_LAT1
+  - AP_TCTE_OUT_HOLD
+  - AP_TCTE_RDY
+  - AP_TCTE_RST
 status: draft
 ```
 

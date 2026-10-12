@@ -59,7 +59,7 @@ from gatelib import (
 from hooks_port_consistency import compare_ports
 from large_mem_manifest import check_large_mem_manifest
 from private_leaves import is_private_leaf, private_skip_finding
-from pyc_lib_check import check_pyc_lib
+from pyc_lib_check import check_pyc_lib, check_pyclib_single
 
 # Call only this script. Do not add pycc flags here.
 EMIT_SCRIPT = "scripts/emit_rtl.py"
@@ -793,6 +793,7 @@ def main() -> int:
                     lock_src=REPO_ROOT / ".pycircuit-src",
                 )
             )
+            findings.extend(check_pyclib_single(REPO_ROOT))
             if any(f.rule == "EMIT_FAIL" and f.bucket == "new" for f in findings):
                 return emit_report("emit", findings)
         else:
@@ -812,6 +813,7 @@ def main() -> int:
                     lock_src=REPO_ROOT / ".pycircuit-src",
                 )
             )
+            findings.extend(check_pyclib_single(REPO_ROOT))
     finally:
         if worktree is not None:
             run_cmd(["git", "worktree", "remove", "--force", str(worktree)])

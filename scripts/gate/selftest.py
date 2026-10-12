@@ -35,7 +35,7 @@ from gatelib import (
 from hooks_port_consistency import compare_ports
 from large_mem_manifest import check_large_mem_manifest
 from lint import lint_module, lint_sources_for, parse_verilator
-from pyc_lib_check import check_pyc_lib
+from pyc_lib_check import check_pyc_lib, check_pyclib_single
 from pycircuit_provenance import static_splice_check
 from private_selftest import run_all as run_private_selftests
 from rtl_emit_consistency import (
@@ -246,6 +246,73 @@ def test_pyc_lib_skip_missing_dir() -> None:
             _fail("pyc-lib-skip-missing", "missing rtl/pyc_lib must not fail")
         if any(h.bucket == "new" for h in hits):
             _fail("pyc-lib-skip-missing", "must not introduce blocking findings")
+
+
+def _write_gate_yml(root: Path, key: str, value: bool) -> None:
+    yml = root / "scripts" / "gate" / "private_leaves.yml"
+    yml.parent.mkdir(parents=True, exist_ok=True)
+    prev = yml.read_text(encoding="utf-8") if yml.is_file() else "leaves: []\n"
+    yml.write_text(prev + f"{key}: {str(value).lower()}\n", encoding="utf-8")
+
+
+def test_pyclib_single_copy_and_ok() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        rtl = root / "rtl"
+        _v(rtl / "pyc_lib" / "pyc_reg.v", "pyc_reg", "input clk")
+        _v(rtl / "pcs" / "ub_pcs_leaf.v", "ub_pcs_leaf", "input core_clk")
+        _write_gate_yml(root, "pyclib_single_required", True)
+        hits = check_pyclib_single(root, rtl)
+        if any(f.rule in {"PYCLIB_COPY", "PYCLIB_FETCH"} for f in hits):
+            _fail("pyclib-single-ok", f"clean tree must pass, got {hits}")
+        print("SELFTEST PASS pyclib-single-ok: no PYCLIB_COPY/FETCH")
+
+        _v(root / "formal" / "cmn" / "pyc_reg.v", "pyc_reg", "input clk")
+        hit = _expect_rule("pyclib-copy-name", check_pyclib_single(root, rtl), "PYCLIB_COPY")
+        if "formal/cmn/pyc_reg.v" not in hit.file:
+            _fail("pyclib-copy-name", f"expected formal copy, got {hit.file}")
+        if hit.bucket != "new":
+            _fail("pyclib-copy-name", "must be blocking when required")
+
+        (root / "formal" / "cmn" / "pyc_reg.v").unlink()
+        _v(rtl / "common" / "alias.v", "pyc_reg", "input clk")
+        hit = _expect_rule("pyclib-copy-module", check_pyclib_single(root, rtl), "PYCLIB_COPY")
+        if "defines module pyc_reg" not in hit.message:
+            _fail("pyclib-copy-module", hit.message)
+
+
+def test_pyclib_single_fetch_and_report() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        rtl = root / "rtl"
+        _v(rtl / "pyc_lib" / "pyc_reg.v", "pyc_reg", "input clk")
+        script = root / "scripts" / "impl" / "pull_lib.sh"
+        script.parent.mkdir(parents=True)
+        script.write_text(
+            "git show origin/main:rtl/pyc_lib/pyc_reg.v > rtl/pyc_lib/pyc_reg.v\n",
+            encoding="utf-8",
+        )
+        hit = _expect_rule("pyclib-fetch-report", check_pyclib_single(root, rtl), "PYCLIB_FETCH")
+        if hit.bucket != "report":
+            _fail("pyclib-fetch-report", "must be report-only until #47 is on main")
+        _write_gate_yml(root, "pyclib_single_required", True)
+        hit = _expect_rule("pyclib-fetch-block", check_pyclib_single(root, rtl), "PYCLIB_FETCH")
+        if hit.bucket != "new":
+            _fail("pyclib-fetch-block", "must be blocking when required")
+        if "git show" not in hit.message:
+            _fail("pyclib-fetch-block", hit.message)
+
+        fixture = root / "scripts" / "gate" / "selftest.py"
+        fixture.parent.mkdir(parents=True, exist_ok=True)
+        fixture.write_text(
+            'ok = _git_show("deadbeef", "rtl/pyc_lib/pyc_reg.v", "out.v")\n'
+            "git show origin/main:rtl/pyc_lib/pyc_reg.v\n",
+            encoding="utf-8",
+        )
+        hits = [f for f in check_pyclib_single(root, rtl) if f.file.endswith("selftest.py")]
+        if hits:
+            _fail("pyclib-fetch-skip-selftest", "gate selftest fixtures are excluded")
+        print("SELFTEST PASS pyclib-fetch-skip-selftest: scripts/gate selftest ignored")
 
 
 def test_pyc_lib_byte_diff() -> None:
@@ -1453,6 +1520,8 @@ def main() -> int:
         test_stray_pyc_reg,
         test_pyc_lib_skip_missing_dir,
         test_pyc_lib_byte_diff,
+        test_pyclib_single_copy_and_ok,
+        test_pyclib_single_fetch_and_report,
         test_unlisted_tb_obs,
         test_obs_must_be_output,
         test_sby_bind_missing_signal,

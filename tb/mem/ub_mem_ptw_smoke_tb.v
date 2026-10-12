@@ -490,8 +490,8 @@ module ub_mem_ptw_smoke_tb;
         use_force_slot = 0;
         mem_push(pack_tb(1'b1, KIND_PAGE, 36'h00AB_CDEF, 3'd2, 2'b10, 1'b1, 1'b0,
                          1'b1, 1'b0, ILL_NONE));
-        start_walk({16'b0, 36'h0100_0000 | s[2:0], 12'h000}, 6'd21);
-        expect_fill(36'h0100_0000 | s[2:0], 36'h00AB_CDEF, 8'h55, 2'b10, 1'b1, 1'b0, 1'b1);
+        start_walk({16'b0, 36'h0100_0000 | {33'b0, s[2:0]}, 12'h000}, 6'd21);
+        expect_fill(36'h0100_0000 | {33'b0, s[2:0]}, 36'h00AB_CDEF, 8'h55, 2'b10, 1'b1, 1'b0, 1'b1);
         $display("8B slot %0d ok", s);
       end
     end

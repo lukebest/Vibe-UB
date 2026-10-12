@@ -4,6 +4,7 @@
 
 ### Added
 
+- `docs/arch/MODULE_INVENTORY.md`：`ub_pcs_amctl_rx` 完备性核对表（端口 / AMCTL 识别 / SDF 位 / 已配置 lane / `pcs_rx_lid[3:0]`+`pcs_rx_lid_vld`）。识别规则与 SDF 位号标 MISSING。scrambler placeholder 期 LID 口 Tie，waiver `placeholder, D20`。
 - `docs/arch/MODULE_INVENTORY.md` + SPEC §3.3.4 / §6.1 / A-23：登记 `ub_pcs_nullblk_det`（线 A 设计）。Xia 裁定 2026-10-12：旁路观察 `pcs2dll_*` / `dll2pcs_*`；`ub_pcs_amctl_rx` 出寄存电平 `pcs_rx_sdf_seen`；新增 `lmsm2pcs_nb_phase`；Null 判别 UB-DL §4.3.3.2 + `CLENGTH==5'b00000`；每拍至多一个 block（§3.3.1 / §3.3.2），保持 1-bit 脉冲；RX 门控在寄存前，TX 无门控；t→t+1，LMSM 计 ≥s+1。参考模型待写。
 - `tb/models/ub_pcs_fec.py`：RS(128,120) FEC 编解码黄金模型（UB-PHY §3.2.2.1 / §3.2.3.5，SPEC §2.4 `ub_pcs_fec_enc` / `ub_pcs_fec_dec`；T=4 / T=2 / bypass）。
 - `scripts/impl/buffer_fanout.py`：Yosys JSON 上确定性 `buf_4`/`buf_8` 扇出树（quick-synth 默认在 abc 之后调用）。

@@ -58,7 +58,11 @@ from gatelib import (
 )
 from hooks_port_consistency import compare_ports
 from large_mem_manifest import check_large_mem_manifest
-from pyc_lib_check import check_pyc_lib
+from equiv_blackbox import contract_leaf_names, equiv_blackbox_set
+from formal_depth import write_equiv_status
+from formal_parent_free import instantiated_leaf_instances
+from private_leaves import is_private_leaf, private_skip_finding
+from pyc_lib_check import check_pyc_lib, check_pyclib_single
 
 # Call only this script. Do not add pycc flags here.
 EMIT_SCRIPT = "scripts/emit_rtl.py"
@@ -153,6 +157,10 @@ def _sv_read(path: Path, incdirs: list[Path] | None = None) -> str:
     return f"read_verilog -sv {inc} {path}".replace("  ", " ")
 
 
+def _blackbox_cmds(names: list[str] | None) -> list[str]:
+    return [f"blackbox {name}" for name in (names or [])]
+
+
 def _yosys_load_both(
     gold_reads: list[str],
     gold_top: str,
@@ -161,15 +169,18 @@ def _yosys_load_both(
     lib_files: list[Path] | None = None,
     incdirs: list[Path] | None = None,
     extra_rtl: list[Path] | None = None,
+    blackboxes: list[str] | None = None,
 ) -> list[str]:
     """Read gold/gate, flatten, opt -full (fold tied-low hook muxes)."""
     libs = _lib_reads(lib_files)
     extras = [_sv_read(p, incdirs) for p in (extra_rtl or [])]
+    boxes = _blackbox_cmds(blackboxes)
     return [
         *extras,
         *gold_reads,
         *libs,
         f"hierarchy -check -top {gold_top}",
+        *boxes,
         "proc",
         "flatten",
         "opt -full",
@@ -179,6 +190,7 @@ def _yosys_load_both(
         *gate_reads,
         *libs,
         f"hierarchy -check -top {gate_top}",
+        *boxes,
         "proc",
         "flatten",
         "opt -full",
@@ -196,6 +208,7 @@ def _yosys_equiv_script(
     lib_files: list[Path] | None = None,
     incdirs: list[Path] | None = None,
     extra_rtl: list[Path] | None = None,
+    blackboxes: list[str] | None = None,
 ) -> str:
     """Yosys equiv_make / equiv_simple / equiv_induct / equiv_status -assert."""
     return "\n".join(
@@ -208,6 +221,7 @@ def _yosys_equiv_script(
                 lib_files,
                 incdirs,
                 extra_rtl,
+                blackboxes,
             ),
             "equiv_make gold gate equiv",
             "prep -top equiv",
@@ -226,6 +240,7 @@ def _yosys_miter_common(
     lib_files: list[Path] | None = None,
     incdirs: list[Path] | None = None,
     extra_rtl: list[Path] | None = None,
+    blackboxes: list[str] | None = None,
 ) -> list[str]:
     return [
         *_yosys_load_both(
@@ -236,6 +251,7 @@ def _yosys_miter_common(
             lib_files,
             incdirs,
             extra_rtl,
+            blackboxes,
         ),
         "miter -equiv -make_assert -flatten gold gate miter",
         "hierarchy -top miter",
@@ -251,6 +267,7 @@ def _yosys_miter_sat_script(
     lib_files: list[Path] | None = None,
     incdirs: list[Path] | None = None,
     extra_rtl: list[Path] | None = None,
+    blackboxes: list[str] | None = None,
 ) -> str:
     """k-induction on the I/O miter. Caps length so it cannot walk off to k=36."""
     return "\n".join(
@@ -263,6 +280,7 @@ def _yosys_miter_sat_script(
                 lib_files,
                 incdirs,
                 extra_rtl,
+                blackboxes,
             ),
             "sat -verify -tempinduct -seq 2 -maxsteps 4 "
             "-set-init-zero -prove-asserts",
@@ -278,6 +296,7 @@ def _yosys_miter_bmc_script(
     lib_files: list[Path] | None = None,
     incdirs: list[Path] | None = None,
     extra_rtl: list[Path] | None = None,
+    blackboxes: list[str] | None = None,
 ) -> str:
     """I/O miter BMC from zero init.
 
@@ -296,6 +315,7 @@ def _yosys_miter_bmc_script(
                 lib_files,
                 incdirs,
                 extra_rtl,
+                blackboxes,
             ),
             "sat -verify -seq 16 -set-init-zero -prove-asserts",
         ]
@@ -543,6 +563,35 @@ def run_emit_rtl_isolated() -> tuple[list[Finding], Path | None, dict[str, objec
     return compare_emitted_rtl(tmp / "rtl", REPO_ROOT / "rtl"), tmp / "rtl", meta
 
 
+def private_flatten_required(root: Path) -> bool:
+    proc = run_cmd(
+        ["git", "show", "origin/main:docs/rules/verif_gate.md"],
+        cwd=root,
+    )
+    if proc.returncode != 0:
+        return False
+    return "EQUIV_PRIVATE_FLATTENED" in (proc.stdout or "")
+
+
+def private_instances_in_files(paths: list[Path], root: Path) -> list[str]:
+    leaves = contract_leaf_names(root)
+    if not leaves:
+        return []
+    found: list[str] = []
+    for path in paths:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        found.extend(instantiated_leaf_instances(text, leaves))
+    return found
+
+
+def product_outputs(product: Path, module: str, incdirs: list[Path] | None) -> list[str]:
+    exposed = parse_port_decls(product, incdirs=incdirs, module=module)
+    return [n for k, n, _p in exposed if k == "output" and not n.startswith("tb_")]
+
+
 def run_equiv(
     module: str,
     product: Path,
@@ -551,6 +600,8 @@ def run_equiv(
     lib_files: list[Path] | None = None,
     incdirs: list[Path] | None = None,
     extra_rtl: list[Path] | None = None,
+    blackboxes: list[str] | None = None,
+    status_out: dict | None = None,
 ) -> Finding | None:
     """Prove PRODUCT≡HOOKS on PRODUCT ports only (SPEC §11 (d)).
 
@@ -591,6 +642,47 @@ def run_equiv(
     )
     del extra_ports  # compared via PRODUCT ports only; list is documentation
 
+    boxes = (
+        list(blackboxes)
+        if blackboxes is not None
+        else equiv_blackbox_set(REPO_ROOT)
+    )
+    detected = private_instances_in_files([product, hooks], REPO_ROOT)
+    boxed_set = set(boxes)
+    missed = [leaf for leaf in detected if leaf not in boxed_set]
+    flatten_hit = None
+    if missed:
+        bucket = "new" if private_flatten_required(REPO_ROOT) else "report"
+        flatten_hit = Finding(
+            check="emit",
+            module=module,
+            file=rel(product),
+            rule="EQUIV_PRIVATE_FLATTENED",
+            message=(
+                "private-leaf stub flattened instead of blackboxed: "
+                + ",".join(missed)
+            ),
+            bucket=bucket,
+            severity="error" if bucket == "new" else "warning",
+        )
+        print(
+            f"EQUIV_PRIVATE_FLATTENED {module}: instantiated "
+            f"{','.join(missed)} but not blackboxed"
+        )
+    for leaf in detected:
+        if leaf in boxed_set:
+            print(f"EQUIV_BLACKBOX {leaf} in {module}")
+    outs = product_outputs(product, module, incs)
+    print(
+        f"EQUIV_COMPARE {module} outputs={len(outs)} pairs=0"
+    )
+    if status_out is not None:
+        status_out[module] = {
+            "status": "FAIL",
+            "outputs": outs,
+            "blackboxes": boxes,
+        }
+
     eqy_bin = shutil_which("eqy")
     yosys_bin = shutil_which("yosys")
     if not yosys_bin and not eqy_bin:
@@ -617,6 +709,7 @@ def run_equiv(
                 lib_files=lib_files,
                 incdirs=incs,
                 extra_rtl=extra_rtl,
+                blackboxes=boxes,
             )
             + "\n",
             encoding="utf-8",
@@ -657,6 +750,7 @@ def run_equiv(
                     lib_files=lib_files,
                     incdirs=incs,
                     extra_rtl=extra_rtl,
+                    blackboxes=boxes,
                 )
                 + "\n",
                 encoding="utf-8",
@@ -680,6 +774,7 @@ def run_equiv(
                     lib_files=lib_files,
                     incdirs=incs,
                     extra_rtl=extra_rtl,
+                    blackboxes=boxes,
                 )
                 + "\n",
                 encoding="utf-8",
@@ -736,7 +831,13 @@ def run_equiv(
             ),
         )
     print(f"EQUIV {module}: PASS tool={tool}")
-    return None
+    if status_out is not None:
+        status_out[module] = {
+            "status": "PASS",
+            "outputs": outs,
+            "blackboxes": boxes,
+        }
+    return flatten_hit
 
 
 def main() -> int:
@@ -792,6 +893,7 @@ def main() -> int:
                     lock_src=REPO_ROOT / ".pycircuit-src",
                 )
             )
+            findings.extend(check_pyclib_single(REPO_ROOT))
             if any(f.rule == "EMIT_FAIL" and f.bucket == "new" for f in findings):
                 return emit_report("emit", findings)
         else:
@@ -811,6 +913,7 @@ def main() -> int:
                     lock_src=REPO_ROOT / ".pycircuit-src",
                 )
             )
+            findings.extend(check_pyclib_single(REPO_ROOT))
     finally:
         if worktree is not None:
             run_cmd(["git", "worktree", "remove", "--force", str(worktree)])
@@ -839,12 +942,28 @@ def main() -> int:
     disc = discover_rtl()
     thresh = read_cmn_mem_threshold_bits()
     print(f"equiv: ub_cmn_mem_1r1w blackbox threshold={thresh} bits")
+    equiv_status: dict = {}
     for leaf in discover_leaf_pairs():
         product = REPO_ROOT / leaf["product"]
         hooks = REPO_ROOT / leaf["hooks"]
         module = leaf["module"]
+        if is_private_leaf(module):
+            findings.append(
+                private_skip_finding("equiv" if args.equiv_only else "emit", module, leaf["product"])
+            )
+            equiv_status[module] = {
+                "status": "PRIVATE_SKIP",
+                "outputs": [],
+                "blackboxes": [],
+            }
+            continue
         if leaf.get("placeholder") or is_placeholder_module(module):
             print(f"placeholder skip {module}: lint/TB only (not PRODUCT, no equiv)")
+            equiv_status[module] = {
+                "status": "SKIP",
+                "outputs": [],
+                "blackboxes": [],
+            }
             continue
         if product.is_file() and is_handwritten_path(product):
             print(f"eqy/hooks skip {module}: handwritten whitelist")
@@ -910,10 +1029,17 @@ def main() -> int:
                 f"equiv {module}: -lib large ub_cmn_mem_1r1w "
                 f"{[rel(p) for p in lib_files]} (same copy both sides)"
             )
-        hit = run_equiv(module, product, hooks, extra, lib_files=lib_files)
+        hit = run_equiv(
+            module,
+            product,
+            hooks,
+            extra,
+            lib_files=lib_files,
+            status_out=equiv_status,
+        )
         if hit:
             findings.append(hit)
-
+    write_equiv_status(equiv_status)
     return emit_report("equiv" if args.equiv_only else "emit", findings)
 
 

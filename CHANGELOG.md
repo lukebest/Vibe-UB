@@ -42,6 +42,7 @@
 
 ### Changed
 
+- `docs/arch/LAYER_CONTRACTS.md` §2 / §3：对照 PR #58 M-1..M-9 与 PR #61 §8.9.5 / §14.6 十四问。补 TP→NW 边带 DCNA/LBF/RT/CCI、`tp2ta_msn_*`、ROL `ta2tp_cmp_*`；RTPH 16 B、DstTPN/PSN/TPMSN 24；ICRC 按 CFG9/7；CFG 取值 6/7/9（§4.3.2.2.2、§6.3.2）；SCNA/DCNA 规范两档、优先通路 16 b；发送窗 §6.5.1.4.1。其余（NLP→TAH 码点、LPH.RT 位切片、`ta2tp_mode`、flush 拍数、未决上限、长度宽、NAK 原因、GBN vs SR、共享信道、包上限、RTPH 其余宽）标 **未知**。
 - `scripts/impl/quick_synth.*`：`rtl/pyc_lib/` 缺失改为硬失败（目录来自 PR #21，必须存在）；去掉回退 `rtl/common` 的临时 WARN。attest 的 `contract_sha256` 只调用 main 上 `scripts/gate/contract_hash.py`；自测假仓库拷该文件，不再自带副本。
 - SPEC §2.4 / §3.3.4 / §9 / §10.2：`pcs_am_locked` / `tb_inj_am_lock` 改为 1 bit（已配置 RX lane 全锁定）；`ub_pcs_amctl_rx` 含 §3.2.4.4 分 lane 锁定，码字解码在 `ub_pcs_amctl_cw_dec`。Xia 裁定 2026-10-12。
 - `docs/arch/pcs/contracts/ub_pcs_amctl_cw_dec.md`：YAML 增补必填 `assertions:`（正文 8 条 `AP_CWDEC_*`，去重排序）。schema 源 main `73cfa6e1`（#49）。

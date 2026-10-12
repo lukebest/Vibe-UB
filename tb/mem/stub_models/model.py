@@ -280,10 +280,16 @@ class StubDecoderBase:
         return int(ins.get(self._rst_name, 0)) == self.encoding.rst_active
 
     def _compute_in_ready(self, out_ready: int, outstanding: bool, since_rel: int) -> int:
-        """Must not read this-cycle in_valid (AP_*_RDY)."""
+        """Must not read this-cycle in_valid (AP_*_RDY).
+
+        One outstanding beat: ``in_ready=0`` while a result is held or
+        pipelined. That keeps L0 from overwriting a beat still on the
+        output (OUT_HOLD / single-undecoded). ``out_ready`` is accepted
+        so the signature stays stable; occupancy already covers stall.
+        """
         if since_rel <= 0:
             return 0
-        if outstanding and not out_ready:
+        if outstanding:
             return 0
         return 1
 
@@ -322,13 +328,13 @@ class StubDecoderBase:
             return outs
 
         presented_pipe = False
-        if self._inflight is not None:
+        if self._inflight is not None and self._held is None:
             self._held = self._make_result(self._inflight)
             self._held_ctrl = self._ctrl_of(self._inflight)
             self._inflight = None
             presented_pipe = True
 
-        outstanding = self._held is not None
+        outstanding = self._held is not None or self._inflight is not None
         ready_probe = self._compute_in_ready(out_ready, outstanding, self._since_rel)
         in_ready = ready_probe
         accepted = bool(in_valid and in_ready)

@@ -219,11 +219,14 @@ class InterfaceChecker:
     def _check_in_rdy_rst(self, outs: dict[str, int], ins: dict[str, int], since_release: int) -> None:
         ready = _bit(outs, "in_ready")
         stalled = _bit(outs, "out_valid") and not _bit(ins, "out_ready")
+        presenting = _bit(outs, "out_valid")
         if since_release <= 0:
             return
         if since_release == 1:
             return
-        if not stalled:
+        # Occupied output slot: in_ready stays 0 so L0 cannot overwrite.
+        # Idle and not backpressured: Xia IN_RDY_RST requires 1.
+        if not stalled and not presenting:
             self.check("IN_RDY_RST", ready == 1, f"since_release={since_release} in_ready={ready} expected 1")
 
     def _hold_in_names(self) -> tuple[str, ...]:

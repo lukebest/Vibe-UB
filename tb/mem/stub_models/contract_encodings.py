@@ -166,7 +166,12 @@ class EncClassTable:
         return self.cells[key]
 
     def keys(self) -> tuple[tuple[int, str], ...]:
-        return tuple(sorted(self.cells))
+        return tuple(
+            (level, enc)
+            for level in DESC_LEVELS
+            for enc in self.classes
+            if (level, enc) in self.cells
+        )
 
     def as_nested(self) -> dict[str, dict[str, dict[str, Any]]]:
         nested: dict[str, dict[str, dict[str, Any]]] = {}

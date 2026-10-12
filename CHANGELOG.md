@@ -32,7 +32,7 @@
 
 ### Changed
 
-- `docs/arch/LAYER_CONTRACTS.md` §2 / §3：对照 PR #58 `docs/uarch/tp_uarch.md` M-1..M-9。补 TP→NW 边带 `tp2nw_dcna[15:0]` / `lbf[7:0]` / `rt[1:0]` / `cci[15:0]`；补 `tp2ta_msn_*`（TPMSN 24 b）与 ROL `ta2tp_cmp_*`；RTPH 16 B、DstTPN/PSN/TPMSN 24 b；ICRC 按 CFG9/CFG7；发送窗改引 §6.5.1.4.1；计时器归属 DLL/LMSM；提交加 `ta2tp_dcna` / `ta2tp_op_len`（宽 **未知**）。其余 Q-3..Q-15 中规范未定项标 **未知**。
+- `docs/arch/LAYER_CONTRACTS.md` §2 / §3：对照 PR #58 M-1..M-9 与 PR #61 §8.9.5 / §14.6 十四问。补 TP→NW 边带 DCNA/LBF/RT/CCI、`tp2ta_msn_*`、ROL `ta2tp_cmp_*`；RTPH 16 B、DstTPN/PSN/TPMSN 24；ICRC 按 CFG9/7；CFG 取值 6/7/9（§4.3.2.2.2、§6.3.2）；SCNA/DCNA 规范两档、优先通路 16 b；发送窗 §6.5.1.4.1。其余（NLP→TAH 码点、LPH.RT 位切片、`ta2tp_mode`、flush 拍数、未决上限、长度宽、NAK 原因、GBN vs SR、共享信道、包上限、RTPH 其余宽）标 **未知**。
 - `docs/arch/mem/contracts/ub_mem_ptw_desc_dec.md`：`AP_PTW_KIND` 改为 `desc_v ⇔ desc_kind≠0`（`desc_v=1` 当且仅当 `desc_kind` 非 0；`desc_v=0` 时 `desc_kind` 必须为 0）。编码仍为 0 = invalid / 1 = table / 2 = block / 3 = page。芯片开发PM 2026-10-12。
 - SPEC §14 Q-A11：TCTE 范围表的 2 MB 颗粒度配置只由 `ub_mem_tcte_dec` 解码并报 `ILL_MAP_2MB`；L1 的 1 GB 与 L2 的 2 MB 页表块描述符合法（`desc_kind=2`，`desc_illegal=0`），遍历器将其拆成 4 KB TLB 回填。
 - 门禁 hooks：`HOOKS-UB-MEM-PTW` 登记 `tb_mem_ptw_obs_st` / `tb_mem_ptw_obs_rd_pend`（只读、不受 `tb_test_mode`；批准人验证）。

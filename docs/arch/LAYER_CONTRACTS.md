@@ -127,12 +127,14 @@ PHY↔DLL、LMSM 侧带已在 [SPEC.md](../SPEC.md) §3.3 写死（M1）。此�
 
 | 字段 | 宽 | 节号 | 备注 |
 | --- | --- | --- | --- |
+| LPH.CFG | 4 | §4.3.2.2.2 | 0=DLLCB，禁止出现在本口。CTP 取值 **6**（§6.3.2）；RTP 取值 **7**（§5.2.2）；bypass 取值 **9**（B.2.6） |
+| LPH.RT | 2 | §4.3.2.2.2、§5.2 | 与 `tp2nw_rt` / NTH.RT 同源。LPH word 内位切片见该节，本文件不抄，标 **未知** |
 | NTH.RT | 2 | §5.2、§6.5.1.2 | 与 TA 模式协调见 §7.3.4；四码取值见该节，本文件不抄 |
-| NTH.SCNA/DCNA | 16 或 24 | §5.2.1–2 | 优先通路口 `tp2nw_dcna[15:0]`（16-b CNA，TRADEOFFS D19）。24-b 格式口宽 **未知** |
+| NTH.SCNA/DCNA | 16 与 24 两档 | §5.2.1–2 | 规范同时给出两档。优先通路口 `tp2nw_dcna[15:0]`（16-b CNA，TRADEOFFS D19）。24-b 格式口宽 **未知** |
 | NTH.CCI | 16 | §5.2、§5.3.5、§6.6 | TP CC 可读写；TX 边带 `tp2nw_cci[15:0]` |
 | NTH.LBF | 8 | §5.2、§6.5.1.2 | 发送端生成，规范不约束取值；TX 边带 `tp2nw_lbf[7:0]` |
 | NTH.SL | 4 | §5.2、§5.3.4 | NW 映 VL |
-| NTH.NLP | 3 | §5.2 | CTPH/RTPH/UPIH/TAH… |
+| NTH.NLP | 3 | §5.2 | 取值表见该节，本文件不抄。bypass 时 NLP 指向 TAH；TAH 码点 **未知**（PR #61） |
 | NTH.Mgmt | 1 | §5.2.1、§10.4.1.1 | 仅部分 CFG |
 | RTPH 整头 | 16 B | §6.2.1 | |
 | RTPH.TPOpcode | 8 | §6.2.1 | `[7]` = last |
@@ -140,6 +142,7 @@ PHY↔DLL、LMSM 侧带已在 [SPEC.md](../SPEC.md) §3.3 写死（M1）。此�
 | RTPH.DstTPN | 24 | §6.2.1 | 与 SrcTPN 同表 |
 | RTPH.PSN | 24 | §6.2.1、§6.4.1 | 模 2^24；半空间比较见该节。工程窗深 **未知** |
 | RTPH.TPMSN | 24 | §6.2.1、§6.7.1.2.1 | 整操作完成键 |
+| RTPH.NLP / RSPST / RSPINFO | **未知** | §6.2.1 | 16 B 头内其余字段宽本仓库未锁 |
 | CTPH | 1 B；TPOpcode 2 + NLP | §6.2.1 | |
 | UTPH | 16 B；TPOpcode 8 | §6.2.1 | |
 | ICRC | 算法在 §5.3.7 | bypass（CFG9）无 ICRC（B.2.6）。RTP（CFG7）带 ICRC（§5.3.7） |
@@ -191,11 +194,15 @@ PHY↔DLL、LMSM 侧带已在 [SPEC.md](../SPEC.md) §3.3 写死（M1）。此�
 
 **未决（规范未给或本仓库未锁）**
 
-- 24-b CNA 格式下 `tp2nw_dcna` 是否加宽到 24：**未知**（后波 CFG7）。
+- 24-b CNA 格式下 `tp2nw_dcna` 是否加宽到 24：**未知**（后波 CFG=7）。
 - SCNA 是否由 TP 给出：**未知**（NW 可从 `PORT_CNA` / App. D.5.5 填）。
 - RX 侧 `nw2tp_scna` / `nw2tp_cci` 是否另开边带：**未知**（NTH 可随 `nw2tp_data` 上送，或 NW 已剥 NTH；PR #58 Q-1）。
 - 优先通路 CCI 复位取值：建议 0；规范是否要求非零 **未知**。
 - NTH 由边带交给 NW 写入，或由 TP 写入 `tp2nw_data`：**本契约取边带**（与已有 `sl`/`nlp` 同形）。RX 是否已剥 NTH：**未知**。
+- 包字节上限：**未知**（§5.3.8 只给头+尾+最大净荷关系；D.1.13 MTU 本仓库未锁）。PR #61。
+- NTH.NLP→TAH 码点：**未知**（§5.2 有表，本文件不抄）。PR #61。
+- LPH.RT 在 LPH word 内的位切片：**未知**（宽 2 b 已锁，§4.3.2.2.2）。PR #61。
+- Go-Back-N 与选择重传：§6.4.2 两套都有；实现先做哪一套 **未知**。PR #61。
 
 ---
 
@@ -292,16 +299,17 @@ PHY↔DLL、LMSM 侧带已在 [SPEC.md](../SPEC.md) §3.3 写死（M1）。此�
 
 **未决（规范未给或本仓库未锁）**
 
-- `ta2tp_mode[1:0]` 四模式编码：**未知**。
-- `ta2tp_op_len` 宽、TA 最大操作长度：**未知**（PR #58 Q-8）。
+- `ta2tp_mode[1:0]` 四模式编码：**未知**。PR #61。
+- `ta2tp_op_len` / 净荷长度字段宽、TA 最大操作长度：**未知**（PR #58 Q-8、PR #61）。
 - `ta2tp_op_ch`（信道号）是否每操作给出：**未知**（可随 TP 信道绑定）。
 - RSPST / RSPINFO 宽：**未知**（§6.2.1、§6.8.2）；Compact ATAH Status 宽：**未知**。PR #58 草案 3 b / 5 b 标为假设。
-- `tp2ta_fail` 原因码集合与编码：**未知**（PR #58 Q-9）。
-- flush 未确认操作一律 `fail`，或等 link 恢复后续传：**未知**（PR #58 Q-10）。本口建议仍给 `fail`。
+- `tp2ta_fail` / TP NAK 原因码集合与编码：**未知**（PR #58 Q-9、PR #61）。
+- flush 拍数：**未知**。flush 未确认操作一律 `fail`，或等 link 恢复后续传：**未知**（PR #58 Q-10、PR #61）。本口建议仍给 `fail`。
+- 未决 TASSN 上限：**未知**（实现后回填，至少 1）。PR #61。
+- 共享 TP 信道策略：**未知**（§6.1、§6.3.1）。PR #61。
 - TPMSN 分配后回 TA 的拍位（提交成交拍 vs 仅 `tp2ta_msn_*`）：**未知**。
 - DstTPN 是否每操作出现在 TA→TP 描述符：**未知**（可随 TP 信道绑定）。
 - `tp2ta_msn_*` 与 `tp2ta_done` 的拍序：**未知**。
-- 优先通路未决上限：**未知**（实现后回填，至少 1）。
 - TX 出口仲裁（bypass vs TPACK/重传）、CTX/RTB 实现、µs 节拍来源、`TP_ATOMIC_EN`、F=1 伪包 obs 名、HOOKS 点名存储：属微架构，标 **未知**（PR #58 Q-3..Q-7、Q-11、Q-13..Q-15）。
 
 ---

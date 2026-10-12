@@ -1197,6 +1197,7 @@ def sat_one_po(
         ys.append("opt_clean")
     ys += [
         "miter -equiv -flatten gold gate miter",
+        "hierarchy -top miter",
         "sat -verify -prove trigger 0 -show-inputs",
     ]
     print(f"equiv_ref REGPAIR sat_cmd=sat -verify -prove trigger 0 po={po}")

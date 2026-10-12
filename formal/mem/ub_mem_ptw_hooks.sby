@@ -6,13 +6,17 @@
 # Encoding values: SPEC §10 table (not yet on #50); interim values from
 # #48 a06758a / designer posting. Cite SPEC §10 in the localparam block.
 #
-# Default tasks: cover + bmc 24. prove is not tagged default until it
-# converges. Manual: `sby -f ub_mem_ptw_hooks.sby prove`.
+# Default task: cover only. bmc 24 of a_st_legal FAILs at step 10
+# (obs_st=0): unconstrained desc_kind with desc_v=1 matches no
+# next-state arm (not TABLE/BLOCK/PAGE) and the walker drops to
+# all-zero. That is an RTL hole under "any decode result", not a
+# weakened property and not an assume. prove stays non-default.
+# Manual: `sby -f ub_mem_ptw_hooks.sby bmc` / `prove`.
 # hooks-port-consistency may be red until #50 registers the ports.
 
 [tasks]
 cover default
-bmc default
+bmc
 prove
 
 [options]

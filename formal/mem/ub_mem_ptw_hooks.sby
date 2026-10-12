@@ -54,8 +54,9 @@ flatten
 #   out_valid -> pyc_instance_143
 #   desc_v    -> pyc_instance_144
 #   desc_kind -> pyc_instance_145
-# Flatten absorbs tap_* into u_hooks_inv.<port>. connect -set those
-# to the DUT nets so c_kind0 sees the same $anyseq the walker does.
+# Harness ties those inv ports to 0; -set replaces the ties.
+# Do not introduce tap_* aliases — connect -set unsets the lhs
+# driver and would disconnect a tap_* net from the inv port.
 connect -set \u_hooks_inv.dec_out_valid \u_dut.pyc_instance_143
 connect -set \u_hooks_inv.desc_v \u_dut.pyc_instance_144
 connect -set \u_hooks_inv.desc_kind \u_dut.pyc_instance_145

@@ -142,11 +142,6 @@ module ub_mem_ptw_hooks_harness (
     .busy(busy)
   );
 
-  // Yosys 0.33 drops dotted hierarchical refs and ignores bind.
-  // Decoder ports are tied here so flatten does not create a tap_*
-  // alias. ub_mem_ptw_hooks.sby `connect -set` after flatten replaces
-  // these ties with the DUT-side u_desc_dec nets
-  // (pyc_instance_147/148/149 = out_valid/desc_v/desc_kind).
   ub_mem_ptw_hooks_inv u_hooks_inv (
     .core_clk(core_clk),
     .rst_pyc(rst_pyc),
@@ -157,10 +152,7 @@ module ub_mem_ptw_hooks_harness (
     .req_ready(req_ready),
     .fill_valid(fill_valid),
     .flt_valid(flt_valid),
-    .evt_valid(evt_valid),
-    .dec_out_valid(1'b0),
-    .desc_v(1'b0),
-    .desc_kind(2'b00)
+    .evt_valid(evt_valid)
   );
 
 endmodule

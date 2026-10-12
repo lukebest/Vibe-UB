@@ -59,7 +59,7 @@ read -formal ub_mem_ptw_harness.sv
 # Only definition of ub_mem_ptw_desc_dec is the cut. Walker file
 # instantiates it but does not define it (#48 52dfc26). Read the
 # cut (sby copies [files] by basename), then hierarchy once.
-# Do not blackbox (sby prep flatten errors).
+# Bound by module name. Do not blackbox (sby prep flatten errors).
 read -formal ub_mem_ptw_desc_dec.sv
 hierarchy -check -top ub_mem_ptw_harness
 proc

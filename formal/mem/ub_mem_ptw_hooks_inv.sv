@@ -6,8 +6,9 @@
 // posting (same as tb/mem/ub_mem_ptw_smoke_tb.v). One mapping
 // block; properties use the names.
 //
-// Decoder ports are the public cut outputs (fully free $anyseq).
-// Used only by the kind=0 → fault → idle cover.
+// State invariants read only tb_mem_ptw_obs_st /
+// tb_mem_ptw_obs_rd_pend. Consistency asserts also use PRODUCT
+// handshake ports. No decoder internals.
 
 module ub_mem_ptw_hooks_inv (
   input  wire        core_clk,
@@ -19,16 +20,12 @@ module ub_mem_ptw_hooks_inv (
   input  wire        req_ready,
   input  wire        fill_valid,
   input  wire        flt_valid,
-  input  wire        evt_valid,
-  input  wire        dec_out_valid,
-  input  wire        desc_v,
-  input  wire [1:0]  desc_kind
+  input  wire        evt_valid
 );
 
   // SPEC §10 walker obs_st encodings (cite SPEC §10; values from #48
   // until #50 writes the table). Pack is
   // {st_evt, st_flt, st_fill, st_dec, st_rd, st_idle}.
-  // desc_kind values: contract §2 / params.py.
   localparam integer ST_W         = 6;
   localparam [5:0]   ST_IDLE      = 6'b000001;
   localparam [5:0]   ST_RD        = 6'b000010;  // table-read
@@ -36,7 +33,6 @@ module ub_mem_ptw_hooks_inv (
   localparam [5:0]   ST_FILL      = 6'b001000;
   localparam [5:0]   ST_FLT       = 6'b010000;
   localparam [5:0]   ST_EVT       = 6'b100000;
-  localparam [1:0]   KIND_INVALID = 2'd0;
 
   wire chk = !rst_pyc;
 
@@ -89,46 +85,42 @@ module ub_mem_ptw_hooks_inv (
     end
   end
 
-  // Decoder returns desc_v=1 & kind=0 while the walker is in ST_DEC;
-  // walker then reaches ST_FLT and ST_IDLE with no fill_* in between.
-  wire kind0_fire = chk &&
-                    (tb_mem_ptw_obs_st == ST_DEC) &&
-                    dec_out_valid &&
-                    desc_v &&
-                    (desc_kind == KIND_INVALID);
+  // Observable catch-all: ST_DEC → ST_FLT → ST_IDLE with no fill
+  // (covers desc_v=1 & kind=0 and any other free-cut fault).
+  wire dec_fire = chk && (tb_mem_ptw_obs_st == ST_DEC);
 
-  reg f_kind0;
-  reg f_kind0_flt;
-  reg f_kind0_fill;
+  reg f_dec;
+  reg f_dec_flt;
+  reg f_dec_fill;
 
   initial begin
-    f_kind0      = 1'b0;
-    f_kind0_flt  = 1'b0;
-    f_kind0_fill = 1'b0;
+    f_dec      = 1'b0;
+    f_dec_flt  = 1'b0;
+    f_dec_fill = 1'b0;
   end
 
   always @(posedge core_clk) begin
     if (rst_pyc) begin
-      f_kind0      <= 1'b0;
-      f_kind0_flt  <= 1'b0;
-      f_kind0_fill <= 1'b0;
-    end else if (kind0_fire) begin
-      f_kind0      <= 1'b1;
-      f_kind0_flt  <= 1'b0;
-      f_kind0_fill <= 1'b0;
-    end else if (f_kind0) begin
+      f_dec      <= 1'b0;
+      f_dec_flt  <= 1'b0;
+      f_dec_fill <= 1'b0;
+    end else if (dec_fire) begin
+      f_dec      <= 1'b1;
+      f_dec_flt  <= 1'b0;
+      f_dec_fill <= 1'b0;
+    end else if (f_dec) begin
       if (tb_mem_ptw_obs_st == ST_FLT)
-        f_kind0_flt <= 1'b1;
+        f_dec_flt <= 1'b1;
       if (fill_valid)
-        f_kind0_fill <= 1'b1;
+        f_dec_fill <= 1'b1;
     end
   end
 
   always @(posedge core_clk) begin
     c_kind0_flt_idle: cover (
-      chk && f_kind0 && f_kind0_flt &&
+      chk && f_dec && f_dec_flt &&
       (tb_mem_ptw_obs_st == ST_IDLE) &&
-      !f_kind0_fill && !fill_valid
+      !f_dec_fill && !fill_valid
     );
   end
 

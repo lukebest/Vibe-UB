@@ -6,12 +6,13 @@
 # Encoding values: SPEC §10 table (not yet on #50); interim values from
 # #48. Cite SPEC §10 in the localparam block.
 #
-# Decoder is only cut/ub_mem_ptw_desc_dec.sv (fully free $anyseq).
-# Never the PRODUCT stub. After #48 52dfc26 the walker file defines
-# only ub_mem_ptw — no leftover $abstract stub, no delete needed.
+# Decoder is only cut/ub_mem_ptw_desc_dec.sv (fully free $anyseq),
+# bound by module name — same script as PRODUCT. Never the PRODUCT
+# stub. After #48 52dfc26 the walker file defines only ub_mem_ptw.
 # #48 98818fc catch-all: desc_v=1 with kind not table/block/page →
 # existing flt_xlat; any state with no legal next falls back to
-# st_idle. a_st_legal / a_rd_pend_st are asserts-only (no contract).
+# st_idle. a_st_legal / a_rd_pend_st are asserts-only (no contract)
+# and read only the two obs ports.
 #
 # Default tasks: cover + bmc 24 + prove. prove PASS k=20 ~1s
 # (yices) after tracker/obs consistency asserts. Assert-only.
@@ -47,22 +48,14 @@ read -formal ub_mem_ptw.v
 read -formal ub_mem_ptw_if_props.sv
 read -formal ub_mem_ptw_hooks_inv.sv
 read -formal ub_mem_ptw_hooks_harness.sv
+# Only definition of ub_mem_ptw_desc_dec is the cut. Walker file
+# instantiates it but does not define it. Read the cut (sby copies
+# [files] by basename), then hierarchy once. Bound by module name.
+# Do not blackbox (sby prep flatten errors).
 read -formal ub_mem_ptw_desc_dec.sv
 hierarchy -check -top ub_mem_ptw_hooks_harness
 proc
 flatten
-# Yosys 0.33 drops dotted refs and ignores bind. After flatten the
-# cut drives the DUT-side instance nets (pycc names in #48
-# rtl/mem/hooks/ub_mem_ptw.v u_desc_dec port map):
-#   out_valid -> pyc_instance_147
-#   desc_v    -> pyc_instance_148
-#   desc_kind -> pyc_instance_149
-# Harness ties those inv ports to 0; -set replaces the ties.
-# Do not introduce tap_* aliases — connect -set unsets the lhs
-# driver and would disconnect a tap_* net from the inv port.
-connect -set \u_hooks_inv.dec_out_valid \u_dut.pyc_instance_147
-connect -set \u_hooks_inv.desc_v \u_dut.pyc_instance_148
-connect -set \u_hooks_inv.desc_kind \u_dut.pyc_instance_149
 opt
 memory -nomap
 opt -purge

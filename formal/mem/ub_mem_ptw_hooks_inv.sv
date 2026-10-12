@@ -37,7 +37,7 @@ module ub_mem_ptw_hooks_inv (
   wire chk = !rst_pyc;
 
   // #48 98818fc: walker returns to a legal encoding for any decode
-  // result. These two stay asserts-only on the free cut.
+  // result. These stay asserts-only on the free cut.
   always @(posedge core_clk) begin
     if (chk) begin
       // (a) state legal — obs_st is one of the SPEC §10 encodings.

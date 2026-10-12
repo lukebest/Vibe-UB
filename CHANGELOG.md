@@ -5,6 +5,8 @@
 ### Added
 
 - `tb/mem/stub_models/`：C 线 6 个私有解码叶子的 testbench 桩行为模型（契约 YAML 头驱动端口 / 延迟 / 编码；`ub_mem_ptw_desc_dec` 按 `desc_lvl` × `ENC_INVALID`/`ENC_TBL_PG`/`ENC_BLOCK` 十二格交叉；不解码 `raw`）。
+- 门禁 S-01(b)：`scripts/gate/contract_check.py` 扫 `docs/arch/*/contracts/*.md`；`contract_hash.py` 对 YAML 映射做规范 sha256；`gen_private_stub.py` 写 `pycircuit/<layer>/stub/` 并经 pycc 出 `rtl/<layer>/stub/`；公开 attest 路径 `reports/private/<layer>/<leaf>.yml`。规则 `docs/rules/verif_gate.md` §12 GATE-CONTRACT-* / GATE-PRIV-*。
+- `docs/SPEC.md` §14：线 C 第 9 章（UMMU / 译码器）首轮裁定写入 MEM 章（船长 2026-10-12 09:05 / D20；S-01 落地见同日 09:20）。每条引用规范节与决策 ID。§10.5 按 C-D1 撤 `mem_dec_b0`…`mem_dec_b7`。docs-only。
 - `docs/arch/mem/contracts/`：C 线私有解码叶子公开信号契约（D20 S-01 (b)；docs-only）。
 - `tb/models/ub_pcs_fec.py`：RS(128,120) FEC 编解码黄金模型（UB-PHY §3.2.2.1 / §3.2.3.5，SPEC §2.4 `ub_pcs_fec_enc` / `ub_pcs_fec_dec`；T=4 / T=2 / bypass）。
 - `scripts/impl/buffer_fanout.py`：Yosys JSON 上确定性 `buf_4`/`buf_8` 扇出树（quick-synth 默认在 abc 之后调用）。
@@ -27,6 +29,22 @@
 
 ### Changed
 
+- 门禁 hooks：`HOOKS-UB-MEM-PTW` 登记 `tb_mem_ptw_obs_st` / `tb_mem_ptw_obs_rd_pend`（只读、不受 `tb_test_mode`；批准人验证）。
+- 门禁 regpair：同一 FF Q 上架构 `_q` 名与 PRODUCT 输出口同时出现时按 `_q` 配对；多个 `_q` 或同名落到不同 cell 仍 `FAIL(pairing)`。
+- 门禁 formal：`GATE-FORMAL-DEPTH` (4)：PRODUCT prove 仅在同次 CI equiv 对该叶子真实 PASS 时可继承 HOOKS prove；否则回退 (2)。report-only `FORMAL_INHERIT_NO_EQUIV`。继承还要求该模块实例化的每个私有叶子都有 `EQUIV_BLACKBOX`。
+- 门禁 equiv：blackbox 集合 = `blackbox.yml` ∪ 契约叶子；PRODUCT≡HOOKS / regpair / emit flatten 前都 `blackbox`。flatten 则 `EQUIV_PRIVATE_FLATTENED`（#47 进 main 前 report-only）。
+- 门禁 lint：`GATE-ONE-MODULE-PER-FILE`。`MULTI_MODULE` 先 report-only；`PRIVATE_IN_PARENT` 在 #47 进 main 后拦。
+- `gen_private_stub.py --formal-free`：写 `formal/<layer>/cut/<leaf>.sv`（anyseq 自由输出）。cut 头 hash / HANDWRITTEN 同 rtl 桩。
+- 门禁 emit：`GATE-PYCLIB-SINGLE`：`rtl/pyc_lib/` 以外不得再有同名 / 同模块原语副本（`PYCLIB_COPY`），脚本不得从其它 ref 或 toolchain 拉取（`PYCLIB_FETCH`）。`rtl/common/pyc_reg.v` 在 main 仍有该文件时只报告（#5 删后自检提醒去 allowlist）。缺 `rtl/pyc_lib/` 仅在 main 已有该目录后硬拦。`PYCLIB_FETCH` / 其它 COPY 在 #47 进 main 后拦。
+- 门禁 contract-check：`GATE-OWNED-PATHS`：非守门人 PR 改 `scripts/gate/`、`.github/workflows/` → `GATE_FILE_TOUCHED`（「门禁文件由守门人维护」）。守门人 = PR 标题以 `gate:` 开头。`waivers/` 可在任意 PR 添加，须守门人评论 `GATE-WAIVER-APPROVED: <path>`；API 未接通前只报告。#47 进 main 前 `GATE_FILE_TOUCHED` report-only。
+- 门禁 formal：`GATE-PRIVATE-PARENT-FREE`：默认 sby 任务不得 `assume` 私有叶子输出口（桩切掉，父级断言在自由输出下成立）。诊断任务可单独命名。#47 进 main 前 report-only。
+- 门禁 formal：`GATE-FORMAL-DEPTH`（prove 收敛则必跑并记 k/runtime；否则 BMC 覆盖两笔完整事务+余量并附归纳反例初态，标 `not fully proven`。BMC depth ≥ 最深 cover + 6，现为 report-only）。
+- 门禁 contract-check：扫描 `docs/arch/*/contracts/`（含 pcs）。pcs 的 `parent` 查 `docs/arch/pcs/UARCH.md` §3 叶子列，不看 mem 表。
+- 门禁 contract-check：`scripts/gate/` 以外不得自带 `contract_hash.py` / `def contract_sha256`。#47 进 main 前只报告（`GATE-CONTRACT-HASH-SINGLE`）。
+- 门禁 contract-check：`assertions:` 必填、与正文 `` `AP_*` `` 一一对应。#49 把 README §8 标成「必填 / 参与 hash」之前只报告；标记进 main（或 `assertions_required: true`）后拦截。
+- 门禁 contract-check：`parent` 只认 `UARCH.md` §3 叶子表「叶子」列的本行名字（去反引号 / 空白后全等）。描述列或其它节出现同名不算；`+` 拼在同一格里的后续名字等设计拆行（#46）之后才算。缺行 `PARENT_UNKNOWN` 拦截，不设豁免。
+- SPEC §14 Q-C07 / Q-A08 / Q-A11：`ub_mem_tbl_rd` 的 `len`（8 bit 字节数，合法 8/32/64）与 `tag`（4 bit）；请求侧由寄存器驱动、不要求同拍首读，`valid && !ready` 时下一拍保持 `valid` 与 `addr`/`len`/`tag`（`AP_TBLRD_REQ_HOLD`）；遍历器事件口暂定 `evt_valid`/`evt_ready`、`EVT_CODE_W=4`、`EVT_MATT_WD_MISS`=1（等 Q-E09）；遍历器对 `ub_mem_ptw_desc_dec` 任意输出回到合法态，`desc_v=1` 且 `desc_kind` ∉ {1,2,3} 走既有翻译故障分支与既有故障码。§10 登记 `ub_mem_ptw` 观察口 `tb_mem_ptw_obs_st`（6 bit 一hot `{st_evt, st_flt, st_fill, st_dec, st_rd, st_idle}`，#48 `b522fd6`）与 `tb_mem_ptw_obs_rd_pend`（1 bit，`= rd_valid_q`；仅 `TEST_HOOKS=1`，不受 `tb_test_mode` 门控；`AP_TBLRD_REQ_HOLD` k-induction）。Xia 裁定 2026-10-12 11:05。
+- GATE-EQY-004 (split from #16 onto main): `equiv_ref.sh` / `equiv_regpair.py` write per-side named binary combinational AIGER for `&cec` (never `write_aiger -miter` / `-ascii`). NOT EQ is a verdict only with a replayable CEX; otherwise `SCRIPT_ERROR`. After `&cec` timeout, method (5) affine next-state folds `start`/`valid_in`/`last` (8 combos, `rst_pyc=0`) at Yosys coarse grain; allowed `$xor`/`$xnor`/`$not`/`$reduce_xor`/`$reduce_xnor`/`$pos`/const; leftover `$mux`/`$pmux` or other cells = N/A. Self-tests: `d[0]&d[1]` and data-bit `$mux` fail the precondition; one-bit affine plant is NOT EQ with CEX. **Open:** ABC `&cec` AIGER export on RX leaves 294 PIs unused (script bug); RX 1-bit POs fall back to Yosys `sat -prove-asserts`, remaining wide `rp_d_*` to affine.
 - `docs/arch/mem/contracts/`：六份叶子契约 YAML 增补必填 `assertions:`（正文引用的 `AP_*` ID，去重排序，参与契约 hash）。
 - 门禁（#21 对接）：lint 不再把 `rtl/pyc_lib/` 原语既 `-I` 又当第二份源（`MODDUP`）；cdc 对 `rtl/pyc_lib/` 的 `clk` 不报 `CLOCK_NOT_CORE`（产品叶子仍必须 `core_clk`）；`formal.sh` 在 `.sby` 目录跑 `sby`（`[files]` 同目录相对路径，与 `make -C formal` 一致），缺文件报 `SBY_FILE_MISSING` 不抛异常；CI 用 `setup_sby.sh` 装 YosysHQ/sby + z3（apt 没有 sby 包）；tb-selfcheck 按 `TOOLCHAIN.lock` 安装/要求 Verilator，`model/` / `tb/cmn` / `tb/models` 分别计数，pytest skip 即失败。provenance 维持 AST-only，重生成逐字节仍走 `scripts/emit_rtl.py`（不采纳自制 pycc argv 比对）。
 - `docs/arch/mem/contracts/`：Xia 裁定 2026-10-12（共用 4 bit 非法码、illegal 时其余输出清零、原因优先级、`desc_kind`、`out_ready` 反压、`in_ready` 复位后首拍、时钟域、YAML 机读头；D-05 项改暂缓；TECTE/MAPTE 条目尺寸、`lvl`、`ctx_mapt_bb_sz`；按 Q-A11，2 MB / 1 GB 页表块合法，`ILL_MAP_2MB` 只对应 TCTE 范围表颗粒度；`ub_mem_ptw_desc_dec` 保留 `desc_lvl[1:0]`，各级表按输入编码类 `ENC_INVALID` / `ENC_TBL_PG` / `ENC_BLOCK` 交叉，L0 / L3 保留编码走翻译故障；C-D1 后 `ub_mem_dec_ent_dec` L0/L1 均为寄存 1 拍；`comb_budget_ns` 仅 0 拍组合路径必填，寄存叶子不写该键）。

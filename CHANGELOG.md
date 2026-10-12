@@ -25,7 +25,8 @@
 
 ### Changed
 
-- SPEC §13 / §2.4 / §3 / §6.1 / §6.3 / §9 + DECISIONS D20：船长 2026-10-12 09:05 裁定 104 条待决表，全部按建议。A 线 A-01~A-24 / A-VL 逐行关闭（占位 / 已定 / 实现后回填）；Probe 与 RETRY_WAIT 默认 4 µs；`NUM_RETRY_THRESHOLD`/`NUM_PHY_REINIT_THRESHOLD`=15/4；`LFSR_INIT` 全 0 且 `en=0`；工艺 Sky130 代理；scrambler 只出 `_placeholder`。本 PR 吸收并收口 PR #9。
+- SPEC §13 / §2.4 / §3 / §6.1 / §6.3 / §9 + DECISIONS D20：船长 2026-10-12 09:05 裁定 104 条待决表，全部按建议。A 线 A-01~A-24 / A-VL 逐行关闭（占位 / 已定 / 实现后回填）；Probe 与 RETRY_WAIT 默认 4 µs（ceil → 323 拍）；`NUM_RETRY_THRESHOLD`/`NUM_PHY_REINIT_THRESHOLD`=15/4；`LFSR_INIT` 全 0 且 `en=0`；工艺 Sky130 代理；scrambler 只出 `_placeholder`。本 PR 吸收并收口 PR #9。
+- SPEC §4.1 / §6.3 / §6.4 / §9：`RETRY_WAIT_CYC` 16 bit CSR、单位拍、复位 323、合法 1..65535、0 硬件当 323 / 固件拒；进入 WAIT 当拍采样，到达当拍超时；叶子口 `retry_wait_cyc[15:0]` 接 `ub_csr`。Probe 用固定参数 323。固件从 `ub_regs.h` 取 `F_CORE`（后续 REGMAP PR 发出；本 PR 不改 `regmap.yaml`）。`pcs2lmsm_null_blk` 已在 §3.3.4 / §6.1。
 - SPEC §2.6：BCRC `last` 拍给出 `crc_word` 后 CRC 寄存器回到初值全 1；块首未带 `start` 的 `valid_in` 按全 1 计入，块中间未带 `start` 的 `valid_in` 接着当前 CRC 折入。上游仍应在每块首 flit 给 `start`。
 - synth-check：按 cell 类型（`$adff`/`$adffe`/`$dffsr` 等）识别异步复位触发器，对所有模块生效，不算 LATCH（豁免只作用于 LATCH，不跳过该行的 MULTI_DRIVE / COMBO_LOOP）。SCC 只对组合单元建图。真 latch、真组合环、异步 FF+真组合环三个假网表仍报失败。
 - SPEC §2.2：pyCircuit 源码目录与导入（已定）——叶子 `pycircuit/<层>/<leaf>.py`，门禁只扫该层 `*.py`（跳过 `lib/` 与 `__init__.py`）；同层 helper 在 `pycircuit/<层>/lib/` 不出网表；导入根 `pycircuit/`（`from <层>.lib import ...`），门禁 / `emit_rtl.py` / tb 把 `pycircuit/` 置于 `PYTHONPATH` 最前；仓库根目录不进 `sys.path`；工具按脚本路径调用。门禁细则见 `docs/rules/verif_gate.md`（PR #33）。架构 Xia 与守门人验证 2026-10-10 共同定。

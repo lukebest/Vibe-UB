@@ -436,8 +436,8 @@ LMB 为 16 个 8-bit 符号（见 UB-PHY §3.4.1）。种类：LTB、EEIB（§3.
 | `pcs_am_locked` | in | `NLANE` | 每 lane AM/AMCTL 锁定。可被 `tb_inj_am_lock` 旁路，不回灌 PCS |
 | `pcs_lid_bad` | in | 1 | 训练所见 Link_ID 非法/不一致。可被 `tb_inj_lid_bad` 旁路，不回灌 PCS |
 | `pcs_deskew_ok` | in | 1 | deskew 完成 |
-| `pcs2lmsm_null_blk` | in | 1 | RX 空块选通。宽 1，**1 拍脉冲**，复位 0。见 §6.1（§13 A-23） |
-| `pcs2lmsm_tx_null_blk` | in | 1 | TX 空块选通。宽 1，**1 拍脉冲**，复位 0。见 §6.1（§13 A-23） |
+| `pcs2lmsm_null_blk` | in | 1 | `core_clk`。PCS→LMSM。**1 拍脉冲**，复位 0。deskew 完成且 AMCTL+SDF 之后，全部已配置 RX lane 对齐的一个 Null Block 给一拍。见 §6.1（§13 A-23） |
+| `pcs2lmsm_tx_null_blk` | in | 1 | `core_clk`。PCS→LMSM。**1 拍脉冲**，复位 0。全部已配置 TX lane 发出一个 Null Block 时给一拍。见 §6.1（§13 A-23） |
 
 `ASCEND`：PCS 把物理 lane i 的 Lane_ID 取自 `lmsm2pcs_lane_id_map` 对应字节；`lmsm2pcs_lane_id_base` 等于逻辑 Tx_0 那一字节，供对照。`PHYS`：PCS 写物理 lane 号，不用 map/base。`NULL`（mode=2 或 3）：各激活 lane 的 Lane_ID 均为 §3.4.1.1 的空值。
 
@@ -500,6 +500,7 @@ M1 **只有** `core_clk`。它就是 PMA 并行字时钟：
 - 多时钟是 M1 **非目标**。产品通路不做 CDC。
 - PMA 模型与 PCS 同拍于 `core_clk`。xN 时接口宽度 `N*32`，无需跨时钟齿轮箱。
 - 工艺先用 Sky130 开源 PDK 代理值估算（§13 A-20）。`F_CORE` 已按上式确定，与工艺无关。
+- 固件从生成头文件 `ub_regs.h` 取 `F_CORE`（`F_CORE` 将作为 `regmap.yaml` 全局参数，由 `gen_regmap.py` 在 #11 之后的 REGMAP PR 发出；本 PR 不改 `regmap.yaml`）。`RETRY_WAIT_CYC` 复位默认 323 拍按本 `F_CORE` 计算，见 §6.3。
 
 pyc4.0 的 CDC 原语仍只允许按 §4.3 使用；M1 生成网表中不应出现跨时钟 FIFO。后续里程碑若引入第二时钟，再开新决策，不在 M1 预留 `pma_clk` 端口。
 
@@ -645,7 +646,7 @@ PCS 职责：deskew 完成且 AMCTL+SDF 之后，对全部已配置 RX lane 对�
 | `Retrain.Confirm` | 48 ms | §3.4.3.8 |
 | `Change_Speed` 失败回 Idle | 48 ms | §3.4.3.9 |
 | `Equalization`（≤ DR4） | EQ.Passive 32 ms；EQ.Active 24 ms | §3.4.2.9、§3.4.3.10 |
-| `Probe.Wait` / `Probe.Confirm` | 默认 **4 µs**（周期数 = ceil(4 µs × `F_CORE`)，按 §4.1 的 `F_CORE` = 2.578125e9/32 Hz 算得默认值 **323** 拍（322.27 向上取整）；`F_CORE` 变更时按同一公式重算。实际超时不短于 4 µs）。验证期可用 `LMSM_TMR_SCALE` 缩短 | §3.4.3.2；§13 A-08 |
+| `Probe.Wait` / `Probe.Confirm` | 固定参数 **323** 拍（ceil(4 µs × `F_CORE`)，§4.1 `F_CORE` ≈ 80.57 MHz）。无 CSR 可调字段。验证期可用 `LMSM_TMR_SCALE` 缩短步进 | §3.4.3.2；§13 A-08 |
 | `Change_Speed` 电气空闲停留 | M1 最短停留后回 Retrain | §3.4.3.9；§13 A-09 |
 
 `cfg_*` LTB 通告针脚：端口保留；M1 用参数或绑死默认通告 DR0，后续由 CSR / 附录 D 镜像驱动电平（§13 A-24）。
@@ -686,7 +687,7 @@ stateDiagram-v2
 | REQ → WAIT | `Retry_Req_Set` 已连续发完（1 Retry_Idle + 32 Retry_Req） |
 | REQ → RETRAIN | 进入 REQ 时 `NUM_RETRY` 增 1 后等于 `NUM_RETRY_THRESHOLD`，或物理层开始重训；此时清 `NUM_RETRY` |
 | WAIT → NORMAL | 收到对端 `Retry_Ack_Set` |
-| WAIT → REQ | 等应答超时（`RETRY_WAIT_CYC`，周期数 = ceil(4 µs × `F_CORE`)=323，CSR 可调） |
+| WAIT → REQ | 等应答超时：进入 WAIT 当拍采样的 `RETRY_WAIT_CYC` 到达当拍（16 bit CSR，复位 323，合法 1..65535） |
 | WAIT → RETRAIN | 物理层开始重训 |
 | RETRAIN → REQ | 物理层重训成功 |
 | RETRAIN → ERROR | 进入 RETRAIN 时 `NUM_PHY_REINIT` 增 1 后等于 `NUM_PHY_REINIT_THRESHOLD`；此时清 `NUM_PHY_REINIT` |
@@ -694,7 +695,11 @@ stateDiagram-v2
 
 REQ / WAIT：只允许 Retry_Idle / Retry_Req / Retry_Ack；其它 DLLCB/DLLDP 丢弃。RETRAIN / ERROR：不收不发。RETRAIN 中若 PHY 报 `link_up==0`，DLL 回 `DLL_Disabled`（§4.7.3.3、§4.2）。
 
-阈值（已定，规范推荐已采用，§13 A-12）：`NUM_RETRY_THRESHOLD=15`，`NUM_PHY_REINIT_THRESHOLD=4`。`RETRY_WAIT_CYC` 默认 **4 µs**（周期数 = ceil(4 µs × `F_CORE`)，按 §4.1 的 `F_CORE` = 2.578125e9/32 Hz 算得默认值 **323** 拍（322.27 向上取整）；`F_CORE` 变更时按同一公式重算。实际超时不短于 4 µs。CSR 可调，§13 A-10）。
+阈值（已定，规范推荐已采用，§13 A-12）：`NUM_RETRY_THRESHOLD=15`，`NUM_PHY_REINIT_THRESHOLD=4`。
+
+**`RETRY_WAIT_CYC`（已定，§13 A-10；交叉 §4.1）：** CSR 字段宽 **16** bit，单位 `core_clk` 拍。复位值 **323** = ceil(4 µs × `F_CORE`)，`F_CORE` ≈ 80.57 MHz（§4.1）。合法范围 **1..65535**（上限约 813 µs）。**0** 为保留/非法：硬件把 0 当 323（复位默认）；固件把 0 与越界值判为非法配置并拒绝。叶子计数器/比较器宽 **16** bit（按合法范围上限 65535 定宽）。`ub_dll_retry` 以输入口 `retry_wait_cyc[15:0]` 接 `ub_csr`，参数默认 323。固件从 `ub_regs.h` 取 `F_CORE`（`regmap.yaml` 全局参数由后续 REGMAP PR 经 `gen_regmap.py` 发出；本 PR 不改 `regmap.yaml`）。
+
+**装载与超时沿（已定）：** 进入 WAIT 的当拍采样并装载当时的 `RETRY_WAIT_CYC`（0 折成 323）。本轮 WAIT 计数用该采样值；计数进行中的 CSR 写从下一次进入 WAIT 起生效。计数到达该采样值的当拍给出 `ub_dll_retry_wait_to`（1 拍脉冲）并走 WAIT → REQ；到达前一拍保持 WAIT。
 
 **事件输入口**（`ub_dll_retry` 叶子；已有模块间口不改名。已定，§13 A-13）：重训相关与 `link_up` / 复位为电平，其余事件 1 拍脉冲。
 
@@ -745,7 +750,7 @@ ACK 态：只发应答集与标记重放块；收方向仍正常收。
 | `ub_dll_retry_req_set` | 1 | **1 拍脉冲**，复位 0 | RX 解析：已收齐对端 `Retry_Req_Set` | NORMAL → ACK；ACK 保持 ACK |
 | `ub_dll_retry_ack_set_done` | 1 | **1 拍脉冲**，复位 0 | 本叶 TX：应答集与本轮重放都已发完 | ACK → NORMAL |
 
-本 SM 没有重训 / 超时 / 阈值事件口。
+本 SM 没有重训 / 超时 / 阈值事件口。`RETRY_WAIT_CYC` 只服务 §6.3 的 WAIT。
 
 **同拍优先级：** 复位 → NORMAL；`ub_dll_retry_req_set` → ACK（覆盖当拍的 `ub_dll_retry_ack_set_done`）；`ub_dll_retry_ack_set_done` → NORMAL。
 
@@ -773,7 +778,7 @@ ACK 态：只发应答集与标记重放块；收方向仍正常收。
 | 非法 / 未使能 VL | NW TX `nw_tx_vl` | 整包丢弃；`CNT_BAD_VL` +1；粘滞 `IRQ_STATUS.BAD_VL` | §4.5 |
 | CSR 未映射地址 | 译码 | 读返回 0 且 `csr_err=1`；写忽略且 `csr_err=1`（响应在请求下一拍） | 项目约定 |
 
-超时的具体微秒/拍数：规范有的以节号为准（例如部分 LMSM 超时在 §3.4.3.x），实现时对照，**不抄进本仓库**。Probe 等待与 `RETRY_WAIT_CYC` 默认 4 µs，见 §6.1 / §6.3。
+超时的具体微秒/拍数：规范有的以节号为准（例如部分 LMSM 超时在 §3.4.3.x），实现时对照，**不抄进本仓库**。Probe 等待固定参数 323 拍；`RETRY_WAIT_CYC` 复位 323、CSR 可调，见 §6.1 / §6.3。
 
 信用：0 信用只反压。下溢（实现把计数减过 0）才走错误计数 / 粘滞 / irq。对端少归还走超时（§4.8.1）。RTL 不对下溢做 assertion。
 
@@ -834,7 +839,7 @@ M1 列中 Xia 提出的默认值已由船长确认。2026-10-12 裁定见 D20 / 
 | DLLDP 最大 flit | `MAX_DP_FLITS` | 512 | 512 | UB-DL §4.3.2.1（1–512 flit） |
 | `NUM_RETRY_THRESHOLD` | 同名 | 15 | 同 | §4.7.3.3 规范推荐已采用（§13 A-12） |
 | `NUM_PHY_REINIT_THRESHOLD` | 同名 | 4 | 同 | §4.7.3.3 规范推荐已采用（§13 A-12） |
-| RETRY WAIT 超时 | `RETRY_WAIT_CYC` | ceil(4 µs × `F_CORE`)=323 | CSR 可调 | §6.3、§13 A-10；§4.1 `F_CORE`=2.578125e9/32 Hz，322.27 向上取整；`F_CORE` 变更时按同一公式重算。实际超时不短于 4 µs |
+| RETRY WAIT 超时 | `RETRY_WAIT_CYC` | 323（16 bit CSR，1..65535；0→323） | CSR 可调 | §6.3、§4.1、§13 A-10。复位 ceil(4 µs × `F_CORE`)=323；叶子口 `retry_wait_cyc[15:0]`，计数器 16 bit |
 | 预编码 | `PRECODE_EN` | 0（关） | **待定** | UB-PHY §3.3.2；M1 默认关，已定 |
 | 工艺 | — | Sky130 开源 PDK 代理 | — | §13 A-20；估算用 |
 | 目标频率 | `F_CORE` | ≈80.57 MHz | 同 | `2.578125e9/32`；已定 |
@@ -1050,9 +1055,9 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 | A-05 | `pma_rx_data_valid_lane` | **已定** | 不用 per-lane valid；deskew 用 AMCTL 位置；端口删除并列非目标 | §1.2、§3.2.4 |
 | A-06 | `pma_tx_width` / `pma_rx_width` | **已定** | 与 `NUM_LANES_*` 同：二进制 1/2/4/8，其余保留，TB assert | §3.2.5、§9 |
 | A-07 | PMA 均衡针脚 | **已定** | M1 不加；列为非目标（DR0） | §1.2、§3.2.5 |
-| A-08 | Probe 等待 / 部分计数超时 | **已定** | 默认 4 µs（周期数 = ceil(4 µs × `F_CORE`)，§4.1 算得 323 拍；`F_CORE` 变更时按同一公式重算。实际超时不短于 4 µs）；验证期用 `LMSM_TMR_SCALE` 缩短 | §6.1、§9 |
+| A-08 | Probe 等待 / 部分计数超时 | **已定** | 固定参数 323 拍（ceil(4 µs × `F_CORE`)）；无 CSR 可调字段；验证期用 `LMSM_TMR_SCALE` 缩短步进 | §6.1、§9 |
 | A-09 | `Change_Speed` 电气空闲停留 | **已定** | M1 不改速：最短停留后回 Retrain；超时 48 ms；列为非目标 | §1.2、§6.1 |
-| A-10 | `RETRY_WAIT_CYC` | **已定** | 默认 4 µs（周期数 = ceil(4 µs × `F_CORE`)，§4.1 算得 323 拍；`F_CORE` 变更时按同一公式重算。实际超时不短于 4 µs），CSR 可调 | §6.3、§9 |
+| A-10 | `RETRY_WAIT_CYC` | **已定** | 16 bit CSR，单位拍，复位 323，合法 1..65535，0 硬件当 323、固件拒；进入 WAIT 当拍采样，到达当拍超时 | §6.3、§4.1、§9 |
 | A-11 | `LMSM_TMR_SCALE` / `AM_IVL_SCALE` | **已定** | 0 → 每拍 +1；非 0 → 每拍 +SCALE | §9、§10.4 |
 | A-12 | `NUM_RETRY_THRESHOLD` / `NUM_PHY_REINIT_THRESHOLD` | **已定** | 规范推荐已采用：15 / 4 | §6.3、§9 |
 | A-13 | RETRY_*_SM 事件口 / 脉冲或电平 / 同拍优先级 | **已定** | 重训与 `link_up`/复位为电平，其余 1 拍脉冲；优先级见 §6.3 / §6.4 | §6.3、§6.4 |

@@ -634,7 +634,7 @@ module ub_mem_ptw_smoke_tb;
       end
     end
 
-    // AP_TBLRD_REQ_HOLD + extra cycle from req accept to first rd_valid.
+    // AP_TBLRD_REQ_HOLD + first rd_valid 1 cycle after req accept.
     // Hold mem2host_rd_ready so the monitor sees valid/addr/len/tag hold.
     begin
       integer guard;
@@ -655,8 +655,8 @@ module ub_mem_ptw_smoke_tb;
         errors = errors + 1;
       end else begin
         first_rd_lat = lat;
-        if (first_rd_lat != 2) begin
-          $display("FAIL: first mem2host_rd_valid at +%0d (want +2)", first_rd_lat);
+        if (first_rd_lat != 1) begin
+          $display("FAIL: first mem2host_rd_valid at +%0d (want +1)", first_rd_lat);
           errors = errors + 1;
         end
         repeat (3) tick;

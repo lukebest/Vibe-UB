@@ -4,7 +4,7 @@
 
 ### Added
 
-- `ub_mem_ptw`：C 线页表遍历器（4 KB 粒度，L0–L3；`mem2host_rd_*` 全宽口，SPEC §14 Q-C07 / Q-A08 / Q-A18 (D20)；表读请求口出寄存器，`AP_TBLRD_REQ_HOLD`；`EVT_MATT_WD_MISS` / `RD_LEN_8B`；读回描述符寄存后交给 `ub_mem_ptw_desc_dec`；块/页合成 4 KB `fill_*`）。HOOKS 只读观察口 `tb_mem_ptw_obs_st` / `tb_mem_ptw_obs_rd_pend`（登记 SPEC §10，#50）。公开占位桩源 `pycircuit/mem/stub/ub_mem_ptw_desc_dec.py`（`contract_sha256: HANDWRITTEN`）。
+- `ub_mem_ptw`：C 线页表遍历器（4 KB 粒度，L0–L3；`mem2host_rd_*` 全宽口，SPEC §14 Q-C07 / Q-A08 / Q-A18 (D20)；表读请求口出寄存器，`AP_TBLRD_REQ_HOLD`，`mem2host_rd_addr` 接 `addr_q` Q；`EVT_MATT_WD_MISS` / `RD_LEN_8B`；读回描述符寄存后交给 `ub_mem_ptw_desc_dec`；块/页合成 4 KB `fill_*`）。HOOKS 只读观察口 `tb_mem_ptw_obs_st` / `tb_mem_ptw_obs_rd_pend`（登记 SPEC §10，#50）。公开占位桩源 `pycircuit/mem/stub/ub_mem_ptw_desc_dec.py`（`contract_sha256: HANDWRITTEN`）。
 - `docs/arch/mem/contracts/`：C 线私有解码叶子公开信号契约（D20 S-01 (b)；docs-only）。
 - `tb/models/ub_pcs_fec.py`：RS(128,120) FEC 编解码黄金模型（UB-PHY §3.2.2.1 / §3.2.3.5，SPEC §2.4 `ub_pcs_fec_enc` / `ub_pcs_fec_dec`；T=4 / T=2 / bypass）。
 - `scripts/impl/buffer_fanout.py`：Yosys JSON 上确定性 `buf_4`/`buf_8` 扇出树（quick-synth 默认在 abc 之后调用）。
@@ -27,6 +27,7 @@
 
 ### Changed
 
+- GATE-EQY-004 (split from #16 onto main): `equiv_ref.sh` / `equiv_regpair.py` write per-side named binary combinational AIGER for `&cec` (never `write_aiger -miter` / `-ascii`). NOT EQ is a verdict only with a replayable CEX; otherwise `SCRIPT_ERROR`. After `&cec` timeout, method (5) affine next-state folds `start`/`valid_in`/`last` (8 combos, `rst_pyc=0`) at Yosys coarse grain; allowed `$xor`/`$xnor`/`$not`/`$reduce_xor`/`$reduce_xnor`/`$pos`/const; leftover `$mux`/`$pmux` or other cells = N/A. Self-tests: `d[0]&d[1]` and data-bit `$mux` fail the precondition; one-bit affine plant is NOT EQ with CEX. **Open:** ABC `&cec` AIGER export on RX leaves 294 PIs unused (script bug); RX 1-bit POs fall back to Yosys `sat -prove-asserts`, remaining wide `rp_d_*` to affine.
 - `docs/arch/mem/contracts/`：六份叶子契约 YAML 增补必填 `assertions:`（正文引用的 `AP_*` ID，去重排序，参与契约 hash）。
 - 门禁（#21 对接）：lint 不再把 `rtl/pyc_lib/` 原语既 `-I` 又当第二份源（`MODDUP`）；cdc 对 `rtl/pyc_lib/` 的 `clk` 不报 `CLOCK_NOT_CORE`（产品叶子仍必须 `core_clk`）；`formal.sh` 在 `.sby` 目录跑 `sby`（`[files]` 同目录相对路径，与 `make -C formal` 一致），缺文件报 `SBY_FILE_MISSING` 不抛异常；CI 用 `setup_sby.sh` 装 YosysHQ/sby + z3（apt 没有 sby 包）；tb-selfcheck 按 `TOOLCHAIN.lock` 安装/要求 Verilator，`model/` / `tb/cmn` / `tb/models` 分别计数，pytest skip 即失败。provenance 维持 AST-only，重生成逐字节仍走 `scripts/emit_rtl.py`（不采纳自制 pycc argv 比对）。
 - `docs/arch/mem/contracts/`：Xia 裁定 2026-10-12（共用 4 bit 非法码、illegal 时其余输出清零、原因优先级、`desc_kind`、`out_ready` 反压、`in_ready` 复位后首拍、时钟域、YAML 机读头；D-05 项改暂缓；TECTE/MAPTE 条目尺寸、`lvl`、`ctx_mapt_bb_sz`；按 Q-A11，2 MB / 1 GB 页表块合法，`ILL_MAP_2MB` 只对应 TCTE 范围表颗粒度；`ub_mem_ptw_desc_dec` 保留 `desc_lvl[1:0]`，各级表按输入编码类 `ENC_INVALID` / `ENC_TBL_PG` / `ENC_BLOCK` 交叉，L0 / L3 保留编码走翻译故障；C-D1 后 `ub_mem_dec_ent_dec` L0/L1 均为寄存 1 拍；`comb_budget_ns` 仅 0 拍组合路径必填，寄存叶子不写该键）。

@@ -71,13 +71,37 @@ def _expect_none(name: str, findings: list[Finding], rule: str) -> None:
     print(f"SELFTEST PASS {name}: no {rule}")
 
 
+SECTION3_EXACT = """\
+## 3. 叶子划分
+
+| 模块 | 本草案叶子 | 类型 | 职责（一句话） |
+| --- | --- | --- | --- |
+| `ub_mem_ptw` | `ub_mem_ptw` | 结构 | structure |
+"""
+
+SECTION3_DESC_ONLY = """\
+## 3. 叶子划分
+
+| 模块 | 本草案叶子 | 类型 | 职责（一句话） |
+| --- | --- | --- | --- |
+| `ub_mem_xlat` | `ub_mem_tlb` | 结构 | 遍历器 `ub_mem_ptw` 只写在描述列 |
+"""
+
+
+def _write_uarch(root: Path, text: str, layer: str = "mem") -> Path:
+    path = root / "docs" / "arch" / layer / "UARCH.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
 def _write_contract(root: Path, text: str, layer: str = "mem", name: str = "ub_mem_toy_dec") -> Path:
     path = root / "docs" / "arch" / layer / "contracts" / f"{name}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     uarch = root / "docs" / "arch" / layer / "UARCH.md"
     if not uarch.is_file():
-        uarch.write_text("| `ub_mem_ptw` | structure |\n", encoding="utf-8")
+        _write_uarch(root, SECTION3_EXACT, layer)
     return path
 
 
@@ -159,6 +183,7 @@ def test_hash_assertion_changes() -> None:
 def test_parent_ok_and_unknown() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
+        _write_uarch(root, SECTION3_EXACT)
         path = _write_contract(root, VALID_YAML)
         data, errs = parse_contract_file(path, root)
         if errs or data is None:
@@ -169,6 +194,22 @@ def test_parent_ok_and_unknown() -> None:
         data, _ = parse_contract_file(path, root)
         assert data is not None
         _expect("parent-unknown", validate_contract(data, root), "PARENT_UNKNOWN")
+
+
+def test_parent_description_not_row() -> None:
+    """parent in another row's description column is not an own row."""
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _write_uarch(root, SECTION3_DESC_ONLY)
+        path = _write_contract(root, VALID_YAML)
+        data, errs = parse_contract_file(path, root)
+        if errs or data is None:
+            _fail("parent-desc-only", f"parse failed: {errs}")
+        _expect(
+            "parent-desc-only",
+            validate_contract(data, root),
+            "PARENT_UNKNOWN",
+        )
 
 
 def test_comb_budget() -> None:
@@ -393,8 +434,10 @@ def test_scan_includes_pcs_layer() -> None:
             "parent: ub_mem_ptw", "parent: ub_pcs_lane_dist"
         )
         _write_contract(root, pcs, layer="pcs", name="ub_pcs_toy_dec")
-        (root / "docs" / "arch" / "pcs" / "UARCH.md").write_text(
-            "| `ub_pcs_lane_dist` |\n", encoding="utf-8"
+        _write_uarch(
+            root,
+            SECTION3_EXACT.replace("ub_mem_ptw", "ub_pcs_lane_dist"),
+            layer="pcs",
         )
         findings = collect_contract_findings(root, paths=[], title="")
         if any(f.rule == "CONTRACT_YAML" for f in findings):
@@ -408,6 +451,7 @@ def run_all() -> None:
         test_hash_indent_comment_stable,
         test_hash_assertion_changes,
         test_parent_ok_and_unknown,
+        test_parent_description_not_row,
         test_comb_budget,
         test_stub_hash_match_and_mismatch,
         test_stub_handwritten_report,

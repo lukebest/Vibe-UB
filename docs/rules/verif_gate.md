@@ -414,7 +414,7 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 | ID | 规则 | 来源 | 日期 |
 | --- | --- | --- | --- |
 | GATE-CONTRACT-001 | `scripts/gate/contract_hash.py`：`yaml.safe_load` 后 `json.dumps(obj, sort_keys=True, separators=(',',':'), ensure_ascii=False)` 的 UTF-8 再 sha256。全部字段参与（含 `assertions`）。列表顺序保留。缩进 / 注释 / 正文不改变 digest | 本分册 | 2026-10-12 |
-| GATE-CONTRACT-002 | 字段缺失或类型不符 → FAIL。`parent` 必须在该层 `UARCH.md` 叶子表或 `MODULE_INVENTORY` | README §8 | 2026-10-12 |
+| GATE-CONTRACT-002 | 字段缺失或类型不符 → FAIL。`parent` 必须等于该层 `UARCH.md` **§3 叶子表「叶子」列**某一行（去反引号 / 空白后全等）。描述列、其它列、正文、以及同一格 `+` 后面的名字都不算。缺行 → `PARENT_UNKNOWN`（拦）。`MODULE_INVENTORY` 仍可补 | README §8 / PM | 2026-10-12 |
 | GATE-CONTRACT-003 | `comb_budget_ns`：组合 / 0 拍叶子缺 → FAIL；寄存叶子带了 → FAIL | Xia | 2026-10-12 |
 | GATE-CONTRACT-004 | 正文出现 YAML `assertions` 未收录的 `` `AP_*` `` → `CONTRACT_ASSERT_UNLISTED`（warn / report-only） | 本分册 | 2026-10-12 |
 | GATE-PRIV-001 | `scripts/gate/private_leaves.yml` 登记私有叶子 | D20 | 2026-10-12 |

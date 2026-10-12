@@ -28,6 +28,8 @@ from gatelib import (  # noqa: E402
 PRIVATE_LIST = Path(__file__).resolve().parent / "private_leaves.yml"
 AP_RE = re.compile(r"`(AP_[A-Z0-9_]+)`")
 LEAF_TICK_RE = re.compile(r"`(ub_[a-z0-9_]+)`")
+UARCH_H2_RE = re.compile(r"^##[ \t]+(\d+)\b", re.M)
+PLAIN_LEAF_RE = re.compile(r"\Aub_[a-z0-9_]+\Z")
 HASH_HEADER_RE = re.compile(
     r"contract_sha256:\s*([0-9a-fA-F]{64}|HANDWRITTEN)\b"
 )
@@ -135,11 +137,84 @@ def layer_of_contract(path: Path, root: Path) -> str:
     return "unknown"
 
 
+def _uarch_section(text: str, number: int) -> str:
+    """Body of `## N` up to the next `##` heading (exclusive)."""
+    starts = [
+        (m.start(), int(m.group(1))) for m in UARCH_H2_RE.finditer(text)
+    ]
+    for i, (pos, num) in enumerate(starts):
+        if num != number:
+            continue
+        line_end = text.find("\n", pos)
+        body_at = len(text) if line_end < 0 else line_end + 1
+        end = starts[i + 1][0] if i + 1 < len(starts) else len(text)
+        return text[body_at:end]
+    return ""
+
+
+def _md_table_rows(section: str) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for raw in section.splitlines():
+        line = raw.strip()
+        if not line.startswith("|"):
+            if rows:
+                break
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if cells and all(re.fullmatch(r":?-{3,}:?", c.replace(" ", "")) for c in cells):
+            continue
+        rows.append(cells)
+    return rows
+
+
+def _leaf_name_column(header: list[str]) -> int:
+    """Prefer the '本草案叶子' / '叶子' column; fall back to the first cell."""
+    for i, cell in enumerate(header):
+        title = cell.replace("`", "").strip()
+        if "叶子" in title and "职责" not in title:
+            return i
+    return 0
+
+
+def _row_leaf_name(cell: str) -> str | None:
+    """Own-row identity of one §3 leaf-name cell.
+
+    Strip backticks/whitespace. A cell that is exactly one `ub_*` name
+    is that row. A combined `A + B + C` cell is one row owned by A
+    (the first name) until design splits B/C into their own rows.
+    Description text is not passed in.
+    """
+    if not cell or cell in {"—", "-", "–"}:
+        return None
+    ticks = LEAF_TICK_RE.findall(cell)
+    if ticks:
+        return ticks[0]
+    plain = cell.replace("`", "").strip()
+    if PLAIN_LEAF_RE.fullmatch(plain):
+        return plain
+    return None
+
+
 def load_uarch_leaves(root: Path, layer: str) -> set[str]:
+    """Leaf names that have their own row in UARCH.md §3 (leaf-name column)."""
     path = root / "docs" / "arch" / layer / "UARCH.md"
     if not path.is_file():
         return set()
-    return set(LEAF_TICK_RE.findall(path.read_text(encoding="utf-8")))
+    section = _uarch_section(path.read_text(encoding="utf-8"), 3)
+    if not section:
+        return set()
+    rows = _md_table_rows(section)
+    if not rows:
+        return set()
+    idx = _leaf_name_column(rows[0])
+    names: set[str] = set()
+    for row in rows[1:]:
+        if idx >= len(row):
+            continue
+        name = _row_leaf_name(row[idx])
+        if name:
+            names.add(name)
+    return names
 
 
 def load_inventory_leaves(root: Path) -> set[str]:
@@ -504,8 +579,9 @@ def validate_contract(data: dict[str, Any], root: Path) -> list[Finding]:
                     file=file_rel,
                     rule="PARENT_UNKNOWN",
                     message=(
-                        f"parent {parent!r} is not in docs/arch/{layer}/UARCH.md "
-                        "leaf table or MODULE_INVENTORY"
+                        f"parent {parent!r} has no own row in "
+                        f"docs/arch/{layer}/UARCH.md §3 leaf-name column "
+                        "(description / other columns / + extras do not count)"
                     ),
                 )
             )

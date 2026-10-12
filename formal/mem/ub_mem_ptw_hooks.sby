@@ -4,23 +4,21 @@
 # (no tb_*). Auxiliaries are asserts only, never assumed.
 #
 # Encoding values: SPEC §10 table (not yet on #50); interim values from
-# #48 a06758a / designer posting. Cite SPEC §10 in the localparam block.
+# #48. Cite SPEC §10 in the localparam block.
 #
-# Default task: cover only. Unconstrained bmc 24 of a_st_legal FAILs
-# at step 9 (obs_st=0): cut fires desc_v=1, desc_kind=KIND_INVALID,
-# !illegal — no next-state arm, all one-hot D bits drop. That combo
-# is not contract-legal (AP_PTW_FAULT / AP_PTW_KIND_LVL). a_st_legal
-# is not weakened. prove stays non-default.
-# Diagnostic (untagged): `sby -f ub_mem_ptw_hooks.sby bmc_contract`
-# splices ub_mem_ptw_desc_dec_cut_contract.sv ($anyseq + contract
-# output-combo assumes). Manual unconstrained: `... bmc` / `prove`.
+# Decoder cut is fully free ($anyseq). #48 98818fc catch-all: desc_v=1
+# with kind not table/block/page → existing flt_xlat; any state with
+# no legal next falls back to st_idle. a_st_legal / a_rd_pend_st are
+# checked on that free cut (no contract assumes).
+#
+# Default tasks: cover + bmc 24. prove stays untagged until it
+# converges (gatekeeper moves it). Manual: `sby -f ub_mem_ptw_hooks.sby prove`.
 # hooks-port-consistency may be red until #50 registers the ports.
 
 [tasks]
-cover default uncon
-bmc uncon
-prove uncon
-bmc_contract
+cover default
+bmc default
+prove
 
 [options]
 cover:
@@ -35,31 +33,11 @@ prove:
 mode prove
 depth 20
 --
-bmc_contract:
-mode bmc
-depth 24
---
 
 [engines]
 smtbmc yices
 
 [script]
-bmc_contract:
-read -formal ub_mem_ptw.v
-read -formal ub_mem_ptw_if_props.sv
-read -formal ub_mem_ptw_hooks_inv.sv
-read -formal ub_mem_ptw_hooks_harness.sv
-hierarchy -check -top ub_mem_ptw_hooks_harness
-delete ub_mem_ptw_desc_dec
-read -formal ub_mem_ptw_desc_dec_cut_contract.sv
-hierarchy -check -top ub_mem_ptw_hooks_harness
-proc
-flatten
-opt
-memory -nomap
-opt -purge
---
-uncon:
 read -formal ub_mem_ptw.v
 read -formal ub_mem_ptw_if_props.sv
 read -formal ub_mem_ptw_hooks_inv.sv
@@ -73,13 +51,11 @@ flatten
 opt
 memory -nomap
 opt -purge
---
 
 [files]
 ub_mem_ptw_if_props.sv
 ub_mem_ptw_hooks_inv.sv
 ub_mem_ptw_hooks_harness.sv
 ub_mem_ptw_desc_dec_cut.sv
-ub_mem_ptw_desc_dec_cut_contract.sv
 inc/pyc_reg.v
 ../../rtl/mem/hooks/ub_mem_ptw.v

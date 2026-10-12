@@ -19,14 +19,10 @@
 #           depth 24 (two full walks + margin; >= deepest cover + 6)
 # prove is defined but not tagged `default` (gatekeeper: not fully
 # proven — not a waiver). Manual: `sby -f ub_mem_ptw.sby prove`.
-# Status: bmc 24 PASS, prove not converged.
-# k=20: basecase PASS, induction FAIL (step 0). CEX start is unreachable
-# (reset deasserted; pyc_reg_45 multi-hot st_idle+st_rd+st_dec+st_fill
-# with rd_valid_q=0; addr_q=0 vs property shadow f_rd_addr_q MSB set).
-# #48 b522fd6: HOOKS obs ports + mem2host_rd_addr = addr_q
-# (rd_addr_q dropped; first mem2host_rd_valid is +1 cycle after
-# accept). State auxiliaries live only in ub_mem_ptw_hooks.sby (#55).
-# Encoding table is SPEC §10. Hooks-port registration lands in #50.
+# Status: rerun pending against #48 98818fc (decode catch-all).
+# State auxiliaries live only in ub_mem_ptw_hooks.sby (#55), on a
+# fully free decoder cut. Encoding table is SPEC §10. Hooks-port
+# registration lands in #50.
 #
 # [files] are relative to this directory (sby_dir = formal/mem/).
 

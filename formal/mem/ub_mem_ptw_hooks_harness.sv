@@ -144,7 +144,11 @@ module ub_mem_ptw_hooks_harness (
     .core_clk(core_clk),
     .rst_pyc(rst_pyc),
     .tb_mem_ptw_obs_st(tb_mem_ptw_obs_st),
-    .tb_mem_ptw_obs_rd_pend(tb_mem_ptw_obs_rd_pend)
+    .tb_mem_ptw_obs_rd_pend(tb_mem_ptw_obs_rd_pend),
+    .dec_out_valid(u_dut.u_desc_dec.out_valid),
+    .desc_v(u_dut.u_desc_dec.desc_v),
+    .desc_kind(u_dut.u_desc_dec.desc_kind),
+    .fill_valid(fill_valid)
   );
 
 endmodule

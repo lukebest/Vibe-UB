@@ -4,6 +4,7 @@
 
 ### Added
 
+- `docs/arch/mem/contracts/`：C 线私有解码叶子公开信号契约（D20 S-01 (b)；docs-only）。
 - `tb/models/ub_pcs_fec.py`：RS(128,120) FEC 编解码黄金模型（UB-PHY §3.2.2.1 / §3.2.3.5，SPEC §2.4 `ub_pcs_fec_enc` / `ub_pcs_fec_dec`；T=4 / T=2 / bypass）。
 - `scripts/impl/buffer_fanout.py`：Yosys JSON 上确定性 `buf_4`/`buf_8` 扇出树（quick-synth 默认在 abc 之后调用）。
 - 工具守门 CI：`.github/workflows/gate.yml` + `scripts/gate/` + `make gate`（emit / 端口一致性 / lint / CDC / formal / synth-check / regmap `--check` / tb-selfcheck）。名单在 `gate/`（legacy / handwritten / stubs / hooks_ports），豁免在 `waivers/`，批准规则相同。等价主工具 eqy（`TOOLCHAIN.lock` `eqy_lock`），不可用则回退 Yosys `equiv_*` 并注明工具。规则分册 `docs/rules/verif_gate.md`。CODEOWNERS 将 `waivers/`、`gate/`、gate workflow 指给 `lukebest`。不改 `rtl/`、`tb/models/`、`model/`。SPEC §11 仅补 Xia 端口裁定 (f)。
@@ -26,6 +27,7 @@
 ### Changed
 
 - 门禁（#21 对接）：lint 不再把 `rtl/pyc_lib/` 原语既 `-I` 又当第二份源（`MODDUP`）；cdc 对 `rtl/pyc_lib/` 的 `clk` 不报 `CLOCK_NOT_CORE`（产品叶子仍必须 `core_clk`）；`formal.sh` 在 `.sby` 目录跑 `sby`（`[files]` 同目录相对路径，与 `make -C formal` 一致），缺文件报 `SBY_FILE_MISSING` 不抛异常；CI 用 `setup_sby.sh` 装 YosysHQ/sby + z3（apt 没有 sby 包）；tb-selfcheck 按 `TOOLCHAIN.lock` 安装/要求 Verilator，`model/` / `tb/cmn` / `tb/models` 分别计数，pytest skip 即失败。provenance 维持 AST-only，重生成逐字节仍走 `scripts/emit_rtl.py`（不采纳自制 pycc argv 比对）。
+- `docs/arch/mem/contracts/`：Xia 裁定 2026-10-12（共用 4 bit 非法码、illegal 时其余输出清零、原因优先级、`desc_kind`、`out_ready` 反压、`in_ready` 复位后首拍、时钟域、YAML 机读头；D-05 项改暂缓；TECTE/MAPTE 条目尺寸、`lvl`、`ctx_mapt_bb_sz`；按 Q-A11，2 MB / 1 GB 页表块合法，`ILL_MAP_2MB` 只对应 TCTE 范围表颗粒度；`ub_mem_ptw_desc_dec` 保留 `desc_lvl[1:0]`，各级表按输入编码类 `ENC_INVALID` / `ENC_TBL_PG` / `ENC_BLOCK` 交叉，L0 / L3 保留编码走翻译故障；C-D1 后 `ub_mem_dec_ent_dec` L0/L1 均为寄存 1 拍；`comb_budget_ns` 仅 0 拍组合路径必填，寄存叶子不写该键）。
 - SPEC §3.3.4 / §6.1 / §13 A-23：新增 PCS→LMSM `pcs2lmsm_rx_nonnull_blk`（1 bit、`core_clk`、1 拍脉冲、复位 0；与 `pcs2lmsm_null_blk` 同一对齐点与门控，同拍互斥，接口断言）。LMSM `Send_NullBlock` RX 连续计数在该脉冲清零。Xia 裁定 2026-10-12 / D20。
 - SPEC §6.1 / §4.1 / §9 / §13 A-08 / A-23 + D20：`PROBE_WAIT_CYC` 与 `RETRY_WAIT_CYC` 同规则（16 bit CSR、复位 323、合法 1..65535、0→323、进入等待当拍采样）；叶子口 `probe_wait_cyc[15:0]`。`Send_NullBlock` 计数：规范派生 UB-PHY §3.4.3.6（RX 连续 8、TX 在首个 RX 之后 ≥16）；Xia 裁定 2026-10-12 / D20（进入拍保持 0 且该拍脉冲不计入、离态重开、RX 清零时 TX/标志保持、饱和、当拍条件成立下一沿进 Active、2 ms / Discovery 优先）。本 PR 不改 `regmap.yaml`。
 - SPEC §13 / §2.4 / §3 / §6.1 / §6.3 / §9 + DECISIONS D20：船长 2026-10-12 09:05 裁定 104 条待决表，全部按建议。A 线 A-01~A-24 / A-VL 逐行关闭（占位 / 已定 / 实现后回填）；Probe 与 RETRY_WAIT 默认 4 µs（ceil → 323 拍）；`NUM_RETRY_THRESHOLD`/`NUM_PHY_REINIT_THRESHOLD`=15/4；`LFSR_INIT` 全 0 且 `en=0`；工艺 Sky130 代理；scrambler 只出 `_placeholder`。本 PR 吸收并收口 PR #9。

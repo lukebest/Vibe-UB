@@ -48,6 +48,8 @@ module ub_mem_ptw_stub_smoke_tb;
   wire        evt_valid;
   wire [3:0]  evt_code;
   wire        busy;
+  wire [5:0]  tb_mem_ptw_obs_st;
+  wire        tb_mem_ptw_obs_rd_pend;
 
   integer errors;
   integer cycles;
@@ -98,8 +100,22 @@ module ub_mem_ptw_stub_smoke_tb;
     .flt_af(flt_af),
     .evt_valid(evt_valid),
     .evt_code(evt_code),
-    .busy(busy)
+    .busy(busy),
+    .tb_mem_ptw_obs_st(tb_mem_ptw_obs_st),
+    .tb_mem_ptw_obs_rd_pend(tb_mem_ptw_obs_rd_pend)
   );
+
+  function automatic legal_obs_st;
+    input [5:0] st;
+    begin
+      legal_obs_st = (st === 6'b000001)
+                  || (st === 6'b000010)
+                  || (st === 6'b000100)
+                  || (st === 6'b001000)
+                  || (st === 6'b010000)
+                  || (st === 6'b100000);
+    end
+  endfunction
 
   initial begin
     core_clk = 1'b0;
@@ -125,6 +141,14 @@ module ub_mem_ptw_stub_smoke_tb;
       mem2host_rd_rsp_err <= 1'b0;
       rsp_pend <= 1'b0;
     end else begin
+      if (!legal_obs_st(tb_mem_ptw_obs_st)) begin
+        $display("FAIL: tb_mem_ptw_obs_st illegal encoding %b", tb_mem_ptw_obs_st);
+        errors = errors + 1;
+      end
+      if (tb_mem_ptw_obs_rd_pend !== mem2host_rd_valid) begin
+        $display("FAIL: tb_mem_ptw_obs_rd_pend != mem2host_rd_valid");
+        errors = errors + 1;
+      end
       if (mem2host_rd_valid && mem2host_rd_ready)
         rsp_pend <= 1'b1;
       if (rsp_pend && mem2host_rd_rsp_ready) begin

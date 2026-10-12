@@ -5,8 +5,9 @@
 SPEC §14 Q-C07 (D20)：首轮单未决，mem2host_rd_len 为 8 bit 字节数（合法
 RD_LEN_8B / RD_LEN_32B / RD_LEN_64B），本叶驱动 RD_LEN_8B；tag 恒
 RD_TAG_ZERO，口宽一次拉齐。表读请求口 mem2host_rd_valid / addr / len / tag
-一律出寄存器（Xia 准：valid/ready 握手；valid 为高期间请求保持；首拍
-表读可多 1 拍）。len / tag 为寄存器常量，无输入时序路径。
+一律出寄存器（Xia 准：valid/ready 握手；valid 为高期间请求保持）。
+addr 接 addr_q Q（pending 期间 addr_q 不写）；valid 在请求成交当拍置位，
+下一沿送出。len / tag 为寄存器常量，无输入时序路径。
 从 512 bit 回读按地址低位取出 8 B 描述符。读回描述符先寄存，再连同
 desc_lvl 交给 ub_mem_ptw_desc_dec（契约：寄存 1 拍）。表描述符进入
 下一级；L1 1 GB / L2 2 MB 块或 L3 页合成 4 KB 对齐 PA，只把页地址
@@ -64,7 +65,7 @@ from mem.lib.walk import (
 )
 
 
-def _ptw_body(m: Circuit) -> None:
+def _ptw_body(m: Circuit, test_hooks: int = 0) -> None:
     clk = m.clock("core_clk")
     rst = m.reset("rst_pyc")
 
@@ -98,9 +99,8 @@ def _ptw_body(m: Circuit) -> None:
 
     rd_sent = m.out("rd_sent", clk=clk, rst=rst, width=1, init=u(1, 0), en=1)
     dec_sent = m.out("dec_sent", clk=clk, rst=rst, width=1, init=u(1, 0), en=1)
-    # 表读请求口：下一地址组合算出后写入这些寄存器再送出。
+    # 表读请求口：valid 出寄存器；addr 直出 addr_q Q。
     rd_valid_q = m.out("rd_valid_q", clk=clk, rst=rst, width=1, init=u(1, 0), en=1)
-    rd_addr_q = m.out("rd_addr_q", clk=clk, rst=rst, width=PA_W, init=u(PA_W, 0), en=1)
     rd_len_q = m.out(
         "rd_len_q", clk=clk, rst=rst, width=RD_LEN_W, init=u(RD_LEN_W, RD_LEN_8B), en=1
     )
@@ -154,7 +154,6 @@ def _ptw_body(m: Circuit) -> None:
 
     rd_req_valid = rd_valid_q.out()
     rd_accept = rd_req_valid & rd_ready
-    rd_launch = in_rd & ~rd_sent.out() & ~rd_valid_q.out()
     rd_rsp_ready = in_rd & rd_sent.out()
     tag_live = rd_rsp_tag == rd_rsp_tag
     rd_take = rd_rsp_ready & rd_rsp_valid & tag_live
@@ -181,6 +180,7 @@ def _ptw_body(m: Circuit) -> None:
     to_flt_ill = dec_fire & dec["desc_illegal"]
     to_flt_xlat = dec_fire & ~dec["desc_illegal"] & ~dec["desc_v"]
     to_next = dec_fire & ~dec["desc_illegal"] & dec["desc_v"] & is_table & ~lvl_l3
+    enter_rd = to_rd_new | to_next
     to_flt_bad = dec_fire & ~dec["desc_illegal"] & dec["desc_v"] & is_table & lvl_l3
     # SPEC §14 Q-A18 (D20)：AF × AFFD；HAF 按 0。
     to_flt_af = (
@@ -216,21 +216,20 @@ def _ptw_body(m: Circuit) -> None:
     st_flt.set(to_flt_rd | to_flt_ill | to_flt_xlat | to_flt_bad | to_flt_af | stay_flt)
     st_evt.set(to_evt_wd | stay_evt)
 
-    enter_rd = to_rd_new | to_next
     done_walk = to_idle_fill | to_idle_flt | to_idle_evt
     rd_sent.set(
         mux(m, enter_rd | done_walk, u(1, 0), mux(m, rd_accept, u(1, 1), rd_sent.out()))
     )
     # AP_TBLRD_REQ_HOLD：valid && !ready 时 valid/addr/len/tag 保持。
+    # enter_rd 当拍置 valid D，下一沿送出（req 成交 → 第一次 valid 为 1 拍）。
     rd_valid_q.set(
         mux(
             m,
             rd_accept | done_walk,
             u(1, 0),
-            mux(m, rd_launch, u(1, 1), rd_valid_q.out()),
+            mux(m, enter_rd, u(1, 1), rd_valid_q.out()),
         )
     )
-    rd_addr_q.set(addr_q.out(), when=rd_launch)
     rd_len_q.set(u(RD_LEN_W, RD_LEN_8B))
     rd_tag_q.set(u(RD_TAG_W, RD_TAG_ZERO))
     dec_sent.set(
@@ -273,7 +272,7 @@ def _ptw_body(m: Circuit) -> None:
     m.output("req_ready", idle)
     # SPEC §14 Q-C07 (D20)：请求口出寄存器；长度恒 8 B，tag 恒 0。
     m.output("mem2host_rd_valid", rd_valid_q.out())
-    m.output("mem2host_rd_addr", rd_addr_q.out())
+    m.output("mem2host_rd_addr", addr_q.out())
     m.output("mem2host_rd_len", rd_len_q.out())
     m.output("mem2host_rd_tag", rd_tag_q.out())
     m.output("mem2host_rd_rsp_ready", rd_rsp_ready)
@@ -297,6 +296,21 @@ def _ptw_body(m: Circuit) -> None:
     m.output("evt_code", evt_code_q.out())
     m.output("busy", ~idle)
 
+    if test_hooks != 0:
+        # HOOKS 只读观察，不受 tb_test_mode 门控（SPEC §10）。
+        m.output(
+            "tb_mem_ptw_obs_st",
+            m.cat(
+                st_evt.out(),
+                st_flt.out(),
+                st_fill.out(),
+                st_dec.out(),
+                st_rd.out(),
+                st_idle.out(),
+            ),
+        )
+        m.output("tb_mem_ptw_obs_rd_pend", rd_valid_q.out())
+
 
 @module(name="ub_mem_ptw")
 def build(m: Circuit, test_hooks: int = 0) -> None:
@@ -304,7 +318,7 @@ def build(m: Circuit, test_hooks: int = 0) -> None:
     if test_hooks != 0:
         if test_hooks != 1:
             raise ValueError("test_hooks must be 0 or 1")
-    _ptw_body(m)
+    _ptw_body(m, test_hooks=test_hooks)
 
 
 build.__pycircuit_name__ = "ub_mem_ptw"

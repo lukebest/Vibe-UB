@@ -1,4 +1,4 @@
-// Directed PRODUCT smoke for ub_mem_ptw.
+// Directed HOOKS smoke for ub_mem_ptw.
 // Walk success cases use tb/mem/ub_mem_ptw_desc_dec_tb_model.v (TB protocol
 // in the 64-bit raw port). The public stub always reports translation fault,
 // so success paths cannot come from the stub itself.
@@ -64,6 +64,8 @@ module ub_mem_ptw_smoke_tb;
   wire        evt_valid;
   wire [3:0]  evt_code;
   wire        busy;
+  wire [5:0]  tb_mem_ptw_obs_st;
+  wire        tb_mem_ptw_obs_rd_pend;
 
   integer errors;
   integer cycles;
@@ -136,8 +138,22 @@ module ub_mem_ptw_smoke_tb;
     .flt_af(flt_af),
     .evt_valid(evt_valid),
     .evt_code(evt_code),
-    .busy(busy)
+    .busy(busy),
+    .tb_mem_ptw_obs_st(tb_mem_ptw_obs_st),
+    .tb_mem_ptw_obs_rd_pend(tb_mem_ptw_obs_rd_pend)
   );
+
+  function automatic legal_obs_st;
+    input [5:0] st;
+    begin
+      legal_obs_st = (st === 6'b000001)
+                  || (st === 6'b000010)
+                  || (st === 6'b000100)
+                  || (st === 6'b001000)
+                  || (st === 6'b010000)
+                  || (st === 6'b100000);
+    end
+  endfunction
 
   initial begin
     core_clk = 1'b0;
@@ -339,6 +355,14 @@ module ub_mem_ptw_smoke_tb;
       prev_rd_addr <= mem2host_rd_addr;
       prev_rd_len <= mem2host_rd_len;
       prev_rd_tag <= mem2host_rd_tag;
+      if (!legal_obs_st(tb_mem_ptw_obs_st)) begin
+        $display("FAIL: tb_mem_ptw_obs_st illegal encoding %b", tb_mem_ptw_obs_st);
+        errors = errors + 1;
+      end
+      if (tb_mem_ptw_obs_rd_pend !== mem2host_rd_valid) begin
+        $display("FAIL: tb_mem_ptw_obs_rd_pend != mem2host_rd_valid");
+        errors = errors + 1;
+      end
     end
   end
 
@@ -610,7 +634,7 @@ module ub_mem_ptw_smoke_tb;
       end
     end
 
-    // AP_TBLRD_REQ_HOLD + extra cycle from req accept to first rd_valid.
+    // AP_TBLRD_REQ_HOLD + first rd_valid 1 cycle after req accept.
     // Hold mem2host_rd_ready so the monitor sees valid/addr/len/tag hold.
     begin
       integer guard;
@@ -631,8 +655,8 @@ module ub_mem_ptw_smoke_tb;
         errors = errors + 1;
       end else begin
         first_rd_lat = lat;
-        if (first_rd_lat != 2) begin
-          $display("FAIL: first mem2host_rd_valid at +%0d (want +2)", first_rd_lat);
+        if (first_rd_lat != 1) begin
+          $display("FAIL: first mem2host_rd_valid at +%0d (want +1)", first_rd_lat);
           errors = errors + 1;
         end
         repeat (3) tick;

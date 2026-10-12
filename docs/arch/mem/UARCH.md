@@ -111,7 +111,7 @@ EID→ENT_IDX 映射放在 RSC（Xia 答复 Q-A02），UMMU 只接 ENT_IDX 和�
 | `ub_mem_cfg_lkup` | ENT_IDX；CSR 写（经 `ub_mem_tecte_dec`） | 配置信号束（§5.1） | 读 1 拍；CSR 读回与查找共用读口，查找优先 |
 | `ub_mem_ctx_lkup` | {ENT_IDX, TokenID}；填充数据（经 `ub_mem_tcte_dec`） | 上下文信号束（§5.2）、命中 / 缺失 | 直接映射；缺失时经 `ub_mem_tbl_rd` 读 64 B（两级多一次 8 B） |
 | `ub_mem_tlb` | {ENT_IDX, TokenID, 页号}；填充；失效 | 翻译信号束（PFN、已解析的属性字节、页权限、AF）、命中 / 缺失 | 4 路并读、标签比较、伪 LRU 替换 |
-| `ub_mem_ptw` | 上下文信号束、UBA | 填充项或翻译故障 | 由输入宽度推起始级，最多 4 次 8 B 读；块描述符拆成 4 KB 项 |
+| `ub_mem_ptw` | 上下文信号束、UBA | 填充项或翻译故障 | 由输入宽度推起始级，最多 4 次 8 B 读；块描述符拆成 4 KB 项。请求成交后 1 拍首次拉高 `mem2host_rd_valid`。 |
 | `ub_mem_plb` | {ENT_IDX, TokenID}、UBA；填充；失效 | 权限信号束、命中 | 所有项并行比范围 |
 | `ub_mem_perm_walk` | 上下文信号束、UBA | 权限信号束或 MAPT 故障 | 单项 1 次 32 B 读；多级 4 KB 最多 4 次 32 B 读，逐级比范围、看终止位 |
 | `ub_mem_perm_cmp` | 权限信号束、请求的 TokenValue / E_bit / 访问类型、上下文排他位、页权限 | 通过 / 失败与原因 | 纯组合；§9.4.4.3.2–§9.4.4.3.5 |
@@ -344,6 +344,13 @@ D19 第 3 条：可选功能集中在最后一轮。
 | UMMU / 译码器 事件 FIFO | 8 ×2 | 256 | 触发器 FIFO | 读 ≤1，写 ≤1 | 否 | 触发器；4,096 bit | 不需要（水位可经 CSR 读） | 事件格式（Q-B08、Q-E09） |
 
 合计：原语类约 **31.1 万 bit**（其中译码 L0 表 26.2 万）；触发器类约 6.9 千 bit。若船长定 L0 放内存，原语类降到约 4.9 万 bit。
+
+walker 只读观察口（HOOKS only；不受 `tb_test_mode` 门控；直出寄存器 Q；编码与口表以 SPEC §10 为准）：
+
+| 口名 | 登记 |
+| --- | --- |
+| `tb_mem_ptw_obs_st` | SPEC §10 钩子口表（#50） |
+| `tb_mem_ptw_obs_rd_pend` | SPEC §10 钩子口表（#50） |
 
 ## 11. 待决事项
 

@@ -41,7 +41,7 @@ LEAVES: list[dict] = [
         "name": "ub_mem_ptw",
         "layer": "mem",
         "source": "mem/ub_mem_ptw.py",
-        "hooks": True,  # SPEC §10 lists no ptw obs yet; HOOKS ports == PRODUCT
+        "hooks": True,  # HOOKS adds tb_mem_ptw_obs_st / obs_rd_pend (SPEC §10)
         "variants": [{"label": ""}],
     },
 ]

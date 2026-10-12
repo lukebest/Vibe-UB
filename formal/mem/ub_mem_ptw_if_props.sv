@@ -53,6 +53,7 @@ module ub_mem_ptw_if_props (
   input  wire        mem2host_rd_rsp_err,
   input  wire        fill_valid,
   input  wire        fill_ready,
+  input  wire [35:0] fill_pfn,
   input  wire        flt_valid,
   input  wire        evt_valid,
   input  wire [3:0]  evt_code,
@@ -70,6 +71,11 @@ module ub_mem_ptw_if_props (
   localparam integer RD_LEN_64B       = 64;
   localparam integer RD_TAG_W         = 4;
   localparam integer RD_TAG_ZERO      = 0;
+  // start_lvl / leaf_pfn (walk.py): ia_w vs VA_L* LSB; L1/L2 block PFN mix.
+  localparam integer VA_L0_LSB        = 39;
+  localparam integer VA_L1_LSB        = 30;
+  localparam integer VA_L2_LSB        = 21;
+  localparam integer PAGE_LSB         = 12;
 
   wire chk = !rst_pyc;
 
@@ -325,6 +331,63 @@ module ub_mem_ptw_if_props (
     end
   end
 
+  // Walk depth + leaf_pfn mix (PRODUCT ports). Latch uba / ia_w on
+  // accept; count error-free table-read responses. L1 block mixes
+  // uba[29:12] into fill_pfn[17:0]; L2 block mixes uba[20:12] into
+  // fill_pfn[8:0] and leaves fill_pfn[17:9] from the block base.
+  reg        f_walk_live;
+  reg [2:0]  f_rd_ok;
+  reg [63:0] f_walk_uba;
+  reg [5:0]  f_walk_ia;
+
+  wire walk_acc = chk && req_valid && req_ready && !ctx_matt_wd;
+  wire rd_ok    = chk && mem2host_rd_rsp_valid && mem2host_rd_rsp_ready &&
+                  !mem2host_rd_rsp_err;
+  wire walk_end = chk && (
+    (fill_valid && fill_ready) ||
+    (flt_valid && flt_ready) ||
+    (evt_valid && evt_ready)
+  );
+
+  initial begin
+    f_walk_live = 1'b0;
+    f_rd_ok     = 3'd0;
+    f_walk_uba  = 64'd0;
+    f_walk_ia   = 6'd0;
+  end
+
+  always @(posedge core_clk) begin
+    if (rst_pyc) begin
+      f_walk_live <= 1'b0;
+      f_rd_ok     <= 3'd0;
+    end else if (walk_acc) begin
+      f_walk_live <= 1'b1;
+      f_rd_ok     <= 3'd0;
+      f_walk_uba  <= req_uba;
+      f_walk_ia   <= ctx_ia_w;
+    end else if (f_walk_live && rd_ok && (f_rd_ok != 3'd7)) begin
+      f_rd_ok <= f_rd_ok + 3'd1;
+    end else if (walk_end) begin
+      f_walk_live <= 1'b0;
+    end
+  end
+
+  wire start_l0 = f_walk_ia > VA_L0_LSB[5:0];
+  wire start_l1 = (f_walk_ia > VA_L1_LSB[5:0]) &&
+                  (f_walk_ia <= VA_L0_LSB[5:0]);
+  wire start_l2 = (f_walk_ia > VA_L2_LSB[5:0]) &&
+                  (f_walk_ia <= VA_L1_LSB[5:0]);
+  wire l1_mix = (fill_pfn[17:0] == f_walk_uba[29:12]);
+  wire l2_mix = (fill_pfn[8:0] == f_walk_uba[20:12]) &&
+                (fill_pfn[17:9] != f_walk_uba[29:21]);
+  wire l1_depth = (start_l0 && (f_rd_ok == 3'd2)) ||
+                  (start_l1 && (f_rd_ok == 3'd1));
+  wire l2_depth = (start_l0 && (f_rd_ok == 3'd3)) ||
+                  (start_l1 && (f_rd_ok == 3'd2)) ||
+                  (start_l2 && (f_rd_ok == 3'd1));
+  wire l1_blk_fill = f_walk_live && l1_mix && l1_depth;
+  wire l2_blk_fill = f_walk_live && l2_mix && l2_depth;
+
   // ------------------------------------------------------------------
   // Covers
   // ------------------------------------------------------------------
@@ -337,6 +400,11 @@ module ub_mem_ptw_if_props (
     // Backpressured request then accept (proves rd_ready is not stuck high).
     c_rd_bp_then_acc:  cover (chk && f_rd_req_hold &&
                               mem2host_rd_valid && mem2host_rd_ready);
+    // L1 1GB / L2 2MB block → 4 KB fill. Port-only: latched uba / ia_w,
+    // error-free table-read count, and leaf_pfn mix (walk.py). No
+    // decoder internals.
+    c_l1_blk_fill:     cover (chk && fill_valid && fill_ready && l1_blk_fill);
+    c_l2_blk_fill:     cover (chk && fill_valid && fill_ready && l2_blk_fill);
   end
 
   // ------------------------------------------------------------------

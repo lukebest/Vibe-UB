@@ -53,9 +53,11 @@ module ub_mem_ptw_if_props (
   input  wire        mem2host_rd_rsp_err,
   input  wire        fill_valid,
   input  wire        fill_ready,
+  input  wire        flt_valid,
   input  wire        evt_valid,
   input  wire [3:0]  evt_code,
-  input  wire        evt_ready
+  input  wire        evt_ready,
+  input  wire        busy
 );
 
   // One mapping block. Names from RTL / UARCH (params.py, SPEC §14).
@@ -343,10 +345,79 @@ module ub_mem_ptw_if_props (
   // (rd_len_q = RD_LEN_8B, rd_tag_q = RD_TAG_ZERO). The induction
   // CEX for AP_TBLRD_REQ_HOLD started with len != 8.
   // ------------------------------------------------------------------
+  reg f_rd_valid_q;
+
+  initial f_rd_valid_q = 1'b0;
+
+  always @(posedge core_clk) begin
+    if (rst_pyc)
+      f_rd_valid_q <= 1'b0;
+    else
+      f_rd_valid_q <= mem2host_rd_valid;
+  end
+
   always @(posedge core_clk) begin
     if (chk) begin
       a_rd_len_const: assert (mem2host_rd_len == RD_LEN_8B[RD_LEN_W-1:0]);
       a_rd_tag_const: assert (mem2host_rd_tag == RD_TAG_ZERO[RD_TAG_W-1:0]);
+
+      // busy is ~idle; req_ready is idle.
+      a_busy_nidle: assert (busy == !req_ready);
+
+      // One-hot port image of the walker (idle / fill / flt / evt).
+      // ST_RD / ST_DEC are the quiet-busy remainder.
+      a_idle_excl: assert (
+        !req_ready ||
+        (!fill_valid && !flt_valid && !evt_valid &&
+         !mem2host_rd_valid && !mem2host_rd_rsp_ready)
+      );
+      a_fill_excl: assert (
+        !fill_valid ||
+        (!req_ready && !flt_valid && !evt_valid &&
+         !mem2host_rd_valid && !mem2host_rd_rsp_ready)
+      );
+      a_flt_excl: assert (
+        !flt_valid ||
+        (!req_ready && !fill_valid && !evt_valid &&
+         !mem2host_rd_valid && !mem2host_rd_rsp_ready)
+      );
+      a_evt_excl: assert (
+        !evt_valid ||
+        (!req_ready && !fill_valid && !flt_valid &&
+         !mem2host_rd_valid && !mem2host_rd_rsp_ready)
+      );
+      // rd_valid_q and rd_sent are mutex; rsp_ready = st_rd & rd_sent.
+      a_rd_valid_excl: assert (
+        !mem2host_rd_valid ||
+        (!req_ready && !fill_valid && !flt_valid && !evt_valid &&
+         !mem2host_rd_rsp_ready)
+      );
+
+      // f_matt_pend is set the cycle after a MATT_WD accept (to_evt_wd
+      // → ST_EVT) and cleared on the completing event handshake.
+      a_matt_pend_evt:    assert (!f_matt_pend || evt_valid);
+      a_matt_pend_code:   assert (
+        !f_matt_pend || (evt_code == EVT_MATT_WD_MISS[EVT_CODE_W-1:0])
+      );
+      a_matt_pend_nord:   assert (!f_matt_pend || !mem2host_rd_valid);
+      a_matt_pend_nofill: assert (!f_matt_pend || !fill_valid);
+      a_matt_pend_noflt:  assert (!f_matt_pend || !flt_valid);
+      a_matt_pend_nidle:  assert (!f_matt_pend || !req_ready);
+      a_matt_pend_seen:   assert (!(f_matt_pend && f_matt_evt_seen));
+
+      // Outstanding table-read: accepted, waiting for rsp (ST_RD & rd_sent).
+      a_rd_outst_nvald: assert (!f_rd_outst || !mem2host_rd_valid);
+      a_rd_outst_rsp:   assert (!f_rd_outst || mem2host_rd_rsp_ready);
+
+      // Last-cycle valid: addr/len/tag held (addr_q writes only on
+      // do_req | to_next, both off while rd_valid).
+      a_rd_addr_held: assert (!f_rd_valid_q ||
+                              (mem2host_rd_addr == f_rd_addr_q));
+      a_rd_len_held:  assert (!f_rd_valid_q ||
+                              (mem2host_rd_len == f_rd_len_q));
+      a_rd_tag_held:  assert (!f_rd_valid_q ||
+                              (mem2host_rd_tag == f_rd_tag_q));
+      a_rd_hold_valid: assert (!f_rd_req_hold || mem2host_rd_valid);
     end
   end
 

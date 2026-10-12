@@ -11,10 +11,9 @@
 # no legal next falls back to st_idle. a_st_legal / a_rd_pend_st are
 # checked on that free cut (no contract assumes).
 #
-# Default tasks: cover + bmc 24. prove stays untagged (did not
-# converge). a_rd_pend_mutex closed the a_rd_pend_st hole; induction
-# then FAIL a_matt_no_rd (PRODUCT if_props) at k=20, ~1s; basecase
-# PASS. Manual: `sby -f ub_mem_ptw_hooks.sby prove`.
+# Default tasks: cover + bmc 24. prove stays untagged until it
+# converges. Tracker↔port/obs consistency asserts are assert-only.
+# Manual: `sby -f ub_mem_ptw_hooks.sby prove`.
 # hooks-port-consistency may be red until #50 registers the ports.
 
 [tasks]

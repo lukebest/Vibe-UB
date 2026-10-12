@@ -133,9 +133,11 @@ module ub_mem_ptw_harness (
     .mem2host_rd_rsp_err(mem2host_rd_rsp_err),
     .fill_valid(fill_valid),
     .fill_ready(fill_ready),
+    .flt_valid(flt_valid),
     .evt_valid(evt_valid),
     .evt_code(evt_code),
-    .evt_ready(evt_ready)
+    .evt_ready(evt_ready),
+    .busy(busy)
   );
 
 endmodule

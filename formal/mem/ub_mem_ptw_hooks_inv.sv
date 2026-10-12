@@ -15,10 +15,14 @@ module ub_mem_ptw_hooks_inv (
   input  wire [5:0]  tb_mem_ptw_obs_st,
   input  wire        tb_mem_ptw_obs_rd_pend,
   input  wire        mem2host_rd_rsp_ready,
+  input  wire        mem2host_rd_valid,
+  input  wire        req_ready,
+  input  wire        fill_valid,
+  input  wire        flt_valid,
+  input  wire        evt_valid,
   input  wire        dec_out_valid,
   input  wire        desc_v,
-  input  wire [1:0]  desc_kind,
-  input  wire        fill_valid
+  input  wire [1:0]  desc_kind
 );
 
   // SPEC §10 walker obs_st encodings (cite SPEC §10; values from #48
@@ -60,6 +64,27 @@ module ub_mem_ptw_hooks_inv (
       // response into ST_FLT while holding rd_pend.
       a_rd_pend_mutex: assert (
         !tb_mem_ptw_obs_rd_pend || !mem2host_rd_rsp_ready
+      );
+
+      // obs_st is the one-hot pack of the same bits that drive the
+      // PRODUCT handshake valids. Ties if_props trackers (f_matt_pend
+      // → evt_valid, f_rd_outst → rsp_ready, …) to walker state.
+      a_obs_rd_pend_eq: assert (tb_mem_ptw_obs_rd_pend == mem2host_rd_valid);
+      a_obs_idle: assert ((tb_mem_ptw_obs_st == ST_IDLE) == req_ready);
+      a_obs_fill: assert ((tb_mem_ptw_obs_st == ST_FILL) == fill_valid);
+      a_obs_flt:  assert ((tb_mem_ptw_obs_st == ST_FLT)  == flt_valid);
+      a_obs_evt:  assert ((tb_mem_ptw_obs_st == ST_EVT)  == evt_valid);
+      a_obs_rd: assert (
+        (tb_mem_ptw_obs_st != ST_RD) ||
+        (!req_ready && !fill_valid && !flt_valid && !evt_valid)
+      );
+      a_obs_dec: assert (
+        (tb_mem_ptw_obs_st != ST_DEC) ||
+        (!req_ready && !fill_valid && !flt_valid && !evt_valid &&
+         !tb_mem_ptw_obs_rd_pend && !mem2host_rd_rsp_ready)
+      );
+      a_obs_rsp_rd: assert (
+        !mem2host_rd_rsp_ready || (tb_mem_ptw_obs_st == ST_RD)
       );
     end
   end

@@ -135,9 +135,11 @@ module ub_mem_ptw_hooks_harness (
     .mem2host_rd_rsp_err(mem2host_rd_rsp_err),
     .fill_valid(fill_valid),
     .fill_ready(fill_ready),
+    .flt_valid(flt_valid),
     .evt_valid(evt_valid),
     .evt_code(evt_code),
-    .evt_ready(evt_ready)
+    .evt_ready(evt_ready),
+    .busy(busy)
   );
 
   // Yosys 0.33 drops dotted hierarchical refs and ignores bind.
@@ -151,10 +153,14 @@ module ub_mem_ptw_hooks_harness (
     .tb_mem_ptw_obs_st(tb_mem_ptw_obs_st),
     .tb_mem_ptw_obs_rd_pend(tb_mem_ptw_obs_rd_pend),
     .mem2host_rd_rsp_ready(mem2host_rd_rsp_ready),
+    .mem2host_rd_valid(mem2host_rd_valid),
+    .req_ready(req_ready),
+    .fill_valid(fill_valid),
+    .flt_valid(flt_valid),
+    .evt_valid(evt_valid),
     .dec_out_valid(1'b0),
     .desc_v(1'b0),
-    .desc_kind(2'b00),
-    .fill_valid(fill_valid)
+    .desc_kind(2'b00)
   );
 
 endmodule

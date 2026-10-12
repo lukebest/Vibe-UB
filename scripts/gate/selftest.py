@@ -453,6 +453,15 @@ def test_sby_relative_and_missing() -> None:
         print("SELFTEST PASS sby-skip-workdir: only formal/<iface>/*.sby")
 
 
+def test_tb_selfcheck_sh_drops_pycircuit_venv() -> None:
+    text = (Path(__file__).resolve().parent / "tb_selfcheck.sh").read_text(
+        encoding="utf-8"
+    )
+    if ".pycircuit-venv" not in text or "deactivate" not in text:
+        _fail("tb-drop-pyc-venv", "tb_selfcheck.sh must leave the pycc venv")
+    print("SELFTEST PASS tb-drop-pyc-venv: provenance venv is not used for TB")
+
+
 def test_tb_requires_verilator() -> None:
     missing = required_sim_tools(
         which=lambda name: "/usr/bin/iverilog" if name == "iverilog" else None
@@ -1030,6 +1039,7 @@ def main() -> int:
         test_cdc_pyc_lib_clk_not_core,
         test_setup_sby_refuses_missing_z3_note,
         test_sby_relative_and_missing,
+        test_tb_selfcheck_sh_drops_pycircuit_venv,
         test_tb_requires_verilator,
         test_tb_skip_is_fail,
         test_deleted_roster_not_error,

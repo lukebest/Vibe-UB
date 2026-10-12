@@ -205,6 +205,14 @@ def run_pytest_suite(label: str, targets: list[str]) -> int:
 
 def main() -> int:
     print_tool_versions(["python", "icarus", "verilator"])
+    try:
+        import pytest  # noqa: F401
+    except ImportError:
+        print(
+            f"ERROR: {sys.executable} has no pytest; "
+            "do not run tb-selfcheck under .pycircuit-venv"
+        )
+        return 1
     missing = required_sim_tools()
     if missing:
         print(

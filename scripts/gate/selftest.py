@@ -996,6 +996,54 @@ def test_equiv_ref_regpair() -> None:
     _require_bmc_icarus("carry", carry, carry_out)
 
 
+def test_equiv_ref_affine() -> None:
+    """GATE-EQY-004 (5): AND/mux plants fail precondition; unit-vector plant NOT EQ."""
+    root = Path(__file__).resolve().parents[2]
+    script = root / "scripts" / "gate" / "equiv_ref.sh"
+    and_net = root / "formal" / "dll" / "negative" / "bcrc_affine_and.sv"
+    mux_net = root / "formal" / "dll" / "negative" / "bcrc_affine_mux.sv"
+    bit_net = root / "formal" / "dll" / "negative" / "bcrc_affine_bit.sv"
+    for net in (and_net, mux_net, bit_net):
+        if not net.is_file():
+            _fail("equiv-ref-affine", f"missing {net}")
+    env = {
+        **os.environ,
+        "EQUIV_METHODS": "regpair",
+        "EQUIV_TMO": "40",
+        "EQUIV_REGPAIR_AFFINE_ONLY": "1",
+    }
+
+    and_proc = run_cmd([str(script), "ub_dll_bcrc", str(and_net)], env=env, timeout=180)
+    and_out = and_proc.stdout or ""
+    if and_proc.returncode == 0:
+        _fail("equiv-ref-affine-and", "AND plant must not PASS")
+    if not re.search(r"affine_prereq .*FAIL.*(\$and|non-affine cell)", and_out):
+        _fail("equiv-ref-affine-and", f"precondition must reject $and: {and_out[-800:]}")
+    if re.search(r"po_cec name=rp_d_crc result=equivalent method=affine", and_out):
+        _fail("equiv-ref-affine-and", "AND plant must not prove rp_d_crc via affine")
+    print("SELFTEST PASS equiv-ref-affine-and: leftover $and rejected")
+
+    mux_proc = run_cmd([str(script), "ub_dll_bcrc", str(mux_net)], env=env, timeout=180)
+    mux_out = mux_proc.stdout or ""
+    if mux_proc.returncode == 0:
+        _fail("equiv-ref-affine-mux", "data-bit $mux plant must not PASS")
+    if not re.search(r"affine_prereq .*FAIL.*leftover \$mux", mux_out):
+        _fail("equiv-ref-affine-mux", f"precondition must reject leftover $mux: {mux_out[-800:]}")
+    print("SELFTEST PASS equiv-ref-affine-mux: leftover data-select $mux rejected")
+
+    bit_proc = run_cmd([str(script), "ub_dll_bcrc", str(bit_net)], env=env, timeout=180)
+    bit_out = bit_proc.stdout or ""
+    if bit_proc.returncode == 0:
+        _fail("equiv-ref-affine-bit", "affine one-bit plant must not PASS")
+    if "SCRIPT_ERROR" in bit_out and "cex_ok=1" not in bit_out:
+        _fail("equiv-ref-affine-bit", "NOT EQ without replayable CEX is a script error")
+    if not re.search(r"method=affine", bit_out) or not re.search(r"cex_ok=1", bit_out):
+        _fail("equiv-ref-affine-bit", f"unit vector must NOT EQ with CEX: {bit_out[-800:]}")
+    if not re.search(r"po_cec name=rp_d_crc result=not_equivalent method=affine", bit_out):
+        _fail("equiv-ref-affine-bit", f"rp_d_crc must be affine NOT EQ: {bit_out[-800:]}")
+    print("SELFTEST PASS equiv-ref-affine-bit: unit-vector NOT EQ + replayable CEX")
+
+
 def test_deadreg_extra() -> None:
     """GATE-SYN-DEADREG: extra-reg fake FAIL; gold PASS."""
     root = Path(__file__).resolve().parents[2]
@@ -1095,6 +1143,7 @@ def main() -> int:
         test_equiv_real_csr_tlb,
         test_deadreg_extra,
         test_equiv_ref_regpair,
+        test_equiv_ref_affine,
         test_equiv_ref_real_compare,
     ]
     for fn in tests:

@@ -17,14 +17,17 @@ their names. Name-set mismatch is FAIL. Combo prove writes each cut side as an
 ordinary AIGER (named PIs/POs, same name order, never `write_aiger
 -miter`) and hands both to ABC `&cec`. A property AIGER (0 PO / 1 bad)
 plus `&cec` is a script error. NOT EQ without a writable `write_cex`
-replay is a script error, not a verdict. Reset kind / polarity / value
-are checked separately (mismatch is FAIL). All must hold.
+replay is a script error, not a verdict. After `&cec` timeout, method (5)
+affine may prove an XOR-family `rp_d_*` (or emit a replayable CEX).
+Reset kind / polarity / value are checked separately (mismatch is FAIL).
+All must hold.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -817,12 +820,70 @@ def write_named_aig(
         "opt_clean\n"
         # Binary AIGER. ABC `&r` reads ASCII `aag` as 0 ANDs and then
         # `&cec` reports a false EQ. Never `-miter` (that is a property AIGER).
-        f"write_aiger {aig}\n"
+        f"write_aiger -map {aig}.map {aig}\n"
     )
     built = run_yosys_p(ys, tmo, quiet=True)
     if built.returncode != 0 or not aig.is_file():
         return False, built.stdout or "write_aiger failed"
     return True, ""
+
+
+def aiger_map_names(path: Path) -> tuple[list[str], list[str]]:
+    """Parse Yosys `write_aiger -map` into (pi_names, po_names) in file order."""
+    mp = Path(str(path) + ".map")
+    if not mp.is_file():
+        return [], []
+    pis: list[str] = []
+    pos: list[str] = []
+    for line in mp.read_text(encoding="utf-8", errors="replace").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        parts = s.split()
+        if len(parts) < 2:
+            continue
+        kind, name = parts[0], parts[-1]
+        if kind == "input":
+            pis.append(name)
+        elif kind == "output":
+            pos.append(name)
+    return pis, pos
+
+
+def print_aiger_name_tables(
+    g_aig: Path,
+    t_aig: Path,
+    pis: list[str],
+    pos: list[str],
+    widths: dict[str, int],
+) -> None:
+    """Print wrapper vs AIGER name order so a PI/PO shuffle is visible."""
+    wrap_pi: list[str] = []
+    wrap_po: list[str] = []
+    for name in pis:
+        w = max(int(widths.get(name, 1) or 1), 1)
+        wrap_pi.extend([f"{name}[{i}]" if w > 1 else name for i in range(w)])
+    for name in pos:
+        w = max(int(widths.get(name, 1) or 1), 1)
+        wrap_po.extend([f"{name}[{i}]" if w > 1 else name for i in range(w)])
+    print(f"equiv_ref REGPAIR aiger_wrap_pi={' '.join(wrap_pi) if wrap_pi else '(none)'}")
+    print(f"equiv_ref REGPAIR aiger_wrap_po={' '.join(wrap_po) if wrap_po else '(none)'}")
+    for label, aig in (("gold", g_aig), ("gate", t_aig)):
+        mpi, mpo = aiger_map_names(aig)
+        print(f"equiv_ref REGPAIR aiger_{label}_pi={' '.join(mpi) if mpi else '(none)'}")
+        print(f"equiv_ref REGPAIR aiger_{label}_po={' '.join(mpo) if mpo else '(none)'}")
+    g_pi, g_po = aiger_map_names(g_aig)
+    t_pi, t_po = aiger_map_names(t_aig)
+    if g_pi and t_pi and g_pi != t_pi:
+        print("equiv_ref REGPAIR aiger_pi_name_diff gold_vs_gate")
+        for i, (a, b) in enumerate(zip(g_pi, t_pi)):
+            if a != b:
+                print(f"equiv_ref REGPAIR aiger_pi_diff i={i} gold={a} gate={b}")
+    if g_po and t_po and g_po != t_po:
+        print("equiv_ref REGPAIR aiger_po_name_diff gold_vs_gate")
+        for i, (a, b) in enumerate(zip(g_po, t_po)):
+            if a != b:
+                print(f"equiv_ref REGPAIR aiger_po_diff i={i} gold={a} gate={b}")
 
 
 def aiger_counts(path: Path) -> tuple[int, int, int]:
@@ -984,6 +1045,7 @@ def cec_pair(
     if g_po == 0 or t_po == 0:
         print(f"equiv_ref REGPAIR SCRIPT_ERROR aiger_zero_po label={label} (property AIGER, not combo CEC)")
         return "script_error", "abc-&cec", "AIGER has 0 POs (write_aiger -miter shape)", {}
+    print_aiger_name_tables(g_aig, t_aig, pis, pos, widths)
     if g_pi != t_pi or g_po != t_po or g_pi != exp_pi or g_po != exp_po:
         print(
             f"equiv_ref REGPAIR SCRIPT_ERROR aiger_pi_po_mismatch label={label} "
@@ -1025,50 +1087,8 @@ def cec_pair(
     return kind, "abc-&cec", line, model
 
 
-def prove_miter(tmp: Path, tmo: int, abc: str, po_names: list[str]) -> tuple[str, str, str, list[str]]:
-    """Name-aligned combo CEC of the two cut nets. Option (a): not property AIGER."""
-    gold_mod = json.loads((tmp / "gold_cut.json").read_text(encoding="utf-8"))["modules"]["gold"]
-    gate_mod = json.loads((tmp / "gate_cut.json").read_text(encoding="utf-8"))["modules"]["gate"]
-    gold_pi, gold_po = port_sets(gold_mod)
-    _t_pi, _t_po = port_sets(gate_mod)
-    pis = sorted(gold_pi)
-    # Next-state only. Leftover leaf outputs (crc_word/done) are Q
-    # passthroughs after the cut; pycc may const-0 them and ABC then
-    # reports a trivial "PI vs. constant" NOT EQ that is not a D mismatch.
-    pos = sorted(n for n in gold_po if n in po_names and n.startswith("rp_d_"))
-    if not pos:
-        pos = sorted(n for n in gold_po if n in po_names)
-    widths = {n: port_width(gold_mod, n) for n in pis + pos}
-    for n in pis + pos:
-        widths.setdefault(n, port_width(gate_mod, n))
-
-    kind, used, line, model = cec_pair(
-        tmp, tmp / "gold_cut.il", tmp / "gate_cut.il", pis, pos, widths, abc, tmo, "all"
-    )
-    rp_pos = [po for po in pos if po.startswith("rp_d_")]
-    if kind == "equivalent":
-        # A subset of an equivalent PO set is equivalent. Do not rebuild a
-        # 1-PO AIGER (opt after deleting the other POs can fool &cec).
-        for po in rp_pos:
-            print(f"equiv_ref REGPAIR po_cec name={po} result=equivalent line={line}")
-        return kind, used, line, []
-    if kind == "script_error":
-        print("equiv_ref REGPAIR SCRIPT_ERROR not_eq_or_bad_aiger_without_combo_cec")
-        for po in rp_pos:
-            print(f"equiv_ref REGPAIR po_cec name={po} result=script_error line={line}")
-        return "script_error", used, line, []
-    if kind != "not_equivalent":
-        for po in rp_pos:
-            print(f"equiv_ref REGPAIR po_cec name={po} result={kind} line={line}")
-        return kind, used, line, []
-
-    # NOT EQ is only a verdict when write_cex produced a replayable model
-    # that differs on a named port. Otherwise it is a script error.
-    candidates: list[dict[str, int]] = []
-    if model:
-        candidates.append(model)
-    # Directed cut vectors. ABC write_cex PI order can miss; eval on
-    # named ports is the replay that counts.
+def directed_cut_vectors(pis: list[str]) -> list[dict[str, int]]:
+    """Named-port vectors to replay a NOT EQ. Includes RX eflag/ok/fail probes."""
     zeros = {n: 0 for n in pis}
     init = dict(zeros)
     if "rp_q_crc" in init:
@@ -1089,7 +1109,111 @@ def prove_miter(tmp: Path, tmo: int, abc: str, po_names: list[str]) -> tuple[str
         recv_last["crc_recv"] = 0x155
     if "rp_q_recv_q" in recv_last:
         recv_last["rp_q_recv_q"] = 0x155
-    candidates += [rst, last_beat, start_valid_last, start_valid, mid, recv_last]
+    # RX eflag_n = done_q ? recv_q[30] : eflag_q. These two should differ
+    # if gold uses `done` (next) and gate uses `done_q` (cut PI), or vice versa.
+    eflag_set = dict(zeros)
+    if "rp_q_done" in eflag_set:
+        eflag_set["rp_q_done"] = 1
+    if "rp_q_recv_q" in eflag_set:
+        eflag_set["rp_q_recv_q"] = 1 << 30
+    eflag_hold = dict(zeros)
+    if "rp_q_eflag_q" in eflag_hold:
+        eflag_hold["rp_q_eflag_q"] = 1
+    ok_match = dict(zeros)
+    if "rp_q_done" in ok_match:
+        ok_match["rp_q_done"] = 1
+    if "crc_recv" in ok_match and "rp_q_crc" in ok_match:
+        ok_match["crc_recv"] = 0x155
+        ok_match["rp_q_crc"] = 0x155
+    ok_mismatch = dict(ok_match)
+    if "crc_recv" in ok_mismatch:
+        ok_mismatch["crc_recv"] = 0x2AA
+    return [rst, last_beat, start_valid_last, start_valid, mid, recv_last, eflag_set, eflag_hold, ok_match, ok_mismatch]
+
+
+def run_affine_on_pos(
+    tmp: Path,
+    pis: list[str],
+    rp_pos: list[str],
+    widths: dict[str, int],
+    tmo: int,
+) -> tuple[str, str, str, list[str]]:
+    """GATE-EQY-004 (5). Only after &cec timeout (or --affine-only)."""
+    from affine_prove import prove_affine_po
+
+    kinds: list[tuple[str, str]] = []
+    wit: list[str] = []
+    last_line = ""
+    for po in rp_pos:
+        akind, aline, _acex, _rows = prove_affine_po(
+            tmp, tmp / "gold_cut.il", tmp / "gate_cut.il", pis, po, widths, tmo
+        )
+        shown = "unproven" if akind == "na" else akind
+        print(f"equiv_ref REGPAIR po_cec name={po} result={shown} method=affine line={aline}")
+        last_line = aline
+        kinds.append((po, akind))
+        if akind == "not_equivalent":
+            wit.append(po)
+    if any(k == "not_equivalent" for _po, k in kinds):
+        return "not_equivalent", "affine", last_line, wit
+    if any(k == "na" for _po, k in kinds):
+        return "unproven", "affine", last_line, []
+    return "equivalent", "affine", last_line, []
+
+
+def prove_miter(
+    tmp: Path,
+    tmo: int,
+    abc: str,
+    po_names: list[str],
+    affine_only: bool = False,
+) -> tuple[str, str, str, list[str]]:
+    """Name-aligned combo CEC of the two cut nets. Option (a): not property AIGER."""
+    gold_mod = json.loads((tmp / "gold_cut.json").read_text(encoding="utf-8"))["modules"]["gold"]
+    gate_mod = json.loads((tmp / "gate_cut.json").read_text(encoding="utf-8"))["modules"]["gate"]
+    gold_pi, gold_po = port_sets(gold_mod)
+    _t_pi, _t_po = port_sets(gate_mod)
+    pis = sorted(gold_pi)
+    # Next-state only. Leftover leaf outputs (crc_word/done) are Q
+    # passthroughs after the cut; pycc may const-0 them and ABC then
+    # reports a trivial "PI vs. constant" NOT EQ that is not a D mismatch.
+    pos = sorted(n for n in gold_po if n in po_names and n.startswith("rp_d_"))
+    if not pos:
+        pos = sorted(n for n in gold_po if n in po_names)
+    widths = {n: port_width(gold_mod, n) for n in pis + pos}
+    for n in pis + pos:
+        widths.setdefault(n, port_width(gate_mod, n))
+    rp_pos = [po for po in pos if po.startswith("rp_d_")]
+
+    if affine_only:
+        print("equiv_ref REGPAIR affine_only=1 skip=&cec")
+        return run_affine_on_pos(tmp, pis, rp_pos, widths, tmo)
+
+    kind, used, line, model = cec_pair(
+        tmp, tmp / "gold_cut.il", tmp / "gate_cut.il", pis, pos, widths, abc, tmo, "all"
+    )
+    if kind == "equivalent":
+        # A subset of an equivalent PO set is equivalent. Do not rebuild a
+        # 1-PO AIGER (opt after deleting the other POs can fool &cec).
+        for po in rp_pos:
+            print(f"equiv_ref REGPAIR po_cec name={po} result=equivalent line={line}")
+        return kind, used, line, []
+    if kind == "script_error":
+        print("equiv_ref REGPAIR SCRIPT_ERROR not_eq_or_bad_aiger_without_combo_cec")
+        for po in rp_pos:
+            print(f"equiv_ref REGPAIR po_cec name={po} result=script_error line={line}")
+        return "script_error", used, line, []
+    if kind == "unproven":
+        # GATE-EQY-004 (5): XOR next-state after &cec timeout.
+        print("equiv_ref REGPAIR note=&cec timeout; trying method=affine")
+        return run_affine_on_pos(tmp, pis, rp_pos, widths, tmo)
+
+    # NOT EQ is only a verdict when write_cex produced a replayable model
+    # that differs on a named port. Otherwise it is a script error.
+    candidates: list[dict[str, int]] = []
+    if model:
+        candidates.append(model)
+    candidates += directed_cut_vectors(pis)
     wit: list[str] = []
     used_model: dict[str, int] | None = None
     for cand in candidates:
@@ -1101,6 +1225,31 @@ def prove_miter(tmp: Path, tmo: int, abc: str, po_names: list[str]) -> tuple[str
         used_model = use
         break
     if used_model is None:
+        # Per-PO &cec to name the differing output, then directed again.
+        # 1-bit POs first (RX eflag/ok/fail/done).
+        by_w = sorted(rp_pos, key=lambda n: widths.get(n, 1))
+        for po in by_w:
+            pk, _pu, pline, pmodel = cec_pair(
+                tmp, tmp / "gold_cut.il", tmp / "gate_cut.il",
+                pis, [po], widths, abc, min(max(tmo, 1), 20), f"po_{po}",
+            )
+            print(f"equiv_ref REGPAIR po_cec name={po} result={pk} line={pline}")
+            if pk == "equivalent":
+                continue
+            if pk == "not_equivalent":
+                more = [pmodel] if pmodel else []
+                more += directed_cut_vectors(pis)
+                for cand in more:
+                    use = {k: v for k, v in cand.items() if k in pis}
+                    diff, detail = explain_cex_on_ports(tmp, use, [po], widths)
+                    if diff is None:
+                        continue
+                    print(
+                        "equiv_ref REGPAIR cex_inputs "
+                        + " ".join(f"{k}=0x{v:x}" for k, v in sorted(use.items()) if k in pis)
+                    )
+                    print(f"equiv_ref REGPAIR cex_ok=1 po={po} {detail}")
+                    return "not_equivalent", used, pline, [po]
         print("equiv_ref REGPAIR SCRIPT_ERROR not_eq_without_cex")
         return "script_error", used, line, []
     print(
@@ -1133,6 +1282,11 @@ def main() -> int:
         help="Self-test: drop this output on --omit-side after the cut (e.g. rp_d_crc).",
     )
     ap.add_argument("--omit-side", default="gold", choices=("gold", "gate"))
+    ap.add_argument(
+        "--affine-only",
+        action="store_true",
+        help="Skip &cec; run GATE-EQY-004 (5) affine on each rp_d_* (self-test).",
+    )
     args = ap.parse_args()
     tmp = args.tmp
     gold_json = json.loads((tmp / "gold.json").read_text(encoding="utf-8"))
@@ -1411,7 +1565,8 @@ def main() -> int:
         eval_directed_midblock(tmp, gold_cut_mod)
 
     po_names = sorted(set(gold_po) | set(gate_po))
-    kind, used, line, wit = prove_miter(tmp, args.tmo, args.abc, po_names)
+    affine_only = bool(args.affine_only or os.environ.get("EQUIV_REGPAIR_AFFINE_ONLY") == "1")
+    kind, used, line, wit = prove_miter(tmp, args.tmo, args.abc, po_names, affine_only=affine_only)
     if wit:
         print(f"equiv_ref REGPAIR witness={' '.join(wit)}")
     print(f"equiv_ref REGPAIR cec_line={line}")

@@ -8,7 +8,7 @@
 #   (2) miter + sat -tempinduct
 #   (3) miter + ABC dsec (or &cec after FFs are ports)
 #   (4) register pairing by normalized Q name + name-paired miter + reset check
-# Affine next-state basis is not a recognized pass (premise unproven).
+#   (5) affine next-state after &cec timeout (XOR-family cone only)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -537,6 +537,9 @@ try_regpair() {
   if [[ -n "${EQUIV_REGPAIR_OMIT_PO:-}" ]]; then
     extra+=(--omit-po "$EQUIV_REGPAIR_OMIT_PO")
     extra+=(--omit-side "${EQUIV_REGPAIR_OMIT_SIDE:-gold}")
+  fi
+  if [[ "${EQUIV_REGPAIR_AFFINE_ONLY:-}" == "1" ]]; then
+    extra+=(--affine-only)
   fi
   # Flatten only — no opt_clean. Unused keep-regs (extra) must still pair-fail.
   local dump="${gold_read}

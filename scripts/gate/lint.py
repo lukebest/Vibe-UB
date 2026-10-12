@@ -15,6 +15,7 @@ from gatelib import (
     collect_stub_findings,
     discover_rtl,
     emit_report,
+    is_pyc_lib_path,
     print_tool_versions,
     rel,
     run_cmd,
@@ -22,6 +23,8 @@ from gatelib import (
     verilator_inc_args,
     module_closure,
 )
+from one_module import check_one_module
+from private_leaves import is_private_leaf, private_skip_finding
 
 WARN_RE = re.compile(
     r"^%(Error|Warning)(?:-([A-Z0-9_]+))?:(?:\s+(\S+):(\d+):)?"
@@ -65,6 +68,29 @@ def parse_verilator(text: str, module: str, default_file: str) -> list[Finding]:
     return findings
 
 
+def lint_sources_for(module_file: Path, closure: list[Path]) -> list[Path]:
+    """Sources passed to Verilator for one top.
+
+    ``rtl/pyc_lib/`` primitives are pulled in via ``-I`` + `` `include ``.
+    Passing them again as sources is ``%Warning-MODDUP``. Still lint the
+    primitive itself when it is the top.
+    """
+    top = module_file.resolve()
+    seen: set[Path] = set()
+    ordered: list[Path] = []
+    for p in [module_file, *closure]:
+        if p.suffix.lower() not in {".v", ".sv"}:
+            continue
+        rp = p.resolve()
+        if rp in seen:
+            continue
+        if is_pyc_lib_path(rp) and rp != top:
+            continue
+        seen.add(rp)
+        ordered.append(rp)
+    return ordered
+
+
 def lint_module(module: str, file: Path, sources: list[Path], incdirs: list[Path]) -> list[Finding]:
     argv = [
         "verilator",
@@ -75,16 +101,7 @@ def lint_module(module: str, file: Path, sources: list[Path], incdirs: list[Path
         *verilator_inc_args(incdirs),
     ]
     # Unit + discovered children only (do not feed the whole tree as sources).
-    seen: set[Path] = set()
-    ordered: list[Path] = []
-    for p in [file, *sources]:
-        if p.suffix.lower() not in {".v", ".sv"}:
-            continue
-        rp = p.resolve()
-        if rp in seen:
-            continue
-        seen.add(rp)
-        ordered.append(rp)
+    ordered = lint_sources_for(file, sources)
     argv.extend(str(p) for p in ordered)
     proc = run_cmd(argv)
     text = proc.stdout or ""
@@ -122,6 +139,7 @@ def main() -> int:
     for u in modules:
         print(f"  {u.kind:4} {u.module:24} {rel(u.file)}")
     findings: list[Finding] = collect_stub_findings("lint")
+    findings.extend(check_one_module(REPO_ROOT))
     if not modules:
         print("lint: no RTL modules discovered")
         return emit_report("lint", findings)
@@ -129,6 +147,9 @@ def main() -> int:
     # when they appear under rtl/. Handwritten whitelist and registered
     # blackbox.yml stubs still lint. ub_cmn_mem_1r1w is a normal cmn leaf.
     for unit in modules:
+        if is_private_leaf(unit.module):
+            findings.append(private_skip_finding("lint", unit.module, rel(unit.file)))
+            continue
         needed = module_closure(unit.module, disc) or [unit.file]
         findings.extend(lint_module(unit.module, unit.file, needed, incdirs))
     return emit_report("lint", findings)

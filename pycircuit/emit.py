@@ -61,14 +61,6 @@ def _find_pycc() -> Path:
     )
 
 
-def _find_pyc_reg(pycc: Path) -> Path:
-    install = pycc.resolve().parent.parent
-    cand = install / "include" / "verilog" / "pyc_reg.v"
-    if cand.is_file():
-        return cand
-    raise SystemExit(f"pyc_reg.v not found next to pycc ({cand})")
-
-
 def _ensure_pycircuit() -> None:
     try:
         import pycircuit  # noqa: F401
@@ -129,18 +121,6 @@ def _header(leaf: str, hooks: int) -> str:
     )
 
 
-def _write_pyc_reg(out_root: Path, pyc_reg: Path) -> Path | None:
-    # PR #21 owns rtl/pyc_lib/pyc_reg.v. Do not write it into the repo tree
-    # from this PR (identical bytes would still collide on merge). Regen
-    # checks pass --out <tmpdir> and get a local copy there.
-    if out_root.resolve() == RTL.resolve():
-        return None
-    dest = out_root / "pyc_lib" / "pyc_reg.v"
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(pyc_reg.read_bytes())
-    return dest
-
-
 def emit_one(
     *,
     source: Path,
@@ -196,11 +176,7 @@ def emit_all(out_root: Path = RTL) -> list[Path]:
     if str(HERE) not in os.sys.path:
         os.sys.path.insert(0, str(HERE))
     pycc = _find_pycc()
-    pyc_reg = _find_pyc_reg(pycc)
     written: list[Path] = []
-    pyc_copy = _write_pyc_reg(out_root, pyc_reg)
-    if pyc_copy is not None:
-        written.append(pyc_copy)
     for leaf in LEAVES:
         source = HERE / leaf["source"]
         for var in leaf["variants"]:

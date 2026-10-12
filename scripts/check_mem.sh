@@ -24,21 +24,12 @@ if [[ -z "${PYC_TOOLCHAIN_ROOT:-}" ]]; then
   export PYC_TOOLCHAIN_ROOT=/tmp/spike/pyCircuit/.pycircuit_out/toolchain/install
 fi
 
-# Consumers use `-I rtl/pyc_lib` (SPEC §2.2; file owned by PR #21 / b6ba203c).
-# Before #21 merges, fetch that file from the #21 branch into $WORK (not rtl/).
-PR21_REF="${PR21_REF:-origin/cursor/cmn-mem-1r1w-5d26}"
-if [[ -f "$ROOT/rtl/pyc_lib/pyc_reg.v" ]]; then
-  PYC_INC="$ROOT/rtl/pyc_lib"
-else
-  git -C "$ROOT" cat-file -e "${PR21_REF}:rtl/pyc_lib/pyc_reg.v" 2>/dev/null \
-    || git -C "$ROOT" fetch origin cursor/cmn-mem-1r1w-5d26
-  mkdir -p "$WORK/pyc_lib"
-  git -C "$ROOT" show "${PR21_REF}:rtl/pyc_lib/pyc_reg.v" > "$WORK/pyc_lib/pyc_reg.v"
-  PYC_INC="$WORK/pyc_lib"
-fi
+# Only the working-tree file. Do not fetch from another ref or the toolchain.
+# PR #21 owns rtl/pyc_lib/; expected FAIL until that PR lands.
+PYC_INC="$ROOT/rtl/pyc_lib"
 PYC_REG="$PYC_INC/pyc_reg.v"
 if [[ ! -f "$PYC_REG" ]]; then
-  echo "FAIL: pyc_reg.v not found (need #21 rtl/pyc_lib or fetch $PR21_REF)"
+  echo "FAIL: $PYC_REG missing (owned by PR #21; expected until #21 lands)"
   exit 1
 fi
 
@@ -163,8 +154,7 @@ stat
 select -assert-none t:$dlatch t:$adff
 YS
 cp "$PH" "$WORK/ph.v"
-cp "$PYC_REG" "$WORK/pyc_reg.v"
-( cd "$WORK" && yosys -q -s synth.ys )
+( cd "$WORK" && yosys -q -I "$PYC_INC" -s synth.ys )
 cat > "$WORK/synth_inv.ys" <<'YS'
 read_verilog pyc_reg.v
 read_verilog inv_prod.v
@@ -175,7 +165,7 @@ check -assert
 stat
 select -assert-none t:$dlatch t:$adff
 YS
-( cd "$WORK" && yosys -q -s synth_inv.ys )
+( cd "$WORK" && yosys -q -I "$PYC_INC" -s synth_inv.ys )
 echo "synth ok"
 
 echo "=== yosys equiv PRODUCT ports only ==="
@@ -282,7 +272,7 @@ YS
 # SPEC §11: only PRODUCT ports must prove. Coincidental pyc_* names
 # are not comparison points. Remaining ready ports (HOOKS ~bd_steal
 # with inputs tied) are finished with sat induction.
-( cd "$WORK" && yosys -s equiv.ys ) > "$WORK/equiv.log" 2>&1 || true
+( cd "$WORK" && yosys -I "$PYC_INC" -s equiv.ys ) > "$WORK/equiv.log" 2>&1 || true
 set +e
 python3 - "$WORK/equiv.log" <<'PY'
 import re, sys
@@ -337,7 +327,7 @@ opt
 sat -verify -tempinduct -set-init-zero -seq 4
 YS
   set +e
-  ( cd "$WORK" && yosys -s sat.ys ) > "$WORK/sat.log" 2>&1
+  ( cd "$WORK" && yosys -I "$PYC_INC" -s sat.ys ) > "$WORK/sat.log" 2>&1
   SAT_RC=$?
   set -e
   if [[ "$SAT_RC" -eq 0 ]] || grep -q "nothing to prove" "$WORK/sat.log"; then
@@ -380,7 +370,7 @@ equiv_simple -seq 16
 equiv_induct -seq 16
 equiv_status -assert
 YS
-( cd "$WORK" && yosys -q -s equiv_inv.ys )
+( cd "$WORK" && yosys -q -I "$PYC_INC" -s equiv_inv.ys )
 echo "equiv ok (ub_mem_inv PRODUCT ≡ HOOKS)"
 
 echo "ALL CHECKS PASSED"

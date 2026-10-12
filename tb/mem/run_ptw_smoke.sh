@@ -9,19 +9,10 @@ RTL="$ROOT/rtl/mem"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/ub_mem_ptw_smoke.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
-PR21_REF="${PR21_REF:-origin/cursor/cmn-mem-1r1w-5d26}"
-if [[ -f "$ROOT/rtl/pyc_lib/pyc_reg.v" ]]; then
-  PYC_INC="$ROOT/rtl/pyc_lib"
-else
-  git -C "$ROOT" cat-file -e "${PR21_REF}:rtl/pyc_lib/pyc_reg.v" 2>/dev/null \
-    || git -C "$ROOT" fetch origin cursor/cmn-mem-1r1w-5d26
-  mkdir -p "$WORK/pyc_lib"
-  git -C "$ROOT" show "${PR21_REF}:rtl/pyc_lib/pyc_reg.v" > "$WORK/pyc_lib/pyc_reg.v"
-  PYC_INC="$WORK/pyc_lib"
-fi
+PYC_INC="$ROOT/rtl/pyc_lib"
 PYC_REG="$PYC_INC/pyc_reg.v"
 if [[ ! -f "$PYC_REG" ]]; then
-  echo "FAIL: pyc_reg.v not found (need #21 rtl/pyc_lib or fetch $PR21_REF)"
+  echo "missing rtl/pyc_lib/pyc_reg.v — depends on PR #21"
   exit 1
 fi
 

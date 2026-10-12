@@ -19,7 +19,8 @@
 #           depth 24 (two full walks + margin; >= deepest cover + 6)
 # prove is defined but not tagged `default` (gatekeeper: not fully
 # proven — not a waiver). Manual: `sby -f ub_mem_ptw.sby prove`.
-# Status: rerun against #48 ce2a3f9 (catch-all + lint-workaround revert).
+# Status vs #48 ce2a3f9: cover PASS; bmc 24 PASS (1s); prove
+# UNKNOWN (induction FAIL AP_TBLRD_REQ_HOLD, k=20, 1s) — not default.
 # State auxiliaries live only in ub_mem_ptw_hooks.sby (#55), on a
 # fully free decoder cut. Encoding table is SPEC §10. Hooks-port
 # registration lands in #50.

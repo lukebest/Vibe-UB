@@ -11,8 +11,9 @@
 # no legal next falls back to st_idle. a_st_legal / a_rd_pend_st are
 # checked on that free cut (no contract assumes).
 #
-# Default tasks: cover + bmc 24. prove stays untagged until it
-# converges (gatekeeper moves it). Manual: `sby -f ub_mem_ptw_hooks.sby prove`.
+# Default tasks: cover + bmc 24. prove stays untagged (did not
+# converge: induction FAIL a_rd_pend_st at k=20, ~1s; basecase PASS).
+# Manual: `sby -f ub_mem_ptw_hooks.sby prove`.
 # hooks-port-consistency may be red until #50 registers the ports.
 
 [tasks]

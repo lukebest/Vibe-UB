@@ -28,6 +28,8 @@
 
 ### Changed
 
+- `docs/arch/mem/contracts/ub_mem_ptw_desc_dec.md`：`AP_PTW_KIND` 改为 `desc_v ⇔ desc_kind≠0`（`desc_v=1` 当且仅当 `desc_kind` 非 0；`desc_v=0` 时 `desc_kind` 必须为 0）。编码仍为 0 = invalid / 1 = table / 2 = block / 3 = page。芯片开发PM 2026-10-12。
+- SPEC §14 Q-A11：TCTE 范围表的 2 MB 颗粒度配置只由 `ub_mem_tcte_dec` 解码并报 `ILL_MAP_2MB`；L1 的 1 GB 与 L2 的 2 MB 页表块描述符合法（`desc_kind=2`，`desc_illegal=0`），遍历器将其拆成 4 KB TLB 回填。
 - 门禁 hooks：`HOOKS-UB-MEM-PTW` 登记 `tb_mem_ptw_obs_st` / `tb_mem_ptw_obs_rd_pend`（只读、不受 `tb_test_mode`；批准人验证）。
 - 门禁 regpair：同一 FF Q 上架构 `_q` 名与 PRODUCT 输出口同时出现时按 `_q` 配对；多个 `_q` 或同名落到不同 cell 仍 `FAIL(pairing)`。
 - 门禁 formal：`GATE-FORMAL-DEPTH` (4)：PRODUCT prove 仅在同次 CI equiv 对该叶子真实 PASS 时可继承 HOOKS prove；否则回退 (2)。report-only `FORMAL_INHERIT_NO_EQUIV`。继承还要求该模块实例化的每个私有叶子都有 `EQUIV_BLACKBOX`。

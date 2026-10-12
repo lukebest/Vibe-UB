@@ -1180,7 +1180,7 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 4. 表遍历属性用项目固定默认。
 5. ASID = `{ENT_IDX, TokenID}`，按非 global 缓存。
 
-各级合法描述符类型见 [arch/mem/contracts/README.md](arch/mem/contracts/README.md)（L0 只 table；L1 为 table 或 1 GB 块；L2 为 table 或 2 MB 块；L3 为 page）。遍历器把块描述符拆成 4 KB TLB 项。公开面按编码类交叉，不写描述符内部切分。
+各级合法描述符类型见 [arch/mem/contracts/README.md](arch/mem/contracts/README.md)（L0 只 table；L1 为 table 或 1 GB 块；L2 为 table 或 2 MB 块；L3 为 page）。遍历器把块描述符拆成 4 KB TLB 项。公开面按编码类交叉，不写描述符内部切分。TCTE 范围表的 2 MB 颗粒度配置只由 `ub_mem_tcte_dec` 解码并报 `ILL_MAP_2MB`；L1 的 1 GB 与 L2 的 2 MB 页表块描述符合法（`desc_kind=2`，`desc_illegal=0`），遍历器将其拆成 4 KB TLB 回填。
 
 对私有叶子输出须鲁棒：无论 `ub_mem_ptw_desc_dec` 给出何种输出，遍历器都必须回到合法态。若 `desc_v=1` 且 `desc_kind` 不在 {1, 2, 3}，遍历器走既有翻译故障分支与既有翻译故障码（不加新端口、不加新编码）。
 

@@ -1019,14 +1019,14 @@ Retry 深度下界公式见 UB-DL §4.7.3.2（含 FEC 120/128 与 RTT）。M1 25
 
 断言意图（formal，HOOKS bind；仅 `lkup_v=1`）：one-hot hit、无重复 tag、invalid way 不得 hit。不在此展开表项字段布局。
 
-第二个登记叶子：`ub_mem_ptw`（线 C 页表遍历器；PM 裁定）。两口仅 `TEST_HOOKS=1`；只出不进；直出状态寄存器 / `rd_valid_q` 的 Q；**不受** `tb_test_mode` 门控。状态机编码保持实现侧既有拼接（#48 `d1f42ab9` `pycircuit/mem/ub_mem_ptw.py`），不改为一hot 重新编码。用途：walker 形式证明的辅助不变量（`AP_TBLRD_REQ_HOLD` k-induction）。
+第二个登记叶子：`ub_mem_ptw`（线 C 页表遍历器；PM 裁定）。两口仅 `TEST_HOOKS=1`；只出不进；直出状态寄存器 / `rd_valid_q` 的 Q；**不受** `tb_test_mode` 门控。状态为 6 bit 一hot 寄存器，拼接 `{st_evt, st_flt, st_fill, st_dec, st_rd, st_idle}`（MSB→LSB；#48 `b522fd6` `pycircuit/mem/ub_mem_ptw.py`，验证-C）。用途：walker 形式证明的辅助不变量（`AP_TBLRD_REQ_HOLD` k-induction）。
 
 | 端口 | 方向 | 宽度 | 时钟域 | 接入 | 含义 |
 | --- | --- | --- | --- | --- | --- |
-| `tb_mem_ptw_obs_st` | out | 6 | `core_clk` | `ub_mem_ptw` | 状态寄存器 Q 直出（只读）。拼接 `{st_evt, st_flt, st_fill, st_dec, st_rd, st_idle}` |
+| `tb_mem_ptw_obs_st` | out | 6 | `core_clk` | `ub_mem_ptw` | 6 bit 一hot 状态寄存器 Q 直出（只读）。`{st_evt, st_flt, st_fill, st_dec, st_rd, st_idle}`（MSB→LSB） |
 | `tb_mem_ptw_obs_rd_pend` | out | 1 | `core_clk` | `ub_mem_ptw` | `= rd_valid_q`（Q 直出，只读） |
 
-`tb_mem_ptw_obs_st` 编码（宽 6；未列出的值非法）：
+`tb_mem_ptw_obs_st` 编码（宽 6，一hot；未列出的值非法）：
 
 | 值 | 状态 |
 | --- | --- |
@@ -1182,6 +1182,8 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 
 各级合法描述符类型见 [arch/mem/contracts/README.md](arch/mem/contracts/README.md)（L0 只 table；L1 为 table 或 1 GB 块；L2 为 table 或 2 MB 块；L3 为 page）。遍历器把块描述符拆成 4 KB TLB 项。公开面按编码类交叉，不写描述符内部切分。
 
+对私有叶子输出须鲁棒：无论 `ub_mem_ptw_desc_dec` 给出何种输出，遍历器都必须回到合法态。若 `desc_v=1` 且 `desc_kind` 不在 {1, 2, 3}，遍历器走既有翻译故障分支与既有翻译故障码（不加新端口、不加新编码）。
+
 **Q-A18 / UB-MEM §9.4.3。** 第一波不做硬件 A/D 写回。`{HDF,HAF}≠0` 记配置非法（`ILL_HW_AD`）。描述符 `AF=0`：`AFFD=0` 时报 Access Flag 故障、不填充，后续按 TCTE.`FBS` / `FBR` 处理；`AFFD=1` 时不报该故障，正常填充。Stage 2 落地后 `S2_AFFD` 同一规则。
 
 ### 14.5 MAPT 与 UBA
@@ -1271,7 +1273,7 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 | Q-A04 | UB-MEM §9.4.2 | 不支持 → 非法 | **已定** | 回错误并记「配置非法」事件，单一路径 |
 | Q-A08 | UB-MEM §9.4.2.2.2 | `MATT_WD` | **已定** | =1 时绕过遍历器：不走页表、不报翻译故障；TLB 缺失记一条翻译事件、不填充，经事件路径结束；无软件 TLB 预装口。事件口暂定：`evt_valid`/`evt_ready`，`EVT_CODE_W=4`，码 0 保留，`EVT_MATT_WD_MISS`=1；取值随 Q-E09，须用命名常量。Xia 2026-10-12 11:05 |
 | Q-A10 | UB-MEM §9.4.3 | 地址宽度 | **已定** | `PA_W=48`；指针高位非 0 与 GPAS 保留编码记配置非法；TLB PFN 36 bit |
-| Q-A11 | UB-MEM §9.4.3 | MATT 格式 | **已定** | VMSAv8-64 Stage 1、4 KB、最多 4 级、48 bit 入/出，5 处适配见 §14.4；各级合法类型见契约 README；块拆成 4 KB TLB 项 |
+| Q-A11 | UB-MEM §9.4.3 | MATT 格式 | **已定** | VMSAv8-64 Stage 1、4 KB、最多 4 级、48 bit 入/出，5 处适配见 §14.4；各级合法类型见契约 README；块拆成 4 KB TLB 项。遍历器对 `ub_mem_ptw_desc_dec` 任意输出回到合法态；`desc_v=1` 且 `desc_kind` ∉ {1,2,3} 走既有翻译故障分支与既有故障码（不加新端口/编码） |
 | Q-A14 | UB-MEM §9.4.4.2 | MAPTE 范围 | **已定** | Base / Limit = 本级区域内字节偏移，闭区间，只比本级有效位 |
 | Q-A15 | UB-MEM §9.4 | `SZ` / UBA | **已定** | `SZ` 合法 16..39，否则配置非法；UBA 高出 `64−SZ` 的位记翻译事件并终止 |
 | Q-A17 | UB-MEM §9.4.4.2 | MAPT 粒度 | **已定** | 第一波只 4 KB；2 MB → `ILL_MAP_2MB`，延后 |

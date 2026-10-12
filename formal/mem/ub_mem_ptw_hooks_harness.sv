@@ -141,8 +141,9 @@ module ub_mem_ptw_hooks_harness (
   );
 
   // Yosys 0.33 drops dotted hierarchical refs and ignores bind.
-  // Local taps are assigned from the flattened u_desc_dec cut
-  // ports in ub_mem_ptw_hooks.sby (`connect -set` after flatten).
+  // ub_mem_ptw_hooks.sby `connect -set` after flatten aliases
+  // u_hooks_inv.{dec_out_valid,desc_v,desc_kind} to the DUT-side
+  // u_desc_dec nets pyc_instance_143/144/145.
   wire        tap_dec_out_valid;
   wire        tap_desc_v;
   wire [1:0]  tap_desc_kind;

@@ -48,11 +48,17 @@ read -formal ub_mem_ptw_desc_dec_cut.sv
 hierarchy -check -top ub_mem_ptw_hooks_harness
 proc
 flatten
-# Drive hooks_inv taps from the free cut's public ports (Yosys 0.33
-# cannot resolve dotted refs or bind). Names are flatten of u_desc_dec.
-connect -set tap_dec_out_valid \u_dut.u_desc_dec.out_valid
-connect -set tap_desc_v \u_dut.u_desc_dec.desc_v
-connect -set tap_desc_kind \u_dut.u_desc_dec.desc_kind
+# Yosys 0.33 drops dotted refs and ignores bind. After flatten the
+# cut drives the DUT-side instance nets (pycc names in #48
+# rtl/mem/hooks/ub_mem_ptw.v u_desc_dec port map):
+#   out_valid -> pyc_instance_143
+#   desc_v    -> pyc_instance_144
+#   desc_kind -> pyc_instance_145
+# Flatten absorbs tap_* into u_hooks_inv.<port>. connect -set those
+# to the DUT nets so c_kind0 sees the same $anyseq the walker does.
+connect -set \u_hooks_inv.dec_out_valid \u_dut.pyc_instance_143
+connect -set \u_hooks_inv.desc_v \u_dut.pyc_instance_144
+connect -set \u_hooks_inv.desc_kind \u_dut.pyc_instance_145
 opt
 memory -nomap
 opt -purge
@@ -62,5 +68,5 @@ ub_mem_ptw_if_props.sv
 ub_mem_ptw_hooks_inv.sv
 ub_mem_ptw_hooks_harness.sv
 ub_mem_ptw_desc_dec_cut.sv
-inc/pyc_reg.v
+../../rtl/pyc_lib/pyc_reg.v
 ../../rtl/mem/hooks/ub_mem_ptw.v

@@ -9,8 +9,8 @@
 # fill / block / page paths stay reachable. Properties must hold for
 # ANY decode result. No private bit-layout is read or written.
 #
-# pyc_reg.v lives in inc/ because #48 has no rtl/pyc_lib (same as
-# formal/mem/ub_mem_tlb.sby on the TLB formal branch).
+# pyc_reg.v is only rtl/pyc_lib/pyc_reg.v (#21). This PR does not
+# copy it. formal.sh / sby [files] stay red until #21 lands.
 #
 # Default tasks (scripts/gate/formal.sh: cd formal/mem && sby -f --sequential):
 #   cover — reach event, MATT_WD complete, read+rsp, fill,
@@ -19,7 +19,7 @@
 #           depth 24 (two full walks + margin; >= deepest cover + 6)
 # prove is defined but not tagged `default` (gatekeeper: not fully
 # proven — not a waiver). Manual: `sby -f ub_mem_ptw.sby prove`.
-# Status: rerun pending against #48 98818fc (decode catch-all).
+# Status: rerun against #48 ce2a3f9 (catch-all + lint-workaround revert).
 # State auxiliaries live only in ub_mem_ptw_hooks.sby (#55), on a
 # fully free decoder cut. Encoding table is SPEC §10. Hooks-port
 # registration lands in #50.
@@ -72,5 +72,5 @@ opt -purge
 ub_mem_ptw_if_props.sv
 ub_mem_ptw_harness.sv
 ub_mem_ptw_desc_dec_cut.sv
-inc/pyc_reg.v
+../../rtl/pyc_lib/pyc_reg.v
 ../../rtl/mem/ub_mem_ptw.v

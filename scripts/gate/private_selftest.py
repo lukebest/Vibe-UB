@@ -656,6 +656,8 @@ def test_owned_paths_gatekeeper_ok() -> None:
         )
         _expect_none("owned-paths-title", hits, "GATE_FILE_TOUCHED")
         _expect_none("owned-paths-title-waiver", hits, "GATE_WAIVER_UNCHECKED")
+        no_pr = check_owned_paths(root, OWNED_TOUCH, title="", comments="")
+        _expect_none("owned-paths-no-pr", no_pr, "GATE_FILE_TOUCHED")
         if not is_gatekeeper_pr(title="gate: anything"):
             _fail("owned-paths-prefix", "title gate: must be gatekeeper")
         if is_gatekeeper_pr(title="Gate: wrong case"):

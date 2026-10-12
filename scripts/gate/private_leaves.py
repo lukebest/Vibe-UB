@@ -1379,7 +1379,8 @@ def check_owned_paths(
     if paths is None:
         paths = changed_paths_vs_main(root)
     findings: list[Finding] = []
-    if not is_gatekeeper_pr(title=title):
+    # PR-scoped (docs: 非守门人 PR). Empty title = push/local, not a PR.
+    if pr_title(title) and not is_gatekeeper_pr(title=title):
         touched = touched_gate_files(paths)
         if touched:
             bucket = "new" if owned_paths_required(root) else "report"

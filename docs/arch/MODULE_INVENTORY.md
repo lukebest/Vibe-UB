@@ -53,7 +53,7 @@ PCS 内部**寄存**电平，1 bit，`core_clk`。`ub_pcs_amctl_rx`（SPEC §2.4
 
 | 项 | 值 |
 | --- | --- |
-| 置位 | 全部已配置 lane（`pma_rx_width`）的分 lane「已收 SDF」旗都立起之后，再寄一拍。末已配置 lane 的 AMCTL **末字**在 **t** → `cw_dec` 输出在 **t+1** → `pcs_rx_sdf_seen` 从 **t+2** 起为 1。旗在 `amctl_vld` 且 `LW_SWITCH`+{`X1`,`X2`,`X4`,`X8`} 且 `lmsm2pcs_nb_phase==1` 时置。SDF / EDF 语义见 `ub_pcs_amctl_rx` |
+| 置位 | 全部已配置 lane（`pma_rx_width`）的分 lane「已收 SDF」旗都立起之后，再寄一拍。末已配置 lane 的 AMCTL **末字**在 **t** → `cw_dec` 输出在 **t+1** → `pcs_rx_sdf_seen` 从 **t+2** 起为 1。旗在 `amctl_vld` 且 `ctrl_ok` 且 `lid_ok` 且 `LW_SWITCH`+{`X1`,`X2`,`X4`,`X8`} 且 `lmsm2pcs_nb_phase==1` 时置。SDF / EDF 与稳健性见 `ub_pcs_amctl_rx` |
 | 保持 | 置位后保持 |
 | 清零 | `lmsm2pcs_nb_phase==0` 或复位的**下一拍**清 0；分 lane 旗一并清 |
 
@@ -92,9 +92,20 @@ SPEC §2.4 已点名该叶子。main 无 `pycircuit/` / `rtl/` 实现。与 `ub_
 | --- | --- | --- | --- |
 | 1 | 全端口表 | Xia 裁定 2026-10-12（M1） | **无** 分 lane valid 输入。输入保持 `pma_rx_data` + 共享 `pma_rx_valid`（§3.2.4；§13 A-05 / A-CL-3）。本叶含 §3.2.4.4 分 lane AMCTL 锁定（在固定插入间隔上做 END 检测，滑窗），分 lane 锁定位在叶内产生；`pcs_am_locked` = 全部已配置 lane（`pma_rx_width`）已锁定 |
 | 2 | AMCTL 识别与字段 | Xia 裁定 2026-10-12（M2） | 公开只写语义：END 场经 eBCH-16 纠正后在预期位置匹配，即识别为 AMCTL（「AMCTL Identification Mechanism」）。场名 BODY / END / LID / CTRL_TYPE / CTRL_DETAIL（表 3-7）。LID 仅两半一致时有效；连续两次相同的已纠正 LID 才更新 lane ID。CTRL_TYPE / CTRL_DETAIL：任一半解出合法码字即有效；两半解出**不同**合法码字则忽略该控制。码字级解码（eBCH-16 纠正、码字表、场符号位置）在私有叶 `ub_pcs_amctl_cw_dec` |
-| 3 | SDF / EDF | Xia 裁定 2026-10-12（M3） | 「带 SDF」：`CTRL_TYPE` = `LW_SWITCH` 且 `CTRL_DETAIL` ∈ {`X1`,`X2`,`X4`,`X8`}（§3.2.4.2「AMCTL Controlling」），且当拍 `lmsm2pcs_nb_phase==1`。「带 EDF」：同类型且 `CTRL_DETAIL` = `X0`。`amctl_rx` 为每 lane 记「已收 SDF」旗（在 `amctl_vld` 上置）。`pcs_rx_sdf_seen` 仍要全部已配置 lane；拍位 **t / t+1 / t+2** 见下表 |
+| 3 | SDF / EDF | Xia 裁定 2026-10-12（M3） | 「带 SDF」：`CTRL_TYPE` = `LW_SWITCH` 且 `CTRL_DETAIL` ∈ {`X1`,`X2`,`X4`,`X8`}（§3.2.4.2「AMCTL Controlling」），且当拍 `lmsm2pcs_nb_phase==1`。「带 EDF」：同类型且 `CTRL_DETAIL` = `X0`。`amctl_rx` 为每 lane 记「已收 SDF」旗（在 `amctl_vld` 且 `ctrl_ok` 且 `lid_ok` 上置；见稳健性）。`pcs_rx_sdf_seen` 仍要全部已配置 lane；拍位 **t / t+1 / t+2** 见下表 |
 | 4 | 「全部已配置 lane」来源 | 已有配置口 | `pma_rx_width[3:0]`（§3.2.5，与 `PARAM_PHY.NUM_LANES_RX[13:10]` 同编码，§9）；参数 `NUM_LANES_RX`。§3.3.4 无 LMSM→PCS 宽度口 |
 | 5 | LID 出口 | Xia 裁定 2026-10-12 | `pcs_rx_lid` 宽 **4**：lane 0..7 加空身份，公开只称 `LID_NULL`（`LID_NULL` 的线码/半场编码是 `ub_pcs_amctl_cw_dec` 私有叶细节）。`pcs_rx_lid_vld`：全部已配置 lane 上 LID 一致解码时 **1 拍脉冲** |
+| 6 | 对私有叶输出的稳健性 | 本清单 | 见下节。`amctl_rx` 对 `cw_dec` **任意**输出保持合法状态；formal 把 `cw_dec` 出口当自由输入 |
+
+### 对私有叶输出的稳健性
+
+`ub_pcs_amctl_rx` 必须对 `ub_pcs_amctl_cw_dec` 的**任意**输出保持合法状态。形式化把各 `cw_dec` 出口当作自由输入；默认任务**不**把契约 `AP_CWDEC_*` 当 assume。
+
+1. 限定场与各 `*_ok`（`end_ok` / `lid` / `lid_ok` / `ctrl_type` / `ctrl_type_ok` / `ctrl_detail` / `ctrl_detail_ok`）**只在** `amctl_vld=1` 时采用；`amctl_vld=0` 时忽略。
+2. `amctl_vld=1` 且（`ctrl_ok=0` 或 `lid_ok=0`）视为「不是 AMCTL」：不置 SDF/EDF，不更新 LID。此处 `ctrl_ok` = `ctrl_type_ok && ctrl_detail_ok`。
+3. 分 lane「已收 SDF」旗与 `pcs_rx_sdf_seen` **只**按本清单已写的置位/清零规则变化（核对表 #3 与拍位表）。
+
+`end_hit` 不受 `amctl_vld` 限定，仍供锁定/滑窗（核对表 #1）。
 
 #### 1. 端口表
 
@@ -117,7 +128,7 @@ SPEC §2.4 已点名该叶子。main 无 `pycircuit/` / `rtl/` 实现。与 `ub_
 | 拍 | 事件 |
 | --- | --- |
 | **t** | 末已配置 lane 的 AMCTL **末字**到达（滑窗后 `word` / `word_vld`） |
-| **t+1** | 该 lane 的 `ub_pcs_amctl_cw_dec` 输出（`amctl_vld` 及限定场）。`amctl_rx` 在 `amctl_vld` 且 `LW_SWITCH`+{`X1`,`X2`,`X4`,`X8`} 且 `lmsm2pcs_nb_phase==1` 时置该 lane「已收 SDF」旗 |
+| **t+1** | 该 lane 的 `ub_pcs_amctl_cw_dec` 输出（`amctl_vld` 及限定场）。`amctl_rx` 在 `amctl_vld` 且 `ctrl_ok` 且 `lid_ok` 且 `LW_SWITCH`+{`X1`,`X2`,`X4`,`X8`} 且 `lmsm2pcs_nb_phase==1` 时置该 lane「已收 SDF」旗（`ctrl_ok` / 非 AMCTL 见上节稳健性） |
 | **t+2** | 全部已配置 lane 旗已立时，`pcs_rx_sdf_seen` 从本拍起为 1（`amctl_rx` 多一拍寄存） |
 
 清零：`lmsm2pcs_nb_phase==0` 或复位的下一拍；分 lane 旗一并清。

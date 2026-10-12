@@ -4,6 +4,7 @@
 
 ### Added
 
+- `docs/uarch/tp_uarch.md`：线 B 第 6 章传输层微架构草案 v0（8 模块；对照 LAYER_CONTRACTS / MODULE_INVENTORY 的 M-1..M-9；15 条开放问题待 Xia）。`RETRY_WAIT_CYC` / `PROBE_WAIT_CYC`（323 拍）归 DLL / LMSM。docs-only。
 - 实现 quick-synth：私有叶子契约发现、公开 CI `PRIVATE_SKIP` 黑盒、attest 模式（公开 `reports/private/<layer>/<leaf>.yml`，私有仓 `attest/<layer>/<leaf>.yml`）。
 - `pycircuit/cmn/ub_cmn_mem_1r1w.py` → `rtl/cmn/` 与 `rtl/cmn/hooks/` 的 `ub_cmn_mem_1r1w_{d5w8,d8w16,d64w64m16}.v`：pycc 固定网表（SPEC §2.2，`d<DEPTH>w<WIDTH>`，N>1 加 `m<WMASK_W>`）。PRODUCT=`TEST_HOOKS=0`，HOOKS=`TEST_HOOKS=1`；§10 无 `tb_*`，两套端口与模块名相同。时钟 `core_clk`；无复位口（业务叶标准名 `rst_pyc`，本原语不引出）。生成参数 `WMASK_W`（默认 = `WIDTH`，整字写；`WIDTH` 须整除）；N=`WIDTH/WMASK_W`>1 时多 `wmask[N-1:0]`，bit i 写段 i，其余段保持；同址同拍 per-segment read-old。1R1W、读 1 拍；阵列与 `rdata` 无复位 / 无零初始化；越界不截断。`scripts/emit_rtl.py` / `make emit` 再现。较大 C 线变体（如 `d512w512m64`）不在本登记表，可经清单流后补。pycc 运行时原语（`pyc_reg.v`）只放 `rtl/pyc_lib/`，从 TOOLCHAIN 钉住的 pyCircuit（`43cc5918`）原样拷贝；层目录不再放 `pyc_*`。
 - `model/ub_cmn_mem_1r1w.py` + `formal/cmn/`：1R1W 存储原语参考模型与接口断言（CODING_STYLE §10 / PR #20 时序提案；`ASSERT_NO_UNINIT_READ` 默认 1；formal 用 anyconst 单地址抽象）。
@@ -42,6 +43,7 @@
 
 ### Changed
 
+- `docs/uarch/tp_uarch.md`：对照 main `8c2c498e`（#63）`LAYER_CONTRACTS` §2/§3。M-1/M-2/M-5/M-7/M-8/M-9 关闭；M-3 除 RSPST/RSPINFO 宽外关闭；M-4 器件级 MTU 仍未知；M-6 GBN 先做、SR 另跟踪仍未知。M-5【Xia】与契约 §3 一致：`RETRY_WAIT`/`PROBE_WAIT`（323 拍）属 DLL §4.7.3.3 / LMSM §3.4.3.2，TP 自用 RTO 与 ACK 合并（§6.4.2.1）。口表改契约名与宽（160 b、1 flit/拍；CFG 4 b：6/7/9）。Q-1/Q-2/Q-8/Q-9/Q-10 仍未知。docs-only。
 - `docs/arch/LAYER_CONTRACTS.md` §3：`RETRY_WAIT_CYC` / `PROBE_WAIT_CYC`（323 拍超时）分别归属 DLL（§4.7.3.3）与 LMSM（§3.4.3.2）；TP 使用本层重传超时（RTO）与 ACK 合并计时器（§6.4.2.1）。
 - `docs/arch/LAYER_CONTRACTS.md` §2 / §3：对照 PR #58 M-1..M-9 与 PR #61 §8.9.5 / §14.6 十四问。补 TP→NW 边带 DCNA/LBF/RT/CCI、`tp2ta_msn_*`、ROL `ta2tp_cmp_*`；RTPH 16 B、DstTPN/PSN/TPMSN 24；ICRC 按 CFG9/7；CFG 取值 6/7/9（§4.3.2.2.2、§6.3.2）；SCNA/DCNA 规范两档、优先通路 16 b；发送窗 §6.5.1.4.1。其余（NLP→TAH 码点、LPH.RT 位切片、`ta2tp_mode`、flush 拍数、未决上限、长度宽、NAK 原因、GBN vs SR、共享信道、包上限、RTPH 其余宽）标 **未知**。
 - `scripts/impl/quick_synth.*`：`rtl/pyc_lib/` 缺失改为硬失败（目录来自 PR #21，必须存在）；去掉回退 `rtl/common` 的临时 WARN。attest 的 `contract_sha256` 只调用 main 上 `scripts/gate/contract_hash.py`；自测假仓库拷该文件，不再自带副本。

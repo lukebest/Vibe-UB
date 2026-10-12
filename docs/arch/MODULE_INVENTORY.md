@@ -128,7 +128,7 @@ SPEC §2.4 已点名该叶子。main 无 `pycircuit/` / `rtl/` 实现。与 `ub_
 
 ## `ub_pcs_amctl_cw_dec`
 
-**船长已确认：** 走 C 线 S-01(b)。公开仓只留端口桩；源码在 `lukebest/Vibe-UB-private`；码字表不进公开 SPEC。契约 [docs/arch/pcs/contracts/ub_pcs_amctl_cw_dec.md](pcs/contracts/ub_pcs_amctl_cw_dec.md)。YAML 头 schema 源：[docs/arch/mem/contracts/README.md](mem/contracts/README.md) §8（main `5b0b9fc3`）。
+**船长已确认：** 走 C 线 S-01(b)。公开仓只留端口桩；源码在 `lukebest/Vibe-UB-private`；码字表不进公开 SPEC。契约 [docs/arch/pcs/contracts/ub_pcs_amctl_cw_dec.md](pcs/contracts/ub_pcs_amctl_cw_dec.md)。YAML 头 schema 源：[docs/arch/mem/contracts/README.md](mem/contracts/README.md) §8（main `73cfa6e1`，#49；含必填 `assertions:`）。
 
 | 项 | 值 |
 | --- | --- |

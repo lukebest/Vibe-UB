@@ -26,12 +26,21 @@ ports:
   - {name: ctrl_detail_ok, dir: out, width: 1, desc: 与 ctrl_type_ok 同一半场规则}
 params: []
 ill_cause_width: 4
+assertions:
+  - AP_CWDEC_AMCTL_VLD
+  - AP_CWDEC_CLK
+  - AP_CWDEC_CTRL_OK
+  - AP_CWDEC_LAT1
+  - AP_CWDEC_LID_OK
+  - AP_CWDEC_OK_WITH_VLD
+  - AP_CWDEC_QUAL_ZERO
+  - AP_CWDEC_RST
 status: draft
 ```
 
 # 公开信号契约 — `ub_pcs_amctl_cw_dec`
 
-YAML 机读头按 [docs/arch/mem/contracts/README.md](../../mem/contracts/README.md) §8 的固定键写（`leaf` / `parent` / `clock` / `latency` / `ports` / `params` / `ill_cause_width` / `status`）。寄存叶子不写 `comb_budget_ns`。schema 源是 main 上那一份（#43 已合入 `5b0b9fc3`）。本文件不另立键。
+YAML 机读头按 [docs/arch/mem/contracts/README.md](../../mem/contracts/README.md) §8 的固定键写（`leaf` / `parent` / `clock` / `latency` / `ports` / `params` / `ill_cause_width` / `assertions` / `status`）。寄存叶子不写 `comb_budget_ns`。`assertions` 是正文引用的全部 `AP_*` ID（精确、去重、排序）。schema 源是 main 上那一份（#49 已合入 `73cfa6e1`）。本文件不另立键。
 
 | 项 | 值 |
 | --- | --- |

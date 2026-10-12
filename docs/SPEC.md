@@ -1150,6 +1150,8 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 
 **Q-A08 / UB-MEM §9.4.2.2.2。** `MATT_WD=1` 时绕过遍历器：不走页表、不报翻译故障。TLB 缺失记一条翻译事件、不填充，请求经事件路径结束。第一波不提供软件 TLB 预装口。
 
+遍历器事件口（暂定，事件格式等 Q-E09）：`evt_valid` / `evt_ready` 握手；`evt_code` 宽由参数 `EVT_CODE_W=4`。码 0 保留，硬件不得发出。暂定常量：`EVT_MATT_WD_MISS`=1（`MATT_WD=1` 时 TLB 缺失）。Q-E09 落地后常量取值可以改；消费者必须用命名常量，不得写死数字。**Xia 裁定 2026-10-12 11:05。**
+
 **Q-A10 / UB-MEM §9.4.3。** `PA_W=48`。指针高位非 0、以及 GPAS 保留编码，记配置非法。TLB PFN 宽 36 bit。
 
 **Q-A11 / UB-MEM §9.4.3。** MATT 格式取 Arm VMSAv8-64 Stage 1、4 KB 粒度、最多 4 级、48 bit 入/出，并做 5 处适配：
@@ -1206,7 +1208,7 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 
 **Q-C05 / UB-MEM §9.4.4。** 第一波不做 MAPT 遍历缓存。
 
-**Q-C07。** UMMU 与译码器各有一个 valid/ready 表读口：地址 48 bit，长度 8 / 32 / 64 B，带 tag；响应 512 bit 加错误。只支持小端；`ENDI=1` 记配置非法。第一波遍历器 1 个未决、读 8 B（长度恒驱 8 B，tag 为 0），按地址低位从 512 bit 响应取出对应 8 B；口宽保持满宽。
+**Q-C07。** UMMU 与译码器各有一个 valid/ready 表读口 `ub_mem_tbl_rd`：地址 48 bit；`len` 为 8 bit 字节数，合法值只有 8 / 32 / 64，其余值是接口断言失败；`tag` 宽 4 bit（第一波遍历器驱 0，1 个未决）；响应 512 bit 加错误。只支持小端；`ENDI=1` 记配置非法。第一波遍历器 1 个未决、读 8 B（`len` 恒驱 8，`tag` 为 0），按地址低位从 512 bit 响应取出对应 8 B；口宽保持满宽。**Xia 裁定 2026-10-12 11:05。**
 
 **Q-C08。** SRAM 桩：读 1 拍寄存、1R1W、同拍同址读返回旧值；阵列不复位；valid 在叶子触发器；写后读旁路在叶子。
 
@@ -1233,6 +1235,9 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 | 译码翻译缓存 | `DEC_TLB_DEPTH` | 32 | C-D1；UB-MEM §9.5 |
 | 目标 EID 宽 | `EID_W` | 20；`_eid128` 以后 | C-D2；UB-MEM §9.5 |
 | CMDQ / EVENTQ | — | 命令 16 B、事件 32 B | Q-B08；App. D.4.1 |
+| 表读 `len` | — | 8 bit 字节数；合法 8 / 32 / 64 | Q-C07；Xia 2026-10-12 11:05 |
+| 表读 `tag` | — | 4 bit；第一波驱 0 | Q-C07；Xia 2026-10-12 11:05 |
+| 遍历器事件码宽 | `EVT_CODE_W` | 4；码 0 保留 | Q-A08；Xia 2026-10-12 11:05 |
 
 ### 14.10 裁定一览
 
@@ -1244,7 +1249,7 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 | Q-A02 | UB-MEM §9.4.2.1 | Entity 下标 | **已定** | 本机 `ENT_IDX`（`ENT_IDX_W=4`，16 项）；TECT 直接下标；EID→`ENT_IDX` 在 RSC；UMMU 收 `ENT_IDX` + 命中 |
 | Q-A03 | UB-MEM §9.4.3 | Stage 范围 | **已定** | 第一波只 Stage 1；Stage 2 与安全态放可选轮；遍历器 / TLB 标签保留扩展参数 |
 | Q-A04 | UB-MEM §9.4.2 | 不支持 → 非法 | **已定** | 回错误并记「配置非法」事件，单一路径 |
-| Q-A08 | UB-MEM §9.4.2.2.2 | `MATT_WD` | **已定** | =1 时绕过遍历器：不走页表、不报翻译故障；TLB 缺失记一条翻译事件、不填充，经事件路径结束；无软件 TLB 预装口 |
+| Q-A08 | UB-MEM §9.4.2.2.2 | `MATT_WD` | **已定** | =1 时绕过遍历器：不走页表、不报翻译故障；TLB 缺失记一条翻译事件、不填充，经事件路径结束；无软件 TLB 预装口。事件口暂定：`evt_valid`/`evt_ready`，`EVT_CODE_W=4`，码 0 保留，`EVT_MATT_WD_MISS`=1；取值随 Q-E09，须用命名常量。Xia 2026-10-12 11:05 |
 | Q-A10 | UB-MEM §9.4.3 | 地址宽度 | **已定** | `PA_W=48`；指针高位非 0 与 GPAS 保留编码记配置非法；TLB PFN 36 bit |
 | Q-A11 | UB-MEM §9.4.3 | MATT 格式 | **已定** | VMSAv8-64 Stage 1、4 KB、最多 4 级、48 bit 入/出，5 处适配见 §14.4；各级合法类型见契约 README；块拆成 4 KB TLB 项 |
 | Q-A14 | UB-MEM §9.4.4.2 | MAPTE 范围 | **已定** | Base / Limit = 本级区域内字节偏移，闭区间，只比本级有效位 |
@@ -1265,7 +1270,7 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 | Q-C04 | UB-MEM §9.4.4 | PLB | **已定** | `PLB_DEPTH=4`（0 关闭），触发器 + 范围比较；TokenValue 不符则作废并重走 MAPT |
 | Q-C05 | UB-MEM §9.4.4 | MAPT 遍历缓存 | **已定** | 第一波不做 |
 | Q-C06 | UB-MEM §9.5 | 译码 L0 缓存 | **已定** | 由 C-D1 取代 |
-| Q-C07 | 实现口 | 表读口 | **已定** | UMMU / 译码器各一口 valid/ready（地址 48 bit，长度 8/32/64 B，tag；响应 512 bit + 错）；只小端，`ENDI=1` → 配置非法；第一波 1 未决、恒读 8 B、tag 0，按地址低位取 8 B，口宽满宽 |
+| Q-C07 | 实现口 | 表读口 | **已定** | `ub_mem_tbl_rd` valid/ready；地址 48 bit；`len` 8 bit 字节数，合法仅 8/32/64（其余接口断言失败）；`tag` 4 bit（第一波驱 0，1 未决）；响应 512 bit + 错；只小端，`ENDI=1` → 配置非法；第一波恒读 8 B，按地址低位取 8 B，口宽满宽。Xia 2026-10-12 11:05 |
 | Q-C08 | 实现 | SRAM 桩 | **已定** | 读 1 拍寄存、1R1W、同拍同址读旧值；阵列不复位；valid 在叶子触发器；写后读旁路在叶子 |
 | Q-C09 | UB-MEM §11.4.4 | 失效 | **已定** | valid 全在触发器；全部失效 1 拍；条件失效按组扫 64 拍，期间暂停查找；SYNC 完成前全部生效；改 TECT 须软件失效 |
 | Q-C10 | 本规格 §10 | 存储后门 | **已定** | 只覆盖 §10 点名阵列；第一批 `mem_tlb_w0`…`w3`、`mem_dec_tlb`；`mem_dec_b0`…`b7` 已随 C-D1 撤；`tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`；仅 HOOKS，`tb_test_mode` 门控，eqy 接低 |

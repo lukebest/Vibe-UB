@@ -174,7 +174,7 @@ M1 PCS 子块：
 | `ub_pcs_fec_enc` / `ub_pcs_fec_dec` | TX/RX | RS(128,120)，T=4 默认；T=2 / bypass 可协商 | §3.2.2.1、§3.2.3.5 |
 | `ub_pcs_scrambler` / `ub_pcs_descrambler` | TX/RX | 每 lane 加法 PRBS23；见下 | §3.2.2.4、§3.2.3.2、§3.2.6 |
 | `ub_pcs_lane_dist` / `ub_pcs_lane_dedist` | TX/RX | **8-bit FEC 符号** 跨 lane 分发/回收，不是 2-bit | §3.2.2.3、§3.2.5 |
-| `ub_pcs_amctl_tx` / `ub_pcs_amctl_rx` | TX/RX | AMCTL 插入、锁定、滑窗、确认 | §3.2.4、§3.2.3.1 |
+| `ub_pcs_amctl_tx` / `ub_pcs_amctl_rx` | TX/RX | AMCTL 插入、锁定、滑窗、确认。RX 含 §3.2.4.4 分 lane 锁定；码字解码在私有叶 `ub_pcs_amctl_cw_dec` | §3.2.4、§3.2.3.1、§3.2.4.4 |
 | `ub_pcs_deskew` | RX | 多 lane 对齐 | §3.2.3.1 |
 | 交织/解交织 | TX/RX | 仅当 FEC 交织（`FEC_CODEC_NUM=2`）开启；M1 用 CodecNum=1，交织列为非目标 | §3.2.2.3、§3.2.3.4、§3.2.3.6 |
 
@@ -184,7 +184,7 @@ M1 PCS 子块：
 
 每个被加扰符号：**LSB 先、MSB 后**（§3.2.2.4）。**不加扰：** EEIB、AMCTL。**加扰：** LTB 全部符号、以及来自 DLL 的全部数据（含 Null Block 等 DLL 码流）（§3.2.2.4、§3.2.3.2）。
 
-种子复位（TX/RX 相同，§3.2.2.4，状态见 §3.4.3.6、§3.4.3.7）：LMSM **不在** `Send_NullBlock` / `Link_Active` 时，遇 AMCTL with EDF → 复位种子。LMSM **处于** 这两态时，遇 AMCTL with SDF → **不**复位。
+种子复位（TX/RX 相同，§3.2.2.4，状态见 §3.4.3.6、§3.4.3.7）：LMSM **不在** `Send_NullBlock` / `Link_Active` 时，遇 AMCTL with EDF → 复位种子。LMSM **处于** 这两态时，遇 AMCTL with SDF → **不**复位。SDF / EDF 语义见 [MODULE_INVENTORY.md](arch/MODULE_INVENTORY.md) `ub_pcs_amctl_rx`（Xia 裁定 2026-10-12；UB-PHY §3.2.4.2「AMCTL Controlling」）。
 
 M1 数据通路：每 lane `PMA_W=32`。每个 `ub_pcs_scrambler` / `ub_pcs_descrambler` 实例服务 **一条** 物理 lane；数据口 32 bit；23-bit 状态每拍步进 32 个扰码比特，`data[0]` 对应该拍第一个（LSB-first）比特。
 
@@ -433,7 +433,7 @@ LMB 为 16 个 8-bit 符号（见 UB-PHY §3.4.1）。种类：LTB、EEIB（§3.
 | `lmsm2pcs_lane_id_base` | out | 8 | `ASCEND` 时逻辑 Tx_0 的 Lane_ID；`PHYS`/`NULL` 忽略 |
 | `lmsm2pcs_lane_id_map` | out | `8*NUM_LANES_TX` | `ASCEND` 时每物理 TX lane 一字节：该 lane 的 Lane_ID（唯一递增 Tx_0..Tx_M-1，或该 lane 为 NULL）。字节 i 对应物理 TX lane i。`PHYS`/`NULL` 忽略 |
 | `pcs2lmsm_ltb_valid` | in | 1 | RX 收到一帧 CRC 通过的 LTB（单拍） |
-| `pcs_am_locked` | in | `NLANE` | 每 lane AM/AMCTL 锁定。可被 `tb_inj_am_lock` 旁路，不回灌 PCS |
+| `pcs_am_locked` | in | 1 | 全部已配置 RX lane（`pma_rx_width`）AMCTL 已锁定。分 lane 锁定位在 `ub_pcs_amctl_rx` 内。可被 `tb_inj_am_lock` 旁路，不回灌 PCS。Xia 裁定 2026-10-12 |
 | `pcs_lid_bad` | in | 1 | 训练所见 Link_ID 非法/不一致。可被 `tb_inj_lid_bad` 旁路，不回灌 PCS |
 | `pcs_deskew_ok` | in | 1 | deskew 完成 |
 | `lmsm2pcs_nb_phase` | out | 1 | `core_clk`。LMSM→PCS。**电平**，LMSM 内寄存。状态为 `Send_NullBlock` 或 `Link_Active` 时为 1。进入 `Send_NullBlock` 当拍 **s**（状态寄存器更新于 s）起拉高。Xia 裁定 2026-10-12 |
@@ -869,7 +869,7 @@ M1 列中 Xia 提出的默认值已由船长确认。2026-10-12 裁定见 D20 / 
 | ASIC 范围 | — | 仅 PCS+DLL 数字；PMA 行为模型 | 同 | D3；已确认 |
 | 单时钟 | `USE_PMA_CLK` | 0 | 多时钟为后续阶段 | §4.1；已定。M1 无 `pma_clk` |
 | 测试钩子生成 | `TEST_HOOKS` | 见 §11：Python 生成期展开，两套网表 | 同 | §10、§11 |
-| 钩子 lane 宽 | `NLANE` | `NUM_LANES_RX` | 同 | §10。`tb_inj_am_lock` 宽度 |
+| 钩子 lane 宽 | `NLANE` | `NUM_LANES_RX` | 同 | §10。`pcs_am_locked` / `tb_inj_am_lock` 现为 1 bit（已配置 lane 全锁定） |
 | 信用反压观察阈值 | `CRD_BP_THRESHOLD` | 1024 | 同 | §10 `tb_obs_crd_bp`；已定（§13 A-14） |
 | TEST 缩放 | `LMSM_TMR_SCALE` / `AM_IVL_SCALE` | 0 → 每拍 +1；非 0 → 每拍 +SCALE | 同 | §13 A-11 |
 
@@ -913,12 +913,12 @@ Retry 深度下界公式见 UB-DL §4.7.3.2（含 FEC 120/128 与 RTT）。M1 25
 
 ### 10.2 顶层钩子端口
 
-`NLANE = NUM_LANES_RX`。非对称时 AM 锁定按 RX lane 数。
+`NLANE = NUM_LANES_RX`。`pcs_am_locked` / `tb_inj_am_lock` 为 **1 bit**（已配置 RX lane 全部锁定）。非对称时锁定仍按 RX 已配置 lane 数合成。
 
 | 端口 | 方向 | 宽度 | 时钟域 | 接入模块 | 含义 |
 | --- | --- | --- | --- | --- | --- |
 | `tb_test_mode` | in | 1 | `core_clk` | 顶层门控 | 为 1 且 `TEST_HOOKS=1` 时钩子生效 |
-| `tb_inj_am_lock` | in | `NLANE` | `core_clk` | `ub_lmsm` | 电平。mux 到 LMSM 的 `am_locked` 输入，不回灌 PCS。M1 **保留**；PMA 模型能出真实 AM 后再删（§13 A-15） |
+| `tb_inj_am_lock` | in | 1 | `core_clk` | `ub_lmsm` | 电平。mux 到 LMSM 的 `am_locked` 输入（与 `pcs_am_locked` 同宽），不回灌 PCS。M1 **保留**；PMA 模型能出真实 AM 后再删（§13 A-15） |
 | `tb_inj_lid_bad` | in | 1 | `core_clk` | `ub_lmsm` | 电平。mux 到 LMSM 的 `lid_bad` 输入，不回灌 PCS。M1 **保留**；删除条件同 `tb_inj_am_lock` |
 | `tb_inj_crd_cells` | in | 16 | `core_clk` | `ub_dll_credit` | 电平。`tb_test_mode=1` 时 **每拍** 覆盖 VL0 信用 cell 计数（mux，HOOKS 网表 **不**另加存储寄存器） |
 | `tb_obs_link_ready` | out | 1 | `core_clk` | `ub_lmsm` | `LMSM==Link_Active`（ACTIVE） |

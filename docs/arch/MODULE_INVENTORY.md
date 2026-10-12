@@ -53,7 +53,7 @@ PCS 内部**寄存**电平，1 bit，`core_clk`。`ub_pcs_amctl_rx`（SPEC §2.4
 
 | 项 | 值 |
 | --- | --- |
-| 置位 | 全部已配置 lane 收到带 SDF 的 AMCTL、且当拍 `lmsm2pcs_nb_phase==1`：下一拍置 1 |
+| 置位 | 全部已配置 lane（`pma_rx_width`）收到带 SDF 的 AMCTL、且当拍 `lmsm2pcs_nb_phase==1`：下一拍置 1。SDF / EDF 语义见 `ub_pcs_amctl_rx` |
 | 保持 | 置位后保持 |
 | 清零 | `lmsm2pcs_nb_phase==0` 或复位的下一拍清 0 |
 
@@ -84,17 +84,17 @@ LMSM 进入 `Send_NullBlock` 当拍 **s**（状态寄存器更新于 s）；`lms
 
 ## `ub_pcs_amctl_rx`
 
-SPEC §2.4 已点名该叶子。main 无 `pycircuit/` / `rtl/` 实现。与 `ub_pcs_nullblk_det` **同一次 RTL PR** 交付。
+SPEC §2.4 已点名该叶子。main 无 `pycircuit/` / `rtl/` 实现。与 `ub_pcs_nullblk_det` **同一次 RTL PR** 交付。下列端口、锁定、识别、SDF 均为 **Xia 裁定 2026-10-12**（出处：UB-PHY §3.2.4.2 AMCTL Structure、表 3-7..3-10、「AMCTL Identification Mechanism」、§3.2.4.4）。公开文本只写语义与节/表号；**不**抄码字取值、CW 编号、符号下标区间。
 
 ### 完备性核对（设计写叶用）
 
-| # | 项 | 状态 | SPEC 出处 |
+| # | 项 | 状态 | 口径 |
 | --- | --- | --- | --- |
-| 1 | 全端口表 | 见下表。每 lane 锁定后的 **分 lane valid** 无独立口名 | 数据/共享 valid：§3.2.4；宽度：§3.2.5 / §9；时钟复位：§4.1 / §4.2 |
-| 2 | AMCTL 识别规则（sync header / block type / marker）与字段位置 | **MISSING** | 近文：§2.4 职责「锁定、滑窗、确认」指向 UB-PHY §3.2.4 / §3.2.3.1；§5「间隔/长度不在此抄录」；§2.4 只写解码后 LID「不是 eBCH 码字」 |
-| 3 | SDF 比特位置 | **MISSING** | 近文：§2.4 / §3.4.3.6 只写事件「AMCTL with SDF / EDF」，无字段位号 |
+| 1 | 全端口表 | Xia 裁定 2026-10-12（M1） | **无** 分 lane valid 输入。输入保持 `pma_rx_data` + 共享 `pma_rx_valid`（§3.2.4；§13 A-05 / A-CL-3）。本叶含 §3.2.4.4 分 lane AMCTL 锁定（在固定插入间隔上做 END 检测，滑窗），分 lane 锁定位在叶内产生；`pcs_am_locked` = 全部已配置 lane（`pma_rx_width`）已锁定 |
+| 2 | AMCTL 识别与字段 | Xia 裁定 2026-10-12（M2） | 公开只写语义：END 场经 eBCH-16 纠正后在预期位置匹配，即识别为 AMCTL（「AMCTL Identification Mechanism」）。场名 BODY / END / LID / CTRL_TYPE / CTRL_DETAIL（表 3-7）。LID 仅两半一致时有效；连续两次相同的已纠正 LID 才更新 lane ID。CTRL_TYPE / CTRL_DETAIL：任一半解出合法码字即有效；两半解出**不同**合法码字则忽略该控制。码字级解码（eBCH-16 纠正、码字表、场符号位置）在私有叶 `ub_pcs_amctl_cw_dec` |
+| 3 | SDF / EDF | Xia 裁定 2026-10-12（M3） | 「带 SDF」：`CTRL_TYPE` = Link Width Switch Indicator 且 `CTRL_DETAIL` ∈ {X1, X2, X4, X8}（§3.2.4.2「AMCTL Controlling」），且当拍 `lmsm2pcs_nb_phase==1`。「带 EDF」：同 `CTRL_TYPE` 且 `CTRL_DETAIL` = X0。`pcs_rx_sdf_seen` 仍按「全部已配置 lane」置位（见 `ub_pcs_nullblk_det` 节） |
 | 4 | 「全部已配置 lane」来源 | 已有配置口 | `pma_rx_width[3:0]`（§3.2.5，与 `PARAM_PHY.NUM_LANES_RX[13:10]` 同编码，§9）；参数 `NUM_LANES_RX`。§3.3.4 无 LMSM→PCS 宽度口 |
-| 5 | LID 出口 | Xia 裁定 2026-10-12 | `pcs_rx_lid` 宽 **4**（§2.4 `amctl_lid`：已解码 `AMCTL.LID`，0–7 / `NULL`=8 / 9–15 保留）；`pcs_rx_lid_vld` 1 拍脉冲。线格式/eBCH 位布局仍见 #2 |
+| 5 | LID 出口 | Xia 裁定 2026-10-12 | `pcs_rx_lid` 宽 **4**：lane 0..7 加空身份，公开只称 `LID_NULL`（`LID_NULL` 的线码/半场编码是 `ub_pcs_amctl_cw_dec` 私有叶细节）。`pcs_rx_lid_vld`：全部已配置 lane 上 LID 一致解码时 **1 拍脉冲** |
 
 #### 1. 端口表
 
@@ -102,18 +102,52 @@ SPEC §2.4 已点名该叶子。main 无 `pycircuit/` / `rtl/` 实现。与 `ub_
 | --- | --- | --- | --- | --- |
 | `core_clk` | in | 1 | §4.1 | M1 唯一时钟 |
 | `rst_pyc` | in | 1 | §4.2 | 同步复位 |
-| `pma_rx_data` | in | `NUM_LANES_RX*PMA_W`（`PMA_W=32`） | §3.2.4 | 每 lane 并行字，lane0 在 LSB。AMCTL 与数据共用此口（§13 A-CL-3）。SPEC 无「block lock 之后」另开口名 |
-| `pma_rx_valid` | in | 1 | §3.2.4 | 共享 1 bit，每拍一字。**无** per-lane valid（`pma_rx_data_valid_lane` 已删，§13 A-05） |
-| 每 lane、block lock 之后的 valid | — | — | **MISSING** | 近文只有共享 `pma_rx_valid` 与锁定电平 `pcs_am_locked` |
+| `pma_rx_data` | in | `NUM_LANES_RX*PMA_W`（`PMA_W=32`） | §3.2.4 | 每 lane 并行字，lane0 在 LSB。AMCTL 与数据共用此口（§13 A-CL-3） |
+| `pma_rx_valid` | in | 1 | §3.2.4 | 共享 1 bit，每拍一字。**无** 分 lane valid（`pma_rx_data_valid_lane` 已删，§13 A-05） |
 | `pcs_deskew_ok` | in | 1 | §3.3.4 | deskew 完成 |
 | `lmsm2pcs_nb_phase` | in | 1 | §3.3.4 | `Send_NullBlock` / `Link_Active` 为 1 |
 | `pma_rx_width` | in | 4 | §3.2.5 | 已配置 RX lane 数；二进制 1/2/4/8 |
-| `pcs_rx_sdf_seen` | out | 1 | 本清单；Xia 裁定 2026-10-12 | 寄存电平；置位/清零见 `ub_pcs_nullblk_det` 节 |
-| `pcs_am_locked` | out | `NLANE`=`NUM_LANES_RX` | §3.3.4、§10.2 | 每 lane AM/AMCTL 锁定 |
-| `pcs_rx_lid` | out | 4 | §2.4 `amctl_lid`；Xia 裁定 2026-10-12 | 已解码 LID |
+| `pcs_rx_sdf_seen` | out | 1 | 本清单；Xia 裁定 2026-10-12 | 寄存电平；置位/清零见 `ub_pcs_nullblk_det` 节；SDF 语义见上表 #3 |
+| `pcs_am_locked` | out | 1 | §3.3.4；Xia 裁定 2026-10-12 | 全部已配置 lane（`pma_rx_width`）已锁定。分 lane 锁定位在叶内，不出口 |
+| `pcs_rx_lid` | out | 4 | Xia 裁定 2026-10-12 | 已解码 LID：lane 0..7 或 `LID_NULL` |
 | `pcs_rx_lid_vld` | out | 1 | Xia 裁定 2026-10-12 | 全部已配置 lane 上 LID 一致解码时 **1 拍脉冲** |
 
 `ub_pcs_scrambler` / `ub_pcs_descrambler` 在 `_placeholder` 期间（§13 A-01 / A-02，D20）不接 `pcs_rx_lid`：该输入口悬空并 Tie 到占位常量，种子保持 placeholder。lint waiver 注记：`placeholder, D20`。
+
+---
+
+## `ub_pcs_amctl_cw_dec`
+
+**待船长确认：把 S-01(b) 私有叶方案延到线 A。** D20 / UARCH D-01 原文写的是 C 线表项位布局；本叶按同一套落地：公开仓只留端口桩，源码在私有仓，附 attest 文件。码字取值、CW 编号、符号下标区间只出现在私有源，不入库。
+
+| 项 | 值 |
+| --- | --- |
+| 叶子名 | `ub_pcs_amctl_cw_dec` |
+| 层 | `pcs` |
+| 所有者 | 设计（线 A） |
+| 父叶 | `ub_pcs_amctl_rx` |
+| 时钟 | `core_clk` |
+| 复位 | `rst_pyc`（同步） |
+| 延迟 | **1 拍寄存** |
+| 公开仓 | 仅端口桩 `rtl/pcs/ub_pcs_amctl_cw_dec.v`（待写；与 `ub_pcs_amctl_rx` 同一次 RTL PR） |
+| 源码 | 私有仓对应叶子（S-01(b)，生成物不入库） |
+| attest | `docs/arch/attest/ub_pcs_amctl_cw_dec.attest`（待写；证明公开桩端口与私有源一致） |
+| 参考模型 | 私有仓；Xia 所有 |
+| TEST_HOOKS 观察口 | 无 |
+
+职责：对每 lane 做码字级解码（eBCH-16 纠正、表 3-7..3-10 的码字表、场符号位置）。父叶 `ub_pcs_amctl_rx` 只认本叶具名口，不认比特位置。公开文本只列端口语义。
+
+### 每 lane 输出（Xia 裁定 2026-10-12）
+
+| 信号 | 宽 | 含义 |
+| --- | --- | --- |
+| `end_ok` | 1 | 该 lane 本拍 END 场经 eBCH-16 纠正后匹配 |
+| `lid` | 4 | 已纠正 LID；空身份公开称 `LID_NULL`（编码是本叶私有细节） |
+| `lid_ok` | 1 | 两半 LID 一致 |
+| `ctrl_type` | 枚举 | `FEC_CTRL` / `LW_SWITCH` / `EI` / `PERIOD_CTRL` / `REMOTE_LW_SWITCH` / `RSVD` / `NO_CMD` |
+| `ctrl_type_ok` | 1 | 任一半解出合法 CTRL_TYPE 码字；两半不同合法码字时父叶忽略控制 |
+| `ctrl_detail` | 枚举 | 按类型分类，含 `X0` / `X1` / `X2` / `X4` / `X8` / `EEI` / `PERIOD0` / `PERIOD1` / `OPEN_FEC` / `CLOSE_FEC` / `RSVD` |
+| `ctrl_detail_ok` | 1 | 与 `ctrl_type_ok` 同一半场规则 |
 
 ---
 

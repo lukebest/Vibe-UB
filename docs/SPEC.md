@@ -436,9 +436,10 @@ LMB 为 16 个 8-bit 符号（见 UB-PHY §3.4.1）。种类：LTB、EEIB（§3.
 | `pcs_am_locked` | in | `NLANE` | 每 lane AM/AMCTL 锁定。可被 `tb_inj_am_lock` 旁路，不回灌 PCS |
 | `pcs_lid_bad` | in | 1 | 训练所见 Link_ID 非法/不一致。可被 `tb_inj_lid_bad` 旁路，不回灌 PCS |
 | `pcs_deskew_ok` | in | 1 | deskew 完成 |
-| `pcs2lmsm_null_blk` | in | 1 | `core_clk`。PCS→LMSM。**1 拍脉冲**，复位 0。deskew 完成且 AMCTL+SDF 之后，全部已配置 RX lane 对齐的一个 Null Block 给一拍。见 §6.1（§13 A-23） |
-| `pcs2lmsm_rx_nonnull_blk` | in | 1 | `core_clk`。PCS→LMSM。**1 拍脉冲**，复位 0。与 `pcs2lmsm_null_blk` 同一对齐点与门控：deskew 完成且 AMCTL+SDF 之后，全部已配置 RX lane 对齐的 flit 为非 Null Block 时给一拍。与 `pcs2lmsm_null_blk` 同拍互斥（接口断言）。见 §6.1（§13 A-23；Xia 裁定 2026-10-12 / D20） |
-| `pcs2lmsm_tx_null_blk` | in | 1 | `core_clk`。PCS→LMSM。**1 拍脉冲**，复位 0。全部已配置 TX lane 发出一个 Null Block 时给一拍。见 §6.1（§13 A-23） |
+| `lmsm2pcs_nb_phase` | out | 1 | `core_clk`。LMSM→PCS。**电平**，LMSM 内寄存。状态为 `Send_NullBlock` 或 `Link_Active` 时为 1。进入 `Send_NullBlock` 当拍 **s**（状态寄存器更新于 s）起拉高。Xia 裁定 2026-10-12 |
+| `pcs2lmsm_null_blk` | in | 1 | `core_clk`。PCS→LMSM。**1 拍脉冲**，复位 0。每拍至多一个 block（§3.3.2 单条 `pcs2dll_valid`）。`pcs2dll_valid` 在 **t** → 脉冲在 **t+1**。门控 `pcs_deskew_ok && pcs_rx_sdf_seen` 加在输出寄存前；门控撤下时已进寄存器的块仍给出脉冲。LMSM 只计到达拍 **≥ s+1** 的脉冲（进入拍 s 的脉冲不计，§6.1）。见 §6.1（§13 A-23；Xia 裁定 2026-10-12） |
+| `pcs2lmsm_rx_nonnull_blk` | in | 1 | `core_clk`。PCS→LMSM。**1 拍脉冲**，复位 0。与 `pcs2lmsm_null_blk` 同一对齐点、同一 RX 门控与同一 t→t+1 / ≥s+1 拍位。对齐 flit 为非 Null Block 时给一拍。与 `pcs2lmsm_null_blk` 同拍互斥（接口断言）。见 §6.1（§13 A-23；Xia 裁定 2026-10-12） |
+| `pcs2lmsm_tx_null_blk` | in | 1 | `core_clk`。PCS→LMSM。**1 拍脉冲**，复位 0。**无** RX 门控。每拍至多一个 block（§3.3.1 单条 `dll2pcs_valid`/`dll2pcs_ready`）。PCS 收下 Null Block 的当拍为 **t** → 脉冲在 **t+1**。LMSM 只在 `Send_NullBlock` 内计数，进入/离开清零（§6.1）；只计到达拍 **≥ s+1**。见 §6.1（§13 A-23；Xia 裁定 2026-10-12） |
 
 `ASCEND`：PCS 把物理 lane i 的 Lane_ID 取自 `lmsm2pcs_lane_id_map` 对应字节；`lmsm2pcs_lane_id_base` 等于逻辑 Tx_0 那一字节，供对照。`PHYS`：PCS 写物理 lane 号，不用 map/base。`NULL`（mode=2 或 3）：各激活 lane 的 Lane_ID 均为 §3.4.1.1 的空值。
 
@@ -632,11 +633,12 @@ M1 bring-up 裁剪（默认参数已确认）：
 
 | 信号 | 方向（相对 LMSM） | 宽 | 脉冲/电平 | 谁计数 |
 | --- | --- | --- | --- | --- |
-| `pcs2lmsm_null_blk` | in | 1 | **1 拍脉冲**，复位 0 | **LMSM** 累加 RX 连续个数（满 8） |
-| `pcs2lmsm_rx_nonnull_blk` | in | 1 | **1 拍脉冲**，复位 0 | **LMSM** 清 RX 连续计数 |
-| `pcs2lmsm_tx_null_blk` | in | 1 | **1 拍脉冲**，复位 0 | **LMSM** 在收到第一个 RX 脉冲之后累加 TX（满 16） |
+| `lmsm2pcs_nb_phase` | out | 1 | **电平**，LMSM 内寄存 | LMSM 状态为 `Send_NullBlock` / `Link_Active` 时为 1；进入拍 s 起拉高 |
+| `pcs2lmsm_null_blk` | in | 1 | **1 拍脉冲**，复位 0 | **LMSM** 累加 RX 连续个数（满 8）；计到达 ≥ s+1 |
+| `pcs2lmsm_rx_nonnull_blk` | in | 1 | **1 拍脉冲**，复位 0 | **LMSM** 清 RX 连续计数；计到达 ≥ s+1 |
+| `pcs2lmsm_tx_null_blk` | in | 1 | **1 拍脉冲**，复位 0 | **LMSM** 在收到第一个 RX 脉冲之后累加 TX（满 16）；无 RX 门控；计到达 ≥ s+1 |
 
-PCS 职责：deskew 完成且 AMCTL+SDF 之后，对全部已配置 RX lane 对齐的一个 Null Block 给一拍 `pcs2lmsm_null_blk`；同一对齐点与门控下，对齐 flit 为非 Null Block 时给一拍 `pcs2lmsm_rx_nonnull_blk`；全部已配置 TX lane 发出一个 Null Block 时给一拍 `pcs2lmsm_tx_null_blk`。`pcs2lmsm_null_blk` 与 `pcs2lmsm_rx_nonnull_blk` 同拍互斥（接口断言）。PCS **不**保持 8/16 计数。8/16 的单位是 Null Block。
+PCS 职责：`pcs2dll_valid` 在 t 的对齐 flit，t+1 给出 RX 脉冲（每拍至多一个 block）。RX 两口门控 `pcs_deskew_ok && pcs_rx_sdf_seen` 加在输出寄存前。`pcs2lmsm_tx_null_blk` 无该门控。`pcs2lmsm_null_blk` 与 `pcs2lmsm_rx_nonnull_blk` 同拍互斥（接口断言）。PCS **不**保持 8/16 计数。8/16 的单位是 Null Block。Xia 裁定 2026-10-12。
 
 **计数细则（Xia 裁定 2026-10-12 / D20）：**
 
@@ -1091,7 +1093,7 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 | A-20 | 工艺节点 | **已定** | 先用 Sky130 开源 PDK 代理值估算 | §4.1、§8、§9 |
 | A-21 | Probe 端接检测算法 | **已定** | 数字侧只看 `pma_probe_pulse_en` / `pma_term_detect`；算法细节列为非目标 | §1.2、§2.3、§3.2.5 |
 | A-22 | Retrain 期间 `LinkUp` | **已定** | 保持 1，回到 Idle 再清 0；§10.2 观察口保持原定义 | §6.1 |
-| A-23 | `pcs2lmsm_null_blk` / `pcs2lmsm_rx_nonnull_blk` / `pcs2lmsm_tx_null_blk` | **已定** | 各 1 bit、1 拍脉冲、复位 0；`null_blk` 与 `rx_nonnull_blk` 同拍互斥（接口断言）。8/16 计数在 LMSM（规范派生 UB-PHY §3.4.3.6；细则 Xia 裁定 2026-10-12 / D20）。RX 连续清零看 `pcs2lmsm_rx_nonnull_blk` | §3.3.4、§6.1 |
+| A-23 | `pcs2lmsm_null_blk` / `pcs2lmsm_rx_nonnull_blk` / `pcs2lmsm_tx_null_blk` / `lmsm2pcs_nb_phase` | **已定** | 三口各 1 bit、1 拍脉冲（每拍至多一个 block，§3.3.1 / §3.3.2）；t→t+1；LMSM 计 ≥s+1。RX 两口门控在寄存前；TX 无门控。`lmsm2pcs_nb_phase` 电平，Send_NullBlock/Link_Active 为 1。Xia 裁定 2026-10-12 | §3.3.4、§6.1 |
 | A-24 | `cfg_*` LTB 通告针脚 CSR 来源 | **已定** | 端口保留；M1 用参数或绑死默认通告 DR0 | §6.1 |
 | A-VL | VL 规划与 SL→VL 映射 | **已定** | 第一波 VL0=请求、VL1=响应，Writeback 时加 VL2；DLL 按 `NUM_VL` 参数化；NW SL→VL 做成 CSR，复位 SL0→VL0、SL1→VL1 | §9 |
 | A-BF-1 | FEC 编解码拍数 / 并行度 | **实现后回填** | 实现后回填 §5 | §5 |

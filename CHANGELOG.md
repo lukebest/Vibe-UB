@@ -29,6 +29,7 @@
 
 - 门禁 contract-check：`assertions:` 必填、与正文 `` `AP_*` `` 一一对应。#49 把 README §8 标成「必填 / 参与 hash」之前只报告；标记进 main（或 `assertions_required: true`）后拦截。
 - 门禁 contract-check：`parent` 只认 `UARCH.md` §3 叶子表「叶子」列的本行名字（去反引号 / 空白后全等）。描述列或其它节出现同名不算；`+` 拼在同一格里的后续名字等设计拆行（#46）之后才算。缺行 `PARENT_UNKNOWN` 拦截，不设豁免。
+- `docs/arch/mem/contracts/`：六份叶子契约 YAML 增补必填 `assertions:`（正文引用的 `AP_*` ID，去重排序，参与契约 hash）。
 - 门禁（#21 对接）：lint 不再把 `rtl/pyc_lib/` 原语既 `-I` 又当第二份源（`MODDUP`）；cdc 对 `rtl/pyc_lib/` 的 `clk` 不报 `CLOCK_NOT_CORE`（产品叶子仍必须 `core_clk`）；`formal.sh` 在 `.sby` 目录跑 `sby`（`[files]` 同目录相对路径，与 `make -C formal` 一致），缺文件报 `SBY_FILE_MISSING` 不抛异常；CI 用 `setup_sby.sh` 装 YosysHQ/sby + z3（apt 没有 sby 包）；tb-selfcheck 按 `TOOLCHAIN.lock` 安装/要求 Verilator，`model/` / `tb/cmn` / `tb/models` 分别计数，pytest skip 即失败。provenance 维持 AST-only，重生成逐字节仍走 `scripts/emit_rtl.py`（不采纳自制 pycc argv 比对）。
 - `docs/arch/mem/contracts/`：Xia 裁定 2026-10-12（共用 4 bit 非法码、illegal 时其余输出清零、原因优先级、`desc_kind`、`out_ready` 反压、`in_ready` 复位后首拍、时钟域、YAML 机读头；D-05 项改暂缓；TECTE/MAPTE 条目尺寸、`lvl`、`ctx_mapt_bb_sz`；按 Q-A11，2 MB / 1 GB 页表块合法，`ILL_MAP_2MB` 只对应 TCTE 范围表颗粒度；`ub_mem_ptw_desc_dec` 保留 `desc_lvl[1:0]`，各级表按输入编码类 `ENC_INVALID` / `ENC_TBL_PG` / `ENC_BLOCK` 交叉，L0 / L3 保留编码走翻译故障；C-D1 后 `ub_mem_dec_ent_dec` L0/L1 均为寄存 1 拍；`comb_budget_ns` 仅 0 拍组合路径必填，寄存叶子不写该键）。
 - SPEC §3.3.4 / §6.1 / §13 A-23：新增 PCS→LMSM `pcs2lmsm_rx_nonnull_blk`（1 bit、`core_clk`、1 拍脉冲、复位 0；与 `pcs2lmsm_null_blk` 同一对齐点与门控，同拍互斥，接口断言）。LMSM `Send_NullBlock` RX 连续计数在该脉冲清零。Xia 裁定 2026-10-12 / D20。

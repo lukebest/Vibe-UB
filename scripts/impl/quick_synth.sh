@@ -15,12 +15,14 @@ ORFS_LIB_URL="${SKY130_HD_LIB_URL:-https://raw.githubusercontent.com/The-OpenROA
 usage() {
   cat <<'EOF'
 Usage: scripts/impl/quick_synth.sh [--ref GIT_REF | --work-tree DIR] [options]
+       scripts/impl/quick_synth.sh --attest LEAF --contract FILE --netlist FILE --out FILE
 
   --ref REF                 synthesize this git ref (git archive; does not checkout)
+  --repo DIR                repository root (default: this checkout)
   --work-tree DIR           synthesize this tree instead
   --base REF                diff base for default tops (default: origin/main)
   --tops m1,m2              top modules (default: rtl/<block>/*.v leaves touched vs --base)
-  --out DIR                 output directory (required unless --self-check)
+  --out DIR                 output directory (attest mode: YAML file). Required unless --self-check
   --chparam KEY=VAL         optional Yosys chparam override (repeatable; TOP:KEY=VAL)
   --baseline-json FILE      prior results.json for QoR compare
   --baseline-report FILE    prior markdown report for QoR compare
@@ -29,7 +31,11 @@ Usage: scripts/impl/quick_synth.sh [--ref GIT_REF | --work-tree DIR] [options]
   --incdir DIR              extra Yosys -I (repeatable; default is rtl/pyc_lib)
   --no-buffer               skip post-map fanout buffering (default: ON, max fanout 16)
   --max-fanout N            max sinks per driver after buffering (default 16)
-  --self-check              parser / mapping / include-read checks (no design synth)
+  --attest LEAF             private-leaf attest YAML (private-repo CI)
+  --contract FILE           contract markdown for --attest
+  --netlist FILE            private leaf netlist for --attest
+  --scratch DIR             attest intermediates; caller owns this directory
+  --self-check              parser / mapping / private-leaf checks (needs liberty for E2E)
   --help                    this text
 
 Env:
@@ -39,18 +45,24 @@ Env:
   QS_INCDIRS              extra Yosys -I dirs (colon / comma / space separated)
   QS_NO_BUFFER=1          same as --no-buffer
   QS_MAX_FANOUT           default for --max-fanout
+  QS_SCRATCH              default --scratch
   YOSYS / STA             tool binaries (default: yosys, sta)
 
 Default clock: core_clk at F_CORE from docs/SPEC.md (§4.1 / §9, ≈80.57 MHz).
-If SPEC states no frequency, period is 2.0 ns (500 MHz) labelled placeholder.
+A contract's clock.period_ns overrides that leaf. If SPEC states no frequency,
+period is 2.0 ns (500 MHz) labelled placeholder.
 
 SPEC §2.2: each rtl/<block>/<leaf>_<tag>.v is a fixed netlist (no required chparam).
 HOOKS are rtl/<block>/hooks/ with the same name. `_placeholder` is lint/TB only.
+
+Attest YAML is one instance. Public copy: reports/private/<layer>/<leaf>.yml
+Private-repo CI writes: attest/<layer>/<leaf>.yml
 EOF
 }
 
 OUT=""
 REF=""
+REPO_ARG=""
 WORK_TREE=""
 BASE="origin/main"
 TOPS=""
@@ -63,10 +75,15 @@ INCDIRS=()
 SELF_CHECK=0
 NO_BUFFER=0
 MAX_FANOUT=""
+ATTEST=""
+CONTRACT=""
+NETLIST=""
+SCRATCH="${QS_SCRATCH:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ref) REF="${2:-}"; shift 2 ;;
+    --repo) REPO_ARG="${2:-}"; shift 2 ;;
     --work-tree) WORK_TREE="${2:-}"; shift 2 ;;
     --base) BASE="${2:-}"; shift 2 ;;
     --tops) TOPS="${2:-}"; shift 2 ;;
@@ -79,17 +96,17 @@ while [[ $# -gt 0 ]]; do
     --incdir) INCDIRS+=("${2:-}"); shift 2 ;;
     --no-buffer) NO_BUFFER=1; shift ;;
     --max-fanout) MAX_FANOUT="${2:-}"; shift 2 ;;
+    --attest) ATTEST="${2:-}"; shift 2 ;;
+    --contract) CONTRACT="${2:-}"; shift 2 ;;
+    --netlist) NETLIST="${2:-}"; shift 2 ;;
+    --scratch) SCRATCH="${2:-}"; shift 2 ;;
     --self-check) SELF_CHECK=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown arg: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
 
-if [[ "$SELF_CHECK" -eq 1 ]]; then
-  exec python3 "${SCRIPT_DIR}/quick_synth.py" --self-check
-fi
-
-if [[ -z "$OUT" ]]; then
+if [[ "$SELF_CHECK" -eq 0 && -z "$OUT" ]]; then
   echo "quick_synth.sh: --out is required" >&2
   usage >&2
   exit 2
@@ -141,7 +158,18 @@ fi
 export SKY130_HD_LIB_SOURCE="${SKY130_HD_LIB_SOURCE:-OpenROAD-flow-scripts ${ORFS_LIB_REL} (SkyWater hd tt; not committed)}"
 export SKY130_HD_LIB_COMMIT="${ORFS_COMMIT}"
 
-py=(python3 "${SCRIPT_DIR}/quick_synth.py" --repo "$REPO_ROOT" --out "$OUT" --base "$BASE")
+if [[ "$SELF_CHECK" -eq 1 ]]; then
+  python3 "${SCRIPT_DIR}/quick_synth.py" --self-check
+  exec python3 "${SCRIPT_DIR}/tests/test_private.py"
+fi
+
+if [[ -n "$REPO_ARG" ]]; then
+  REPO_ROOT="$(cd "$REPO_ARG" && pwd)"
+fi
+py=(python3 "${SCRIPT_DIR}/quick_synth.py" --repo "$REPO_ROOT" --base "$BASE")
+if [[ -n "$OUT" ]]; then
+  py+=(--out "$OUT")
+fi
 if [[ -n "$REF" ]]; then
   py+=(--ref "$REF")
 fi
@@ -150,6 +178,18 @@ if [[ -n "$WORK_TREE" ]]; then
 fi
 if [[ -n "$TOPS" ]]; then
   py+=(--tops "$TOPS")
+fi
+if [[ -n "$ATTEST" ]]; then
+  py+=(--attest "$ATTEST")
+fi
+if [[ -n "$CONTRACT" ]]; then
+  py+=(--contract "$CONTRACT")
+fi
+if [[ -n "$NETLIST" ]]; then
+  py+=(--netlist "$NETLIST")
+fi
+if [[ -n "$SCRATCH" ]]; then
+  py+=(--scratch "$SCRATCH")
 fi
 for c in "${CHPARAMS[@]+"${CHPARAMS[@]}"}"; do
   py+=(--chparam "$c")

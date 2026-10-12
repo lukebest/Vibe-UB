@@ -23,7 +23,9 @@
 | 决定 | 摘要 | 本计划落点 |
 | --- | --- | --- |
 | D1 | 锁 Rev 2.0；Rev 2.1 已知但不采用 | §1、规范出处列；**不再列为风险** |
-| D2 | 一期 = PHY/PCS + DLL + LMSM + 寄存器/CDC；NW / TP / TA 推迟 | §2 范围；推迟层测试点状态 = **推迟** |
+| D2 | 一期 = PHY/PCS + DLL + LMSM + 寄存器/CDC；NW / TP / TA 推迟 | 已被 D18 取代；NW 仍 §8.7 推迟；TP/TA 见 §8.9 |
+| D18 | 全层级控制器；D2 分阶段范围作废 | §2.2；第 6 / 7 章打开 |
+| D19 | 三线并行；轨道 B = TP→TA→FUN | §8.9 为轨道 B 测试点 |
 | D3 | SerDes/PMA 模拟不在 RTL；PCS-PMA 边界行为模型 | §2.3、§5.4；TB 提供模型与环回 |
 | D4 | 一期只验强制行为，不做可选特性 | 测试点状态 = **一期不做 D4** |
 | D5 | 全部业务 RTL 用 pyCircuit（lukebest/pyCircuit pyc4.0）出可综合 Verilog | §1 目标 DUT |
@@ -81,14 +83,14 @@ DUT 来源：pyCircuit（pyc4.0，lukebest/pyCircuit）生成的可综合 Verilo
 | 子系统级 | PCS/FEC、DLL、LMSM+寄存器 | TX/RX 数据通路串接、FEC 纠错边界、DLL 成帧+流控+重传、LMSM 训练到 Link_Active |
 | 顶层 | controller + 环回 | 网络侧 flit 口 ↔ PCS-PMA 边界行为模型（D3）环回；含训练、credit/retry、钩子注错 |
 
-### 2.2 推迟范围（D2）
+### 2.2 推迟范围（D2，已被 D18 取代）
 
-下列层次**只留占位测试点**，状态一律标 **推迟**，一期不实现 TC、不计入门限分母（除非船长改 D2）：
+D18 全层级、D19 三线后，轨道 B 打开第 6 / 7 章测试点（§8.9），轨道 C 内存管理见 §8.8。下列仍只留占位，状态 **推迟**，不计入 D12 分母：
 
-- 网络层（UB-NW 第 5 章）
-- 传输层（UB-TP 第 6 章）
-- 事务层（UB-TA 第 7 章）
-- 功能 / 内存 / 资源 / 安全（第 8–11 章）
+- 网络层（UB-NW 第 5 章）— 轨道 A 后续
+- 功能层除 LS 优先通路以外（第 8 章 URMA 等）
+- 资源 / 安全（第 10–11 章）
+- `tb_obs_nw_dll_data`（SPEC §10.2）
 
 占位目的：避免后续把上层职责误写进 DLL/PCS 检查。
 
@@ -111,7 +113,7 @@ DUT 来源：pyCircuit（pyc4.0，lukebest/pyCircuit）生成的可综合 Verilo
 | --- | --- | --- |
 | FPGA 原型 / 板级 | D11 | 无 FPGA 里程碑 |
 | 可选规范特性 | D4 | 测试点标 **一期不做 D4** |
-| NW / TP / TA 功能 | D2 | 测试点标 **推迟** |
+| NW 功能 | D2 / D19 | 测试点标 **推迟**（§8.7）；TP/TA 见 §8.9 |
 | Toggle 覆盖 | D12 | 不算验收 |
 | 层次 Force | D13 | 禁止；相关旧写法记 SKIP 而非改成 Force |
 | 亚稳态统计 | — | M1 产品通路无 CDC（SPEC §4.1）；后续才用白名单原语 |
@@ -570,10 +572,7 @@ FEC / BCRC 错由 D3 PMA 模型改符号，无对应钩子。
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | TP-DEF-NW-001 | UB-NW §5.2 | NTH 解析 / 改写 | — | — | — | — | 推迟 |
 | TP-DEF-NW-002 | UB-NW §5.3 | 路由、隔离、QoS、拥塞标记、ICRC | — | — | — | — | 推迟 |
-| TP-DEF-TP-001 | UB-TP §6.2–§6.4 | RTP/CTP/UTP 与传输重传 | — | — | — | — | 推迟 |
-| TP-DEF-TP-002 | UB-TP §6.5–§6.6 | 多路径与拥塞控制 | — | — | — | — | 推迟 |
-| TP-DEF-TA-001 | UB-TA §7.2–§7.4 | 事务头与事务类型 | — | — | — | — | 推迟 |
-| TP-DEF-UP-001 | 第 8、10、11 章 | FUN/RSC/SEC（内存管理见 §8.8） | — | — | — | — | 推迟 |
+| TP-DEF-UP-001 | 第 8、10、11 章 | FUN/RSC/SEC（内存管理见 §8.8；TP/TA 见 §8.9） | — | — | — | — | 推迟 |
 | TP-DEF-HOOK-001 | SPEC §10.2；D2 | `tb_obs_nw_dll_data` | — | — | — | — | 推迟 |
 
 ### 8.8 内存管理（轨道 C）
@@ -784,6 +783,128 @@ FEC / BCRC 错由 D3 PMA 模型改符号，无对应钩子。
 
 本小节范围内：第 9 章已列功能需求均有 TP。App. D.4.1.6 中断接 RSC，等 ch10 契约，不记本小节漏项。
 
+### 8.9 传输 / 事务（轨道 B）
+
+本小节为轨道 B 专属（D18 / D19），只在此处增删第 6 / 7 章测试点。列定义沿用上文 §8。依据 [MODULE_INVENTORY.md](arch/MODULE_INVENTORY.md) 第 4–5 节叶子表、[LAYER_CONTRACTS.md](arch/LAYER_CONTRACTS.md) §2 / §3、SPEC §3.1 / §4.1 / §6.1 / §6.3。规范只写章节号。未在契约或 SPEC 写死的宽度 / 编码标 **待 Xia**，验证不选边。
+
+优先通路（LS + `bypass` + CFG9 Read/Write）里程碑 = **M1**；RTP 重传/重排、CFG6+CTP、atomic、UTP/TPG/CC、非 LS 消息/维护/管理标 **后续**（第二波）。RTL 未交的叶标 **RTL未就绪**；契约 pytest / formal 已可跑的标 **计划**。`tb/contracts/` 记分板按 GATE-TB-SB-001（`n_compare > 0` 且等于声明）和 GATE-TB-PAIR-001（TX/RX、提交/完成各自对 model，不用自环当唯一检查）。`formal/contracts/` 默认 `cover`/`bmc`/`prove` **不**含契约 `assume`（GATE-PRIVATE-PARENT-FREE）；BMC 深度 ≥ 最深 cover 步 + 6（GATE-FORMAL-DEPTH §5 规则 3）。
+
+#### 8.9.1 单元级 — Transport（第 6 章）
+
+| ID | 规范 | 描述 | 激励 | 检查 | 覆盖 | 里程碑 | 状态 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TP-UNIT-TP-001 | LAYER_CONTRACTS §2；UB-TP §6.1 | 160 b、1 flit/拍；`valid==0` 边带忽略；`sop&&eop` 单拍合法 | 契约口 / mock | `predict_flit` | cp_tp_flit160 | M1 | 计划 |
+| TP-UNIT-TP-002 | LAYER_CONTRACTS §2；SPEC §3.1 | TX/RX valid/ready 同拍成交；`valid` 保持到成交；`ready` 不组合看本拍 `valid` | 契约 BFM | 保持 / 不组合 | cp_tp_hs | M1 | 计划 |
+| TP-UNIT-TP-003 | LAYER_CONTRACTS §2 | 同一包 flit 连续 sop…eop，中间不得插入另一包 | 两拍包 | 记分板拒插包 | cp_tp_contig | M1 | 计划 |
+| TP-UNIT-TP-004 | LAYER_CONTRACTS §2；UB-DL §4.2 | `nw_link_up==0` ⇒ 无 TX 成交；flush 期间不得开新包 | link down / flush | 无 fire | cp_tp_linkdown | M1 | 计划 |
+| TP-UNIT-TP-005 | LAYER_CONTRACTS §2 | `nw2tp_err` 仅在 `valid&&eop` 有意义 | RX eop ± err | 非 eop 不计 err | cp_tp_err_eop | M1 | 计划 |
+| TP-UNIT-TP-006 | LAYER_CONTRACTS §2；UB-TP §6.3 | `tp2nw_bypass==1` ⇒ 本包无 TPH（NLP 指向 TAH；编码 **待 Xia**） | bypass=1 | 无 TPH 字节 | cp_tp_byp_nth | M1 | 待定 |
+| TP-UNIT-TP-007 | UB-TP §6.3；LAYER_CONTRACTS §2 | TP bypass 仅 CFG9 | bypass × CFG | `bypass_cfg_ok` | cp_tp_byp_cfg9 | M1 | 计划 |
+| TP-UNIT-TP-008 | UB-TP §6.3；UB-TA §7.2 | CFG9 禁止 ICRC / TPH / EIDH / UPIH | CFG=9 组包 | 禁止头集合 | cp_tp_cfg9_forb | M1 | 计划 |
+| TP-UNIT-TP-009 | UB-TP §6.2.1 | RTPH 16 B | 组 RTP 头 | `RTPH_BYTES==16` | cp_tp_rtph16 | M1 | 计划 |
+| TP-UNIT-TP-010 | UB-TP §6.4.1 | PSN 24 bit 回绕（`0xFFFFFF→0`） | `PSN_MASK+1` | `psn_wraps` | cp_tp_psn24 | M1 | 计划 |
+| TP-UNIT-TP-011 | LAYER_CONTRACTS §1/§2；UB-DL §4.3.2；UB-NW §5.2 | LPH+NTH=12 B；RT 取自 LPH word（位切片 **待 Xia**） | LPH word | 12 B；`extract_rt` | cp_tp_lph_nth | M1 | 待定 |
+| TP-UNIT-TP-012 | UB-NW §5.3.4；LAYER_CONTRACTS §2 | VL0 请求、VL1 响应 | 方向 | `vl_for_dir` | cp_tp_vl01 | M1 | 计划 |
+| TP-UNIT-TP-013 | UB-TP §6.8；MODULE_INVENTORY `ub_tp` | MTU ∈ {1024,4096,8192}，默认 4096 | 三档 + 非法 | `mtu_ok` | cp_tp_mtu | M1 | 计划 |
+| TP-UNIT-TP-014 | SPEC §4.1、§6.3 | RETRY WAIT 默认 323 = ceil(4 µs × `F_CORE`)，`F_CORE`=80.566 MHz | 复位默认 / 0 折 323 | `timeout_cycles==323` | cp_tp_retry_def | M1 | 计划 |
+| TP-UNIT-TP-015 | SPEC §4.1、§6.3 | 采样值 322：不到超时 | elapsed=322 | `timed_out` 假 | cp_tp_retry_322 | M1 | 计划 |
+| TP-UNIT-TP-016 | SPEC §4.1、§6.3 | 采样值 323：当拍超时 | elapsed=323 | `timed_out` 真 | cp_tp_retry_323 | M1 | 计划 |
+| TP-UNIT-TP-017 | SPEC §4.1、§6.1；D20 | Probe wait 与 RETRY WAIT 同规则，默认 323 | 复位默认 | 同 323 | cp_tp_probe_323 | M1 | 计划 |
+| TP-UNIT-TP-018 | MODULE_INVENTORY `ub_tp` / `ub_tp_bypass` | 优先通路：至少一种模式 + bypass；LS 先走 bypass | 叶 TB | bypass 使能 | cp_tp_leaf_byp | M1 | RTL未就绪 |
+| TP-UNIT-TP-019 | MODULE_INVENTORY `ub_tp_retry`；UB-TP §6.4.2 | 重传窗 SRAM `ub_cmn_mem_1r1w`，`ASSERT_NO_UNINIT_READ=1`；GBN vs SR **待 Xia** | 未初始化读 | 无 X | cp_tp_retry_mem | 后续 | RTL未就绪 |
+| TP-UNIT-TP-020 | MODULE_INVENTORY `ub_tp_rtp`；UB-TP §6.4 / §6.5.1.4 | 重排窗 SRAM 同上 | 乱序递交 | 无 X | cp_tp_reord_mem | 后续 | RTL未就绪 |
+| TP-UNIT-TP-021 | UB-TP §6.3.2、§6.8.1 | CFG6+CTP 第二波；无 TPACK 仅 TAACK（CFG6 编码 **待 Xia**） | CFG=6 CTP | 无 TPACK | cp_tp_cfg6_ctp | 后续 | RTL未就绪 |
+| TP-UNIT-TP-022 | MODULE_INVENTORY `ub_tp_utp`；UB-TP §6.3.3 | UTP（建链等，可选延后） | — | — | cp_tp_utp | 后续 | RTL未就绪 |
+| TP-UNIT-TP-023 | MODULE_INVENTORY `ub_tp_tpg`；UB-TP §6.5.1 | TPG 多径（可选延后） | — | — | cp_tp_tpg | 后续 | RTL未就绪 |
+| TP-UNIT-TP-024 | MODULE_INVENTORY `ub_tp_cc`；UB-TP §6.6 | 拥塞控制（可选延后） | — | — | cp_tp_cc | 后续 | RTL未就绪 |
+
+#### 8.9.2 单元级 — Transaction（第 7 章）
+
+| ID | 规范 | 描述 | 激励 | 检查 | 覆盖 | 里程碑 | 状态 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TP-UNIT-TA-001 | LAYER_CONTRACTS §3 | 净荷 160 b、1 flit/拍 | 契约口 | `predict_flit` | cp_ta_flit160 | M1 | 计划 |
+| TP-UNIT-TA-002 | LAYER_CONTRACTS §3 | `done` 与 `fail` 互斥，都带 tassn | 完成拍 | `done_fail_ok` | cp_ta_done_fail | M1 | 计划 |
+| TP-UNIT-TA-003 | UB-TA §7.2.1 | `INI_TASSN` 16 bit | tassn 截断 | 16 b 掩码 | cp_ta_tassn16 | M1 | 计划 |
+| TP-UNIT-TA-004 | UB-TA §7.2 | CFG9 紧凑：BTAH/ATAH 4 B | CFG=9 | `header_bytes` | cp_ta_c_btah | M1 | 计划 |
+| TP-UNIT-TA-005 | UB-TA §7.2 | CFG9 紧凑：MAETAH 12 B | CFG=9 | 12 B | cp_ta_c_mae | M1 | 计划 |
+| TP-UNIT-TA-006 | UB-TA §7.2 | 非 CFG9 全头：BTAH/ATAH 8 B、MAETAH 16 B | CFG≠9 | 8 / 16 B | cp_ta_full | M1 | 计划 |
+| TP-UNIT-TA-007 | UB-TA §7.2；LAYER_CONTRACTS §1 | LPH.CFG 选择紧凑 / 全头 | CFG 扫描 | `compact_header` | cp_ta_cfg_fmt | M1 | 计划 |
+| TP-UNIT-TA-008 | LAYER_CONTRACTS §3；UB-TP §6.8 | `bypass==1` 不期待 TPACK 状态；完成 = done/fail | bypass 操作 | 无 TPACK SM | cp_ta_byp_done | M1 | 计划 |
+| TP-UNIT-TA-009 | LAYER_CONTRACTS §3 | 操作级 valid/ready；未成交边带保持 | op BFM | 保持 | cp_ta_op_hs | M1 | 计划 |
+| TP-UNIT-TA-010 | LAYER_CONTRACTS §3 | 一操作净荷 sop…eop 属于当前 tassn；长度字段宽 **待 Xia** | 交错 tassn | 拒错配 | cp_ta_tassn_pay | M1 | 计划 |
+| TP-UNIT-TA-011 | LAYER_CONTRACTS §3 | flush 结束前每个未决 tassn 必须 done 或 fail（拍数 **待 Xia**） | flush | 无残留 | cp_ta_flush | M1 | 待定 |
+| TP-UNIT-TA-012 | MODULE_INVENTORY `ub_ta_mem`；UB-TA §7.4.2 | LS Read/Write 先做 | 叶 TB | 完成 / 失败 | cp_ta_mem_rw | M1 | RTL未就绪 |
+| TP-UNIT-TA-013 | MODULE_INVENTORY `ub_ta_hdr`；UB-TA §7.2 | 组 BTAH；观测 TAOpcode / Poison | 叶 TB | 头字段 | cp_ta_hdr | M1 | RTL未就绪 |
+| TP-UNIT-TA-014 | MODULE_INVENTORY `ub_ta_order`；UB-TA §7.3.4 | `ta2tp_mode` × bypass 属于允许集（编码 **待 Xia**） | 模式交叉 | 允许集 | cp_ta_mode_byp | M1 | 待定 |
+| TP-UNIT-TA-015 | MODULE_INVENTORY `ub_ta` | 顶层 TA：上 FUN 下 TP；未完成表例化 `ub_cmn_mem_1r1w` | 叶 TB | 例化 / 完成 | cp_ta_top | M1 | RTL未就绪 |
+| TP-UNIT-TA-016 | MODULE_INVENTORY `ub_ta_atomic`；UB-TA §7.4.2.3 | Atomic 第二波（最长 64 B 量级） | atomic op | 完成 | cp_ta_atomic | 后续 | RTL未就绪 |
+| TP-UNIT-TA-017 | MODULE_INVENTORY `ub_ta_msg` / `maint` / `mgmt`；UB-TA §7.4.3–5 | 消息 / 维护 / 管理（非 LS 优先通路） | — | — | cp_ta_msg | 后续 | RTL未就绪 |
+
+#### 8.9.3 子系统 / 契约
+
+| ID | 规范 | 描述 | 激励 | 检查 | 覆盖 | 里程碑 | 状态 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TP-SUB-TPTA-001 | LAYER_CONTRACTS §2；GATE-TB-PAIR-001 | NW↔TP TX 独立 vs model（非自环） | `NwTpHook` | `n_compare` | cp_nwtp_tx | M1 | 计划 |
+| TP-SUB-TPTA-002 | LAYER_CONTRACTS §2；GATE-TB-PAIR-001 | NW↔TP RX 独立 vs model | `NwTpHook` | 同上 | cp_nwtp_rx | M1 | 计划 |
+| TP-SUB-TPTA-003 | LAYER_CONTRACTS §3；GATE-TB-PAIR-001 | TP↔TA 提交独立 vs model | `TpTaHook` | 同上 | cp_tpta_sub | M1 | 计划 |
+| TP-SUB-TPTA-004 | LAYER_CONTRACTS §3 | TP↔TA 完成 / 递交独立 vs model | `TpTaHook` | 同上 | cp_tpta_cmp | M1 | 计划 |
+| TP-SUB-TPTA-005 | GATE-TB-SB-001 | 记分板 `n_compare>0` 且等于声明 | `ContractScoreboard` | `check()` | cp_sb_n | M1 | 计划 |
+| TP-SUB-TPTA-006 | GATE-FOR-001；LAYER_CONTRACTS §2 | `formal/contracts/nw_tp.sby`：握手 / 宽度 / 头长；默认任务无 assume | sby cover/bmc/prove | PASS | cp_for_nwtp | M1 | 计划 |
+| TP-SUB-TPTA-007 | GATE-FOR-001；LAYER_CONTRACTS §3 | `formal/contracts/tp_ta.sby`：done/fail、tassn；默认任务无 assume | sby | PASS | cp_for_tpta | M1 | 计划 |
+| TP-SUB-TPTA-008 | GATE-FORMAL-DEPTH (3) | 各任务 BMC depth ≥ 最深 cover 步 + 6 | sby 日志 | 深度表 | cp_for_depth | M1 | 计划 |
+
+#### 8.9.4 本小节测试点统计
+
+| 层 | 总行 | M1（本小节分母） | 后续 | 推迟 | 一期不做 |
+| --- | --- | --- | --- | --- | --- |
+| 单元 Transport（§8.9.1） | 24 | 18 | 6 | 0 | 0 |
+| 单元 Transaction（§8.9.2） | 17 | 15 | 2 | 0 | 0 |
+| 子系统 / 契约（§8.9.3） | 8 | 8 | 0 | 0 | 0 |
+| **本小节合计** | **49** | **41** | **8** | **0** | **0** |
+
+41 + 8 + 0 + 0 = 49。
+
+本小节 M1 分母拆分：计划 33 + RTL未就绪 4 + 待定 4 = 41。未实现的 RTL未就绪 / 待定 记 SKIP，不算 PASS。
+
+#### 8.9.5 本小节待 Xia 清单
+
+| 事项 | 受影响 TP | 出处 |
+| --- | --- | --- |
+| NTH.SCNA/DCNA 16 vs 24 | TP-UNIT-TP-011 旁路字段 | LAYER_CONTRACTS §2 |
+| ICRC 是否全部模式 / LS 通路 | TP-UNIT-TP-008 | LAYER_CONTRACTS §2 |
+| 包字节上限 | TP-UNIT-TP-001 | LAYER_CONTRACTS §2 |
+| RTPH 除 16 B / PSN 24 以外的字段宽 | TP-UNIT-TP-009 | LAYER_CONTRACTS §2 |
+| NTH.NLP 对 TAH 的编码 | TP-UNIT-TP-006 | LAYER_CONTRACTS §2 |
+| LPH.RT 在 LPH word 内的位切片 | TP-UNIT-TP-011 | LAYER_CONTRACTS §1 |
+| `ta2tp_mode` 编码 | TP-UNIT-TA-014 | LAYER_CONTRACTS §3 |
+| flush 拍数 | TP-UNIT-TA-011 | LAYER_CONTRACTS §3 |
+| 未决 TASSN 上限 | TP-UNIT-TA-011 | LAYER_CONTRACTS §3 |
+| 净荷长度字段宽 | TP-UNIT-TA-010 | LAYER_CONTRACTS §3 |
+| TP NAK / fail 原因码 | TP-UNIT-TA-002 | LAYER_CONTRACTS §3 |
+| Go-Back-N vs 选择重传 | TP-UNIT-TP-019 | MODULE_INVENTORY `ub_tp_retry` |
+| 共享 TP 信道策略 | TP-SUB-TPTA-003 | LAYER_CONTRACTS §3 |
+| CFG6 数值编码（CTP 第二波） | TP-UNIT-TP-021 | 第二波 |
+
+#### 8.9.6 本小节 SPEC→TP 反向追溯
+
+| 规范 | 功能需求（短述） | 主 TP |
+| --- | --- | --- |
+| UB-TP §6.1 / §6.3 | 模式 + bypass；优先通路无 TPH | TP-UNIT-TP-006–008、018；TP-UNIT-TA-008 |
+| UB-TP §6.2.1 | RTPH 16 B；PSN；CTPH/UTPH | TP-UNIT-TP-009、010、021、022 |
+| UB-TP §6.4 / §6.4.2 | PSN 窗、重传、GBN vs SR | TP-UNIT-TP-010、019、020 |
+| UB-TP §6.5.1 / §6.6 | TPG / CC（可选延后） | TP-UNIT-TP-023、024 |
+| UB-TP §6.8 | MTU 分段；CTP 无 TPACK | TP-UNIT-TP-013、021 |
+| UB-TA §7.2 / §7.2.1 | 头格式；`INI_TASSN` 16 b | TP-UNIT-TA-003–007、013 |
+| UB-TA §7.3.4 | mode × bypass 允许集 | TP-UNIT-TA-014 |
+| UB-TA §7.4.2 / §7.4.2.3 | Read/Write；atomic 第二波 | TP-UNIT-TA-012、016 |
+| UB-TA §7.4.3–5 | 消息 / 维护 / 管理 | TP-UNIT-TA-017 |
+| SPEC §3.1 | valid/ready 同拍、保持 | TP-UNIT-TP-002；TP-UNIT-TA-009 |
+| SPEC §4.1 / §6.1 / §6.3 | `F_CORE`；RETRY/Probe wait 323 | TP-UNIT-TP-014–017 |
+| LAYER_CONTRACTS §2 | NW↔TP 口、bypass、err 对齐 | TP-UNIT-TP-001–012；TP-SUB-TPTA-001/002/006 |
+| LAYER_CONTRACTS §3 | TP↔TA 口、done/fail、flush | TP-UNIT-TA-001–011；TP-SUB-TPTA-003/004/007 |
+| GATE-TB-SB-001 / PAIR-001 | 记分板次数；两侧独立 vs model | TP-SUB-TPTA-001–005 |
+| GATE-PRIVATE-PARENT-FREE / GATE-FORMAL-DEPTH | 默认任务无 assume；BMC ≥ cover+6 | TP-SUB-TPTA-006–008 |
+
 ---
 
 ## 9. 覆盖率门限与豁免（D12）
@@ -959,14 +1080,17 @@ Xia 已写死：存在两份网表，不得混用验收口径。
 | 单元 UMMU（§8.8.1） | 90 | 81 | 9 | 0 | 0 |
 | 单元译码器（§8.8.2） | 19 | 19 | 0 | 0 | 0 |
 | 子系统内存管理（§8.8.3） | 13 | 13 | 0 | 0 | 0 |
-| 推迟占位 NW/TP/TA/钩子 | 7 | 0 | 0 | 7 | 0 |
-| **合计** | **311** | **274** | **14** | **13** | **10** |
+| 推迟占位 NW/FUN/钩子 | 4 | 0 | 0 | 4 | 0 |
+| 单元 Transport（§8.9.1） | 24 | 18 | 6 | 0 | 0 |
+| 单元 Transaction（§8.9.2） | 17 | 15 | 2 | 0 | 0 |
+| 子系统 / 契约 TP-TA（§8.9.3） | 8 | 8 | 0 | 0 | 0 |
+| **合计** | **357** | **315** | **22** | **10** | **10** |
 
-274 + 14 + 13 + 10 = 311。内存管理三行与 §8.8.4 一致（122 = 113 + 9）。
+315 + 22 + 10 + 10 = 357。内存管理三行与 §8.8.4 一致（122 = 113 + 9）。轨道 B 三行与 §8.9.4 一致（49 = 41 + 8）。§8.7 占位由 7 减 3（原 TP/TA 占位改入 §8.9）得 4。
 
-M1 分母拆分：计划 116 + 计划（waiver）2 + RTL未就绪 120 + 待定 36 = 274。其中内存管理 RTL未就绪 92 + 待定 21 = 113（§8.8.4）。未实现的 RTL未就绪 / 待定 记 SKIP，不算 PASS，也不算功能覆盖达成。
+M1 分母拆分：计划 149 + 计划（waiver）2 + RTL未就绪 124 + 待定 40 = 315。其中内存管理 RTL未就绪 92 + 待定 21 = 113（§8.8.4）；轨道 B 计划 33 + RTL未就绪 4 + 待定 4 = 41（§8.9.4）。未实现的 RTL未就绪 / 待定 记 SKIP，不算 PASS，也不算功能覆盖达成。
 
-待定 36 条：原 SPEC §13 映射 14 + unpack drain 1（PCS-026）+ 内存管理 21（§8.8.5）。无等 SPEC 澄清项。矛盾清单空。
+待定 40 条：原 SPEC §13 映射 14 + unpack drain 1（PCS-026）+ 内存管理 21（§8.8.5）+ 轨道 B 4（§8.9.5）。无等 SPEC 澄清项。矛盾清单空。
 
 ---
 
@@ -1037,6 +1161,17 @@ Q4 已关：TX Lane_ID 口（`lmsm2pcs_lane_id_mode` / `base` / `map`）、LMB �
 
 `model/` UMMU 查表 / 译码参考模型尚未提交（待 Xia）。UARCH §9 可选/延后项（后续，非本表待定）见 §8.8.5。
 
+### 14.6 轨道 B 待 Xia（详表见 §8.9.5）
+
+| 待决 | 事项 | 受影响 TP |
+| --- | --- | --- |
+| NLP / TAH | NTH.NLP 对 TAH 的编码 | TP-UNIT-TP-006 |
+| LPH.RT | RT 在 LPH word 内的位切片 | TP-UNIT-TP-011 |
+| flush | flush 拍数与未决上限 | TP-UNIT-TA-011 |
+| mode | `ta2tp_mode` 编码 | TP-UNIT-TA-014 |
+
+其余（SCNA/DCNA、ICRC、包上限、RTPH 其余宽、长度字段、NAK 原因、GBN vs SR、共享信道、CFG6）见 §8.9.5，不阻优先通路契约自测。
+
 ---
 
 ## 15. SPEC → TP 反向追溯
@@ -1081,6 +1216,8 @@ Xia 标准：每条 SPEC **功能需求**至少一条 TP。下表按 SPEC 章节
 | §11 (a)–(e) | 两套网表、双 mode、PRODUCT 冒烟（含 TEST 窗）、eqy、CRD_UF waiver | TOP-015–018/021、CSR-019、DLL-024 |
 | §12 | 与现网冲突（重写对齐） | 非功能需求；PCS-006、PMA-002、RST-001、CDC-004 覆盖偏差 |
 | §13 | 开放问题 | 见 §14.1，0 条无映射 |
+| UB 第 6 章 | Transport：bypass / RTP/CTP/UTP / PSN / MTU / 重传 | 见 §8.9.6；TP-UNIT-TP-*、TP-SUB-TPTA-* |
+| UB 第 7 章 | Transaction：头格式、TASSN、Read/Write、atomic | 见 §8.9.6；TP-UNIT-TA-* |
 | UB 第 9 章 | UMMU + 译码器（Home / User 内存管理） | 见 §8.8.6；MEM-*、DEC-*、SUB-MEM-* |
 | UB §9.1–§9.3 | 总述、Home-User、UBMD | 见 §8.8.6 |
 | UB §9.4 | UMMU：配置 / 上下文 / 翻译 / 权限 | 见 §8.8.6 |
@@ -1103,8 +1240,10 @@ Xia 标准：每条 SPEC **功能需求**至少一条 TP。下表按 SPEC 章节
 
 ## 16. 本草案不包含的工作
 
-- 不改 `rtl/`、`tb/`、SPEC、`DECISIONS.md`、`SPEC_INDEX.md`、其它文档。
+- 不改 `rtl/`、`pycircuit/`、SPEC、`DECISIONS.md`、`SPEC_INDEX.md`。
+- 本轨道 B PR 只加 `docs/VERIF_PLAN.md` §8.9、`tb/contracts/`、`formal/contracts/`。
 - 不拷贝 Switch TB 代码。
 - 不自合本 PR。
 - 不新增 `TOOLCHAIN.lock`（D16）。
 - 不发明 §7 以外的钩子；不引用任何 Vibe-UB commit SHA。
+- 不改 `scripts/gate/`（GATE-OWNED-PATHS）。

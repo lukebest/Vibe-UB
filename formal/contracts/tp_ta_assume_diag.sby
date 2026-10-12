@@ -1,0 +1,23 @@
+# Named diagnostic task: contract assume only.
+# Not a default bmc/cover/prove (GATE-PRIVATE-PARENT-FREE).
+[tasks]
+assume_diag
+
+[options]
+multiclock off
+assume_diag: mode bmc
+assume_diag: depth 22
+
+[engines]
+smtbmc z3
+
+[script]
+read -sv tp_ta_harness.sv
+read -sv tp_ta_assert.sv
+read -sv tp_ta_assume.sv
+prep -top tp_ta_harness
+
+[files]
+tp_ta_harness.sv
+tp_ta_assert.sv
+tp_ta_assume.sv

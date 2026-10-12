@@ -135,8 +135,7 @@ module ub_mem_ptw_harness (
     .fill_ready(fill_ready),
     .evt_valid(evt_valid),
     .evt_code(evt_code),
-    .evt_ready(evt_ready),
-    .flt_valid(flt_valid)
+    .evt_ready(evt_ready)
   );
 
 endmodule

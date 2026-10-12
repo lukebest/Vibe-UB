@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -22,6 +24,7 @@ from gatelib import (
     leaf_python_argv,
     mark_deleted_findings,
     parse_port_decls,
+    print_tool_versions,
     repo_root_on_sys_path,
     run_cmd,
     sha256_file,
@@ -1019,7 +1022,289 @@ def test_equiv_real_csr_tlb() -> None:
             # (structurally different pycc + mem stub). Ports are the gate.
 
 
+def _shuffle_bcrc_ports(src: Path, dest: Path) -> None:
+    """Same gold body, port list reordered so order-based cec would see a different AIGER."""
+    text = src.read_text(encoding="utf-8")
+    shuffled = (
+        "module ub_dll_bcrc (\n"
+        "  output reg          done,\n"
+        "  input  wire         last,\n"
+        "  output reg  [31:0]  crc_word,\n"
+        "  input  wire [159:0] data_in,\n"
+        "  input  wire         valid_in,\n"
+        "  input  wire         start,\n"
+        "  input  wire         rst_pyc,\n"
+        "  input  wire         core_clk\n"
+        ");"
+    )
+    new, n = re.subn(
+        r"module\s+ub_dll_bcrc\s*\([^)]*\);",
+        shuffled,
+        text,
+        count=1,
+        flags=re.S,
+    )
+    if n != 1:
+        raise SystemExit(f"shuffle rewrite failed n={n}")
+    dest.write_text(new, encoding="utf-8")
+
+
+def test_equiv_ref_regpair() -> None:
+    """GATE-EQY-004 (4): gold-vs-gold (+ shuffled ports) PASS; fakes and omitted rp_d FAIL."""
+    root = Path(__file__).resolve().parents[2]
+    script = root / "scripts" / "gate" / "equiv_ref.sh"
+    gold = root / "formal" / "dll" / "ref" / "ub_dll_bcrc.sv"
+    extra = root / "formal" / "dll" / "negative" / "bcrc_extra_reg.sv"
+    carry = root / "formal" / "dll" / "negative" / "bcrc_carry_after_last.sv"
+    drop = root / "formal" / "dll" / "negative" / "bcrc_drop_start_flit.sv"
+    flip = root / "formal" / "dll" / "negative" / "bcrc_flip.sv"
+    wrst = root / "formal" / "dll" / "negative" / "bcrc_wrong_reset.sv"
+    if not script.is_file() or not gold.is_file():
+        _fail("equiv-ref-regpair", "equiv_ref.sh or gold missing")
+    env = {**os.environ, "EQUIV_METHODS": "regpair", "EQUIV_TMO": "25", "EQUIV_SEQ_DEPTH": "8"}
+    cex_root = Path(tempfile.mkdtemp(prefix="selftest_cex_"))
+    env["EQUIV_CEX_DIR"] = str(cex_root)
+
+    good = run_cmd([str(script), "ub_dll_bcrc", str(gold)], env=env, timeout=90)
+    if good.returncode != 0 or "equiv_ref PASS" not in (good.stdout or ""):
+        _fail("equiv-ref-regpair-gold", (good.stdout or "")[-400:])
+    if not re.search(r"directed_midblock .*result=match", good.stdout or ""):
+        _fail("equiv-ref-regpair-gold", "expected directed_midblock result=match")
+    print("SELFTEST PASS equiv-ref-regpair-gold: gold vs gold")
+
+    with tempfile.TemporaryDirectory() as td:
+        shuffled = Path(td) / "bcrc_port_shuffle.sv"
+        _shuffle_bcrc_ports(gold, shuffled)
+        shuf = run_cmd([str(script), "ub_dll_bcrc", str(shuffled)], env=env, timeout=90)
+        if shuf.returncode != 0 or "equiv_ref PASS" not in (shuf.stdout or ""):
+            _fail("equiv-ref-regpair-shuffle", (shuf.stdout or "")[-400:])
+    print("SELFTEST PASS equiv-ref-regpair-shuffle: shuffled port order")
+
+    matrix = root / "formal" / "dll" / "positive" / "bcrc_matrix_equiv.sv"
+    if not matrix.is_file():
+        _fail("equiv-ref-regpair-matrix", f"missing {matrix}")
+    mtx = run_cmd([str(script), "ub_dll_bcrc", str(matrix)], env=env, timeout=120)
+    mtx_out = mtx.stdout or ""
+    if mtx.returncode != 0 or "equiv_ref PASS" not in mtx_out:
+        _fail("equiv-ref-regpair-matrix", mtx_out[-600:])
+    if "SCRIPT_ERROR" in mtx_out:
+        _fail("equiv-ref-regpair-matrix", "structurally-different equivalent pair must not hit SCRIPT_ERROR")
+    if "write_aiger -miter" in mtx_out or re.search(r"aiger .*gold_po=0", mtx_out):
+        _fail("equiv-ref-regpair-matrix", "combo CEC must not emit a property AIGER")
+    print("SELFTEST PASS equiv-ref-regpair-matrix: structurally different, same formula")
+
+    omit_env = {**env, "EQUIV_REGPAIR_OMIT_PO": "rp_d_crc", "EQUIV_REGPAIR_OMIT_SIDE": "gold"}
+    omit = run_cmd([str(script), "ub_dll_bcrc", str(gold)], env=omit_env, timeout=90)
+    omit_out = omit.stdout or ""
+    if omit.returncode == 0:
+        _fail("equiv-ref-regpair-omit-po", "omitted rp_d_crc must fail")
+    if "ports=FAIL" not in omit_out or "rp_d_crc" not in omit_out:
+        _fail("equiv-ref-regpair-omit-po", omit_out[-400:])
+    print("SELFTEST PASS equiv-ref-regpair-omit-po: missing rp_d_crc listed")
+
+    bad_extra = run_cmd([str(script), "ub_dll_bcrc", str(extra)], env=env, timeout=90)
+    extra_out = bad_extra.stdout or ""
+    if bad_extra.returncode == 0:
+        _fail("equiv-ref-regpair-extra", "extra-reg fake must fail")
+    if "DEADREG result=FAIL" not in extra_out:
+        _fail("equiv-ref-regpair-extra", f"GATE-SYN-DEADREG must catch extra: {extra_out[-400:]}")
+    if "unmatched" not in extra_out:
+        _fail("equiv-ref-regpair-extra", "expected unmatched register listing")
+    print("SELFTEST PASS equiv-ref-regpair-extra: DEADREG + unmatched flop")
+
+    replay = root / "scripts" / "gate" / "replay_seq_cex.py"
+
+    def _require_bmc_icarus(name: str, net: Path, out: str) -> None:
+        if not re.search(
+            r"was asserted in frame|SAT proof finished - model found|Assert failed|proof did fail|NOT EQUIVALENT",
+            out,
+            re.I,
+        ):
+            _fail(f"equiv-ref-regpair-{name}", f"expected BMC CEX (timeout is not a CEX): {out[-600:]}")
+        if re.search(r"未证完", out) and not re.search(r"was asserted in frame|SAT proof finished", out, re.I):
+            _fail(f"equiv-ref-regpair-{name}", "timeout/未证完 is not a real CEX")
+        prefer = cex_root / f"{net.stem}.csv"
+        csvs = [prefer] if prefer.is_file() else list(cex_root.glob(f"*{net.stem}*.csv"))
+        if not csvs:
+            m = re.search(r"cex_csv=(\S+)", out)
+            if m and Path(m.group(1)).is_file():
+                csvs = [Path(m.group(1))]
+        if not csvs:
+            _fail(f"equiv-ref-regpair-{name}", "BMC CEX produced no CSV sequence")
+        icarus = run_cmd(
+            ["python3", str(replay), "--csv", str(csvs[0]), "--net", str(net), "--leaf", "ub_dll_bcrc"],
+            timeout=60,
+        )
+        icarus_out = icarus.stdout or ""
+        print(icarus_out)
+        if "REPLAY FIRST_DIFF" not in icarus_out:
+            _fail(f"equiv-ref-regpair-{name}", f"Icarus must reproduce a port mismatch: {icarus_out[-400:]}")
+        print(f"SELFTEST PASS equiv-ref-regpair-{name}: BMC CEX + Icarus {re.search(r'REPLAY FIRST_DIFF.*', icarus_out).group(0)}")
+
+    for name, net in (("drop", drop), ("flip", flip), ("wrong_reset", wrst)):
+        if not net.is_file():
+            _fail(f"equiv-ref-regpair-{name}", f"missing {net}")
+        proc = run_cmd([str(script), "ub_dll_bcrc", str(net)], env=env, timeout=180)
+        out = proc.stdout or ""
+        if proc.returncode == 0:
+            _fail(f"equiv-ref-regpair-{name}", "fake must fail")
+        if name == "wrong_reset":
+            if "reset=FAIL" not in out:
+                _fail(f"equiv-ref-regpair-{name}", out[-400:])
+            print(f"SELFTEST PASS equiv-ref-regpair-{name}: reset=FAIL")
+            continue
+        if name == "flip":
+            if "SCRIPT_ERROR" in out and "cex_ok=1" not in out:
+                _fail(f"equiv-ref-regpair-{name}", "NOT EQ without replayable CEX is a script error")
+            if not re.search(r"cex_ok=1|REPLAY FIRST_DIFF|was asserted in frame", out):
+                _fail(f"equiv-ref-regpair-{name}", f"NOT EQ must carry a replayable CEX: {out[-500:]}")
+            _require_bmc_icarus(name, net, out)
+            continue
+        if "SCRIPT_ERROR" in out and "cex_ok=1" not in out and "reset=FAIL" not in out:
+            _fail(f"equiv-ref-regpair-{name}", "NOT EQ without replayable CEX is a script error")
+        if not re.search(
+            r"NOT EQUIVALENT|Assert failed|SAT proof finished - model found|proof did fail|was asserted in frame|cex_ok=1",
+            out,
+            re.I,
+        ):
+            _fail(f"equiv-ref-regpair-{name}", f"expected real CEX: {out[-400:]}")
+        print(f"SELFTEST PASS equiv-ref-regpair-{name}: real compare FAIL")
+
+    bad_carry = run_cmd([str(script), "ub_dll_bcrc", str(carry)], env=env, timeout=180)
+    carry_out = bad_carry.stdout or ""
+    if bad_carry.returncode == 0:
+        _fail("equiv-ref-regpair-carry", "carry-after-last fake must fail")
+    if "SCRIPT_ERROR" in carry_out and "cex_ok=1" not in carry_out:
+        _fail("equiv-ref-regpair-carry", "NOT EQ without replayable CEX is a script error")
+    if "INCONCLUSIVE(state-encoding)" not in carry_out:
+        _fail("equiv-ref-regpair-carry", f"expected INCONCLUSIVE then seq: {carry_out[-400:]}")
+    if not re.search(r"cex_ok=1|was asserted in frame", carry_out):
+        _fail("equiv-ref-regpair-carry", "NOT EQ must carry a replayable CEX")
+    _require_bmc_icarus("carry", carry, carry_out)
+
+
+def test_equiv_ref_affine() -> None:
+    """GATE-EQY-004 (5): AND/mux plants fail precondition; unit-vector plant NOT EQ."""
+    root = Path(__file__).resolve().parents[2]
+    script = root / "scripts" / "gate" / "equiv_ref.sh"
+    and_net = root / "formal" / "dll" / "negative" / "bcrc_affine_and.sv"
+    mux_net = root / "formal" / "dll" / "negative" / "bcrc_affine_mux.sv"
+    bit_net = root / "formal" / "dll" / "negative" / "bcrc_affine_bit.sv"
+    for net in (and_net, mux_net, bit_net):
+        if not net.is_file():
+            _fail("equiv-ref-affine", f"missing {net}")
+    env = {
+        **os.environ,
+        "EQUIV_METHODS": "regpair",
+        "EQUIV_TMO": "40",
+        "EQUIV_REGPAIR_AFFINE_ONLY": "1",
+    }
+
+    and_proc = run_cmd([str(script), "ub_dll_bcrc", str(and_net)], env=env, timeout=180)
+    and_out = and_proc.stdout or ""
+    if and_proc.returncode == 0:
+        _fail("equiv-ref-affine-and", "AND plant must not PASS")
+    if not re.search(r"affine_prereq .*FAIL.*(\$and|non-affine cell)", and_out):
+        _fail("equiv-ref-affine-and", f"precondition must reject $and: {and_out[-800:]}")
+    if re.search(r"po_cec name=rp_d_crc result=equivalent method=affine", and_out):
+        _fail("equiv-ref-affine-and", "AND plant must not prove rp_d_crc via affine")
+    print("SELFTEST PASS equiv-ref-affine-and: leftover $and rejected")
+
+    mux_proc = run_cmd([str(script), "ub_dll_bcrc", str(mux_net)], env=env, timeout=180)
+    mux_out = mux_proc.stdout or ""
+    if mux_proc.returncode == 0:
+        _fail("equiv-ref-affine-mux", "data-bit $mux plant must not PASS")
+    if not re.search(r"affine_prereq .*FAIL.*leftover \$mux", mux_out):
+        _fail("equiv-ref-affine-mux", f"precondition must reject leftover $mux: {mux_out[-800:]}")
+    print("SELFTEST PASS equiv-ref-affine-mux: leftover data-select $mux rejected")
+
+    bit_proc = run_cmd([str(script), "ub_dll_bcrc", str(bit_net)], env=env, timeout=180)
+    bit_out = bit_proc.stdout or ""
+    if bit_proc.returncode == 0:
+        _fail("equiv-ref-affine-bit", "affine one-bit plant must not PASS")
+    if "SCRIPT_ERROR" in bit_out and "cex_ok=1" not in bit_out:
+        _fail("equiv-ref-affine-bit", "NOT EQ without replayable CEX is a script error")
+    if not re.search(r"method=affine", bit_out) or not re.search(r"cex_ok=1", bit_out):
+        _fail("equiv-ref-affine-bit", f"unit vector must NOT EQ with CEX: {bit_out[-800:]}")
+    if not re.search(r"po_cec name=rp_d_crc result=not_equivalent method=affine", bit_out):
+        _fail("equiv-ref-affine-bit", f"rp_d_crc must be affine NOT EQ: {bit_out[-800:]}")
+    print("SELFTEST PASS equiv-ref-affine-bit: unit-vector NOT EQ + replayable CEX")
+
+
+def test_deadreg_extra() -> None:
+    """GATE-SYN-DEADREG: extra-reg fake FAIL; gold PASS."""
+    root = Path(__file__).resolve().parents[2]
+    py = root / "scripts" / "gate" / "deadreg.py"
+    extra = root / "formal" / "dll" / "negative" / "bcrc_extra_reg.sv"
+    gold = root / "formal" / "dll" / "ref" / "ub_dll_bcrc.sv"
+    bad = run_cmd(["python3", str(py), "--v", str(extra), "--top", "ub_dll_bcrc", "--label", "extra"], timeout=60)
+    if bad.returncode == 0 or "DEADREG result=FAIL" not in (bad.stdout or ""):
+        _fail("deadreg-extra", bad.stdout or "no FAIL")
+    if "extra" not in (bad.stdout or ""):
+        _fail("deadreg-extra", "expected dead cell extra")
+    print("SELFTEST PASS deadreg-extra: extra Q does not reach an output")
+    good = run_cmd(["python3", str(py), "--v", str(gold), "--top", "ub_dll_bcrc", "--label", "gold"], timeout=60)
+    if good.returncode != 0 or "DEADREG result=PASS" not in (good.stdout or ""):
+        _fail("deadreg-gold", good.stdout or "gold must PASS")
+    print("SELFTEST PASS deadreg-gold: all FF Q reach outputs")
+
+
+def test_equiv_ref_real_compare() -> None:
+    """Fakes fail from solver/miter lines, not source greps or filenames."""
+    root = Path(__file__).resolve().parents[2]
+    script = root / "scripts" / "gate" / "equiv_ref.sh"
+    cases = [
+        (
+            "equiv",
+            "ub_pcs_lane_dist",
+            root / "formal/pcs/negative/forward_lane_dist.sv",
+            {"EQUIV_METHODS": "equiv", "EQUIV_TMO": "30", "NUM_LANES": "4"},
+            r"ERROR:|unproven|equiv_ref FAIL",
+        ),
+        (
+            "abc-cec",
+            "ub_pyc_rst_adapt",
+            root / "formal/common/negative/rst_adapt_wrong_pol.sv",
+            {"EQUIV_METHODS": "abc", "EQUIV_ABC_STAGE": "cec", "EQUIV_TMO": "30"},
+            r"NOT EQUIVALENT|Verification failed",
+        ),
+        (
+            "dedist-equiv",
+            "ub_pcs_lane_dedist",
+            root / "formal/pcs/negative/forward_lane_dedist.sv",
+            {"EQUIV_METHODS": "equiv", "EQUIV_TMO": "30", "NUM_LANES": "4"},
+            r"ERROR:|unproven|equiv_ref FAIL|NOT EQUIVALENT",
+        ),
+    ]
+    real = re.compile(
+        r"NOT EQUIVALENT|Verification failed|Assert failed|SAT proof finished|"
+        r"ERROR:|unproven \$equiv|equiv_ref FAIL|unmatched|ports=FAIL",
+        re.I,
+    )
+    for name, leaf, net, extra, _pat in cases:
+        if not net.is_file():
+            _fail(f"real-compare-{name}", f"missing {net}")
+        env = {**os.environ, **extra}
+        proc = run_cmd([str(script), leaf, str(net)], env=env, timeout=60)
+        out = proc.stdout or ""
+        if proc.returncode == 0:
+            _fail(f"real-compare-{name}", "fake must fail")
+        if not real.search(out):
+            _fail(f"real-compare-{name}", f"no real compare line: {out[-400:]}")
+        if re.search(r"grep .*POLY|filename match", out, re.I):
+            _fail(f"real-compare-{name}", "grep/filename verdict")
+        print(f"SELFTEST PASS real-compare-{name}: {real.search(out).group(0)}")
+
+
+
 def main() -> int:
+    print_tool_versions(["python", "yosys", "icarus"])
+    if not shutil_which("iverilog"):
+        print(
+            "ERROR: iverilog is not on PATH; gate-selftest flip/carry replay "
+            "needs Icarus (TOOLCHAIN.lock icarus_lock)"
+        )
+        return 1
     tests = [
         test_emit_skip_missing_script,
         test_emit_skip_pycc,
@@ -1052,6 +1337,10 @@ def main() -> int:
         test_hooks_wrong_width,
         test_equiv_wide_bus_and_flip,
         test_equiv_real_csr_tlb,
+        test_deadreg_extra,
+        test_equiv_ref_regpair,
+        test_equiv_ref_affine,
+        test_equiv_ref_real_compare,
     ]
     for fn in tests:
         fn()

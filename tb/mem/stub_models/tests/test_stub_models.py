@@ -24,7 +24,7 @@ from tb.mem.stub_models.contract_yaml import (
     parse_assertions,
     parse_contract_yaml,
 )
-from tb.mem.stub_models.derived import collect_live, load_derived
+from tb.mem.stub_models.derived import SOURCE_HEAD, collect_live, live_matches_derived, load_derived
 from tb.mem.stub_models.leaves import LEAF_NAMES, load_leaf_header, make_stub
 
 SEED = 0xC11E5
@@ -96,11 +96,13 @@ def test_loader_parses_all_real_headers():
         assert header.has_port("out_ready")
 
 
-def test_derived_yaml_is_provisional_until_next_43_head():
+def test_derived_yaml_matches_109e1c7():
+    ok, detail = live_matches_derived()
+    assert ok, detail
     recorded = load_derived()
-    assert recorded.get("final") is False
     live = collect_live()
-    assert live.get("final") is False
+    assert recorded.get("final") is True
+    assert recorded.get("source_head") == SOURCE_HEAD == "109e1c72e05415af18ac7f6274f4a45fd3c25cd8"
     assert set(live["ptw_enc_classes"]) == set(ENC_CLASSES)
     assert len(live["ptw_enc_cross"]) == 4
     for level in live["ptw_enc_cross"].values():
@@ -153,14 +155,11 @@ def test_ports_widths_latency_match_contract(leaf):
     model = make_stub(leaf, header=header, seed=SEED)
     assert model.port_names == tuple(p.name for p in header.ports)
     assert model.port_widths == {p.name: p.width for p in header.ports}
-    if leaf == "ub_mem_dec_ent_dec":
-        assert model.latency_cycles == 1
-        assert model.latency_upper_bound == 1
-    else:
-        assert model.latency_cycles == header.latency.cycles
-        assert model.latency_upper_bound == header.latency.max_cycles
-        assert model.latency_cycles == 1
-        assert model.latency_upper_bound == 1
+    assert header.latency.kind == "registered"
+    assert header.comb_budget_ns is None
+    assert header.parent != "ub_mem_dec_l0"
+    assert model.latency_cycles == header.latency.cycles == 1
+    assert model.latency_upper_bound == header.latency.max_cycles == 1
 
 
 def test_tecte_raw_width_comes_from_yaml():
@@ -352,6 +351,14 @@ def test_ptw_config_illegal_precedes_translation_fault():
     assert beat["desc_ill_cause"] == model.encoding.ill_code("ILL_HW_AD")
     assert beat["desc_v"] == 0
     assert beat["desc_kind"] == 0
+
+
+def test_dent_parent_is_dec_walk_and_has_no_comb_budget():
+    header = load_leaf_header("ub_mem_dec_ent_dec")
+    assert header.parent == "ub_mem_dec_walk"
+    assert header.comb_budget_ns is None
+    assert header.latency.kind == "registered"
+    assert header.latency.cycles == 1
 
 
 def test_dent_l0_and_l1_are_registered():

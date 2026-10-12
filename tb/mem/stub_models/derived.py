@@ -29,6 +29,10 @@ def digests_path() -> Path:
     return DERIVED_DIR / DIGESTS_NAME
 
 
+# #43 head the lockfile was last regenerated against.
+SOURCE_HEAD = "109e1c72e05415af18ac7f6274f4a45fd3c25cd8"
+
+
 def collect_live() -> dict[str, Any]:
     root = find_contracts_dir()
     yaml_digests: dict[str, str] = {}
@@ -45,8 +49,8 @@ def collect_live() -> dict[str, Any]:
     if table is None:
         raise ValueError("ub_mem_ptw_desc_dec has no ENC_* cross to derive")
     return {
-        "final": False,
-        "waiting_for": "next #43 head after f2d12ee8",
+        "final": True,
+        "source_head": SOURCE_HEAD,
         "yaml_digests": yaml_digests,
         "ptw_yaml_digest": ptw.yaml_digest,
         "ptw_enc_cross": table.as_nested(),
@@ -81,6 +85,7 @@ def live_matches_derived(path: Path | None = None) -> tuple[bool, str]:
 # extract_yaml_header stays imported so regen and tests share one parser.
 __all__ = [
     "DERIVED_DIR",
+    "SOURCE_HEAD",
     "collect_live",
     "digests_path",
     "extract_yaml_header",

@@ -141,6 +141,7 @@ D20 S-01 (b) 覆盖 C 线表项位布局。UARCH 把每一种规范表项做成�
 | `ports` | 列表 | 每项 `{name, dir, width, desc}`。`dir` 为 `in` / `out`。`width` 为整数、参数表达式（如 `EID_W`）、或 `unknown`（§6 未关的规范宽度） |
 | `params` | 列表 | 每项 `{name, default}`；无参数时为 `[]` |
 | `ill_cause_width` | 整数 | 恒为 `4` |
+| `assertions` | 列表 | 必填。正文引用的全部 `AP_*` 断言 ID（精确、去重、排序）。参与契约 hash。 |
 | `status` | 字符串 | 恒为 `draft` |
 
 `clock` / `rst_pyc` 同时列入 `ports`。`desc` 写字段级语义，不含原始表项内部切分。

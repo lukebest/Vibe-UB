@@ -20,7 +20,7 @@ ports:
   - {name: out_ready, dir: in, width: 1, desc: 下游可收下结果}
   - {name: desc_v, dir: out, width: 1, desc: 描述符有效}
   - {name: desc_kind, dir: out, width: 2, desc: "页粒度类别：0 invalid，1 table，2 block，3 page"}
-  - {name: desc_addr, dir: out, width: 36, desc: 下一级表基址或输出页基址（4 KB 对齐）}
+  - {name: desc_addr, dir: out, width: 36, desc: 下一级表基址、块基址或 4 KB 页基址（4 KB 对齐）；块描述符只给块基址}
   - {name: desc_attr_idx, dir: out, width: 3, desc: 属性 / 内存类型索引}
   - {name: desc_ap, dir: out, width: 2, desc: 访问许可}
   - {name: desc_uxn, dir: out, width: 1, desc: 用户执行禁止}
@@ -38,7 +38,7 @@ status: draft
 | 项 | 值 |
 | --- | --- |
 | 叶子 | `ub_mem_ptw_desc_dec` |
-| 父级例化点 | `ub_mem_ptw`（UMMU 页表遍历器）。解码结果经遍历器拆成 4 KB 项，交给 `ub_mem_tlb` 的 `fill_*` 口（PR #27） |
+| 父级例化点 | `ub_mem_ptw`（UMMU 页表遍历器）。块描述符由遍历器按 §7 合成 4 KB 页地址，交给 `ub_mem_tlb` 的 `fill_*` 口（PR #27） |
 | 规范 | UB Base Spec Rev 2.0 §9.4.3 |
 | 微架构 | [UARCH.md](../UARCH.md) §5.6、§6.2 |
 | 裁定 | D20 S-01 (b)；接口补丁见 [README.md](README.md) §4（Xia 裁定 2026-10-12） |
@@ -68,7 +68,7 @@ TLB 回填路径上的页表描述符解码叶子。输入一根原始描述符�
 | `out_ready` | in | 1 | 下游（`ub_mem_ptw`）可收下结果。第一波遍历器可以把本口 Tied 为 1。**Xia 裁定 2026-10-12。** |
 | `desc_v` | out | 1 | 描述符有效 |
 | `desc_kind` | out | 2 | 页粒度类别。编码（Xia 裁定 2026-10-12）：0 = invalid，1 = table，2 = block，3 = page |
-| `desc_addr` | out | 36 | 下一级表基址或输出页基址（4 KB 对齐后的地址） |
+| `desc_addr` | out | 36 | 下一级表基址、块基址或 4 KB 页基址（4 KB 对齐）。块描述符只给出块基址；块内偏移由父级按请求 VA 计算（§7）。**Xia 裁定 2026-10-12。** |
 | `desc_attr_idx` | out | 3 | 属性 / 内存类型索引；遍历器在填 TLB 前用 `ctx_mattr0/1` 换成 8 bit 属性字节 |
 | `desc_ap` | out | 2 | 访问许可 |
 | `desc_uxn` | out | 1 | 用户执行禁止（按 §9.4.3 适配第 3 条使用） |
@@ -77,7 +77,7 @@ TLB 回填路径上的页表描述符解码叶子。输入一根原始描述符�
 | `desc_illegal` | out | 1 | 配置非法；`desc_illegal == (desc_ill_cause != 0)`。**Xia 裁定 2026-10-12。** |
 | `desc_ill_cause` | out | 4 | 非法原因，编码见 [README.md](README.md) §3 |
 
-`desc_kind` 承担页粒度类别。4 KB 页与「拆成 4 KB 项的块」都经 `desc_addr` 给出页基址；2 MB 粒度走 §4 非法路径。
+`desc_kind` 承担页粒度类别。4 KB 页经 `desc_addr` 给出页基址。遍历器支持的每一级块描述符（第 2 级 2 MB、第 1 级 1 GB）合法：`desc_kind=block`，`desc_illegal=0`；`desc_addr` 给出块基址。按 Q-A11，每个块拆成 4 KB TLB 项，合成规则见 §7。UB-MEM 第 9 章未定义 MATT 页表描述符格式与块大小；TCTE.TGS 字段注记写明其位含义跟随体系结构。**Xia 裁定 2026-10-12。**
 
 ---
 
@@ -95,19 +95,19 @@ TLB 回填路径上的页表描述符解码叶子。输入一根原始描述符�
 
 ## 4. 非法 / 不支持配置
 
-原因码与数值见 [README.md](README.md) §3。本叶子会用到的符号：`ILL_NONE`、`ILL_MAP_2MB`、`ILL_HW_AD`、`ILL_RSVD`、`ILL_UNSUP`。
+原因码与数值见 [README.md](README.md) §3。本叶子会用到的符号：`ILL_NONE`、`ILL_HW_AD`、`ILL_RSVD`、`ILL_UNSUP`。`ILL_MAP_2MB` 只对应 TCTE 范围表颗粒度选取 2 MB，只出现在 `ub_mem_tcte_dec`。2 MB 页表块描述符是另一件事，合法。**Xia 裁定 2026-10-12。**
 
 **Xia 裁定 2026-10-12：**
 
 - `desc_illegal=1` 的同一 `out_valid` 拍，其余解码输出（`desc_v` / `desc_kind` / `desc_addr` / `desc_attr_idx` / `desc_ap` / `desc_uxn` / `desc_pxn` / `desc_af`）为 0。该拍只有 `desc_illegal` 与 `desc_ill_cause` 携带信息。
-- 配置非法（`ILL_MAP_2MB`、`ILL_HW_AD`）先于翻译故障（例如 AF=0）报告。多个非法原因同时成立时，取最小非 0 码。
+- 配置非法（`ILL_HW_AD`）先于翻译故障（例如 AF=0）报告。多个非法原因同时成立时，取最小非 0 码。
 - 描述符 `AF=0` 且需要硬件写回 Access / Dirty → `desc_ill_cause=ILL_HW_AD`。
 - 描述符 `AF=0` 且不要求硬件写回 → `desc_illegal=0`，`desc_af=0`，由遍历器按普通 AF 故障处理。
+- 第 2 级 2 MB 块与第 1 级 1 GB 块：`desc_kind=block`，`desc_illegal=0`。本条取代此前对 1 GB 块报 `ILL_UNSUP` 的行。
 
 | 符号 | 何时拉起 |
 | --- | --- |
-| `ILL_NONE` | `desc_illegal=0` |
-| `ILL_MAP_2MB` | 原始描述符要求 2 MB 映射粒度 |
+| `ILL_NONE` | `desc_illegal=0`（含合法的 2 MB / 1 GB 块描述符） |
 | `ILL_HW_AD` | 原始描述符要求硬件写回 Access / Dirty（含「AF=0 且必须写回才能继续」） |
 | `ILL_RSVD` | 保留编码 |
 | `ILL_UNSUP` | 其余已折成非法的首轮不支持编码 |
@@ -135,13 +135,18 @@ TLB 回填路径上的页表描述符解码叶子。输入一根原始描述符�
 | `AP_PTW_ILL_EQ` | `desc_illegal == (desc_ill_cause != 0)`。**Xia 裁定 2026-10-12。** |
 | `AP_PTW_ILL_ZERO` | `desc_illegal=1` 的 `out_valid` 拍，除 `desc_illegal` / `desc_ill_cause` 外解码输出为 0。**Xia 裁定 2026-10-12。** |
 | `AP_PTW_ILL_PRI` | 多个非法原因同时成立时，`desc_ill_cause` 取最小非 0 码。**Xia 裁定 2026-10-12。** |
-| `AP_PTW_ILL_2MB` | 原始描述符要求 2 MB 映射时，`out_valid` 拍 `desc_ill_cause=1`（`ILL_MAP_2MB`）。 |
 | `AP_PTW_ILL_AD` | 原始描述符要求硬件写回 Access / Dirty 时，`out_valid` 拍 `desc_ill_cause=2`（`ILL_HW_AD`）。 |
 | `AP_PTW_AF` | `AF=0` 且不要求硬件写回时，`desc_illegal=0` 且 `desc_af=0`。**Xia 裁定 2026-10-12。** |
 | `AP_PTW_KIND` | `desc_illegal=0` 时 `desc_kind` ∈ {0, 1, 2, 3}，分别 invalid / table / block / page。**Xia 裁定 2026-10-12。** |
+| `AP_PTW_BLOCK` | 第 2 级 2 MB 块与第 1 级 1 GB 块：`desc_kind=2`（block），`desc_illegal=0`，`desc_addr` 为块基址。`ILL_MAP_2MB` 只出现在 `ub_mem_tcte_dec`。**Xia 裁定 2026-10-12。** |
 
 ---
 
-## 7. 未知
+## 7. 父级义务
 
-- 1 GB 块描述符是否出现、出现时的原因码。
+父级 `ub_mem_ptw` 兑现下列规则。**Xia 裁定 2026-10-12**（按 Q-A11；本条取代此前对 1 GB 块报 `ILL_UNSUP` 的行）：
+
+- 页表用 4 KB 粒度，每个块拆成 4 KB TLB 项。
+- 本叶子只给出块基址 `desc_addr` 与 `desc_kind`；块内偏移由父级按请求 VA 计算。
+- 父级把块基址与请求 VA 的块内偏移合成 4 KB 对齐 PA，交给 `ub_mem_tlb`。
+- `fill_*`（`fill_pfn` / `fill_attr` / `fill_ap` / `fill_uxn` / `fill_pxn` / `fill_af`）只携带该 4 KB 页地址与页属性。块偏移在合成 PA 时用掉。

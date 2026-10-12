@@ -22,7 +22,7 @@
 2. **原始表项内部怎么切字段，只存在于私有叶子源。** 公开契约、桩、上层接口、`CHANGELOG`、评语都保持这一边界。
 3. **时钟与复位** 与 [CODING_STYLE.md](../../../CODING_STYLE.md) §2 / SPEC §4.2 一致：单时钟 `core_clk`；业务寄存器同步复位，叶子只接 `rst_pyc`。目标周期 12.412 ns（SPEC §4.1 `F_CORE` 80.57 MHz），估计走 Sky130 代理。每个私有叶子内部不做 CDC。**Xia 裁定 2026-10-12。**
 4. **握手** 与 SPEC §3.1 一致：同一拍 `valid==1 && ready==1` 成交；`valid==1` 期间数据与边带保持到成交；`ready` 不组合依赖本拍 `valid`。时序在各叶子文件写清：组合 0 拍，或寄存 N 拍，并给出延迟上界。
-5. **首轮不支持的配置**（D20 第 6 条）：2 MB 映射粒度、硬件写回 Access / Dirty。叶子给出 §3 共用非法原因码，且 `*_illegal == (*_ill_cause != 0)`。**Xia 裁定 2026-10-12。**
+5. **首轮不支持的配置**（D20 第 6 条）：TCTE 范围表颗粒度选取 2 MB（`ILL_MAP_2MB`）、硬件写回 Access / Dirty。2 MB 页表块描述符合法，见 §4 第 9 条。叶子给出 §3 共用非法原因码，且 `*_illegal == (*_ill_cause != 0)`。**Xia 裁定 2026-10-12。**
 6. **复位值** 写在各叶子文件。寄存输出在 `rst_pyc` 有效期间为 0。
 7. **断言** 是接口级、自然语言性质，带稳定名字。公开桩的行为模型与私有叶子都要满足同一组性质。
 8. **规范没有裁定的事项** 写「未知」，放在各文件末尾短列表。依赖 D-05 译码器格式的项写入 §5「暂缓」表。本目录不补猜测值。
@@ -40,10 +40,10 @@ D20 S-01 (b) 覆盖 C 线表项位布局。UARCH 把每一种规范表项做成�
 | --- | --- | --- | --- |
 | `ub_mem_ptw_desc_dec` | `ub_mem_ptw`（TLB 回填 / 页表遍历） | [ub_mem_ptw_desc_dec.md](ub_mem_ptw_desc_dec.md) | 64（一次 8 B 描述符读） |
 | `ub_mem_dec_ent_dec` | `ub_mem_decoder`（接 `ub_mem_dec_walk`；第一波 L0 在内存） | [ub_mem_dec_ent_dec.md](ub_mem_dec_ent_dec.md) | L0 大项 512；L1 见 §5 暂缓 |
-| `ub_mem_tecte_dec` | `ub_mem_cfg_lkup`（CSR 写 TECT） | [ub_mem_tecte_dec.md](ub_mem_tecte_dec.md) | **未知** |
+| `ub_mem_tecte_dec` | `ub_mem_cfg_lkup`（CSR 写 TECT） | [ub_mem_tecte_dec.md](ub_mem_tecte_dec.md) | 512（TECTE 64 B） |
 | `ub_mem_tcte_dec` | `ub_mem_ctx_lkup`（TCT 缓存填充） | [ub_mem_tcte_dec.md](ub_mem_tcte_dec.md) | 512（一次 64 B 读） |
 | `ub_mem_l1tct_dec` | `ub_mem_ctx_lkup`（两级 TCT） | [ub_mem_l1tct_dec.md](ub_mem_l1tct_dec.md) | 64（一次 8 B 读） |
-| `ub_mem_mapte_dec` | `ub_mem_perm_walk` / `ub_mem_plb` | [ub_mem_mapte_dec.md](ub_mem_mapte_dec.md) | 256（一次 32 B 读；最终宽度见 §6 未知） |
+| `ub_mem_mapte_dec` | `ub_mem_perm_walk` / `ub_mem_plb` | [ub_mem_mapte_dec.md](ub_mem_mapte_dec.md) | 256（每级 32 B） |
 
 结构叶子（`ub_mem_tlb`、`ub_mem_ptw`、`ub_mem_dec_walk` 等）只认本目录与 UARCH §5 的具名信号。
 
@@ -56,7 +56,7 @@ D20 S-01 (b) 覆盖 C 线表项位布局。UARCH 把每一种规范表项做成�
 | 码 | 符号 | 含义 |
 | --- | --- | --- |
 | 0 | `ILL_NONE` | 无非法；`*_illegal=0` |
-| 1 | `ILL_MAP_2MB` | 原始表项要求 2 MB 映射粒度（首轮，D20） |
+| 1 | `ILL_MAP_2MB` | TCTE 范围表颗粒度选取 2 MB（首轮，D20）。2 MB 页表块描述符合法 |
 | 2 | `ILL_HW_AD` | 原始表项要求硬件写回 Access / Dirty（首轮，D20） |
 | 3 | `ILL_RSVD` | 保留编码 |
 | 4 | `ILL_PTR_OOB` | 指针高位越界 |
@@ -84,6 +84,8 @@ D20 S-01 (b) 覆盖 C 线表项位布局。UARCH 把每一种规范表项做成�
 5. **`out_ready`。** 每片叶子保留该口。第一波遍历器可以把 `out_ready` Tied 为 1。叶子在 `out_valid && !out_ready` 期间保持 `out_valid` 与全部输出稳定。各叶子接口断言 `AP_<LEAF>_OUT_HOLD` 写明本条。
 6. **复位撤销后的 `in_ready`。** SPEC §3.1 原文：「复位撤销后，`valid` 与 `ready` 的首拍值：**待定**（建议 `valid=0`，`ready` 在下游能收时为 1）。」该句未闭合。本目录按下列规则：复位撤销后的第一拍 `in_ready` 可以为 0；从第二拍起，在输出侧未停（`out_ready=1` 或本拍无未决输出）时 `in_ready=1`。
 7. **L0 组合预算。** `ub_mem_dec_ent_dec` 的 L0 路径 `comb_budget_ns: 5.0`（12.412 ns 周期内、输入到输出的最大延迟；周期余量留给其前的存储器读出通路与其后的遍历器寄存器建立时间）。L1 路径仍为寄存 1 拍。**Xia 裁定 2026-10-12。**
+8. **条目尺寸（依据 UB-MEM 第 9 章）。** `ub_mem_tecte_dec.raw` = 512（TECTE 64 B）。`ub_mem_mapte_dec.raw` = 256，每一级皆然（MAPTE 32 B）。`lvl` 宽 2 bit，合法 0..3（4 KB 粒度多级 MAPT 最多 4 级；2 MB 粒度的 3 级形式首轮延后）。延后的「2 MB 映射粒度」指 TCTE 范围表颗粒度选取 2 MB，`ub_mem_tcte_dec` 报 `ILL_MAP_2MB`。`ctx_mapt_bb_sz` 是基块大小指数（4 KB × 2^n），合法 0..9（9 = 2 MB 基块）；10..15 报 `ILL_RSVD`。**Xia 裁定 2026-10-12，依据 UB-MEM 第 9 章条目尺寸。**
+9. **页表块描述符（Q-A11）。** UB-MEM 第 9 章未定义 MATT 页表描述符格式与块大小；TCTE.TGS 字段注记写明其位含义跟随体系结构。按 Q-A11，页表用 4 KB 粒度，每个块拆成 4 KB TLB 项。遍历器支持的每一级块描述符（第 2 级 2 MB、第 1 级 1 GB）在 `ub_mem_ptw_desc_dec` 合法：`desc_kind=block`，`desc_illegal=0`。该叶子只输出块基址 `desc_addr` 与 `desc_kind`。父级 `ub_mem_ptw` 把块基址与请求 VA 的块内偏移合成 4 KB 对齐 PA，交给 TLB；`fill_*` 只携带 4 KB 页地址。`ILL_MAP_2MB` 只对应 TCTE 范围表颗粒度选取 2 MB。2 MB 页表块描述符是另一件事，合法。本条取代此前对 1 GB 块报 `ILL_UNSUP` 的行。**Xia 裁定 2026-10-12。**
 
 ---
 
@@ -101,15 +103,17 @@ D20 S-01 (b) 覆盖 C 线表项位布局。UARCH 把每一种规范表项做成�
 
 ---
 
-## 6. 未知（待 Xia 另裁）
+## 6. 规范宽度（已关）
 
-纯规范宽度 / 体系结构项，本批保持「未知」：
+下列项已由 **Xia 裁定 2026-10-12，依据 UB-MEM 第 9 章条目尺寸** 关闭，正文见 §4 第 8 条与各叶子。本批不再列「未知」。
 
-- `ub_mem_tecte_dec` 的 `raw` 宽度
-- `ub_mem_mapte_dec` 的 `raw` 最终宽度（单项 / 多级是否恒为 256）
-- `ub_mem_mapte_dec` 的 `lvl` 宽度与合法范围
-- `ctx_mapt_bb_sz` 表示 2 MB 的对数值
-- 1 GB 块描述符是否出现、出现时的原因码
+| 项 | 裁定 |
+| --- | --- |
+| `ub_mem_tecte_dec.raw` | 512（TECTE 64 B） |
+| `ub_mem_mapte_dec.raw` | 256，每一级（MAPTE 32 B） |
+| `lvl` | 宽 2 bit，合法 0..3 |
+| `ctx_mapt_bb_sz` | 基块指数，合法 0..9；9 = 2 MB 基块；10..15 → `ILL_RSVD`。延后的 2 MB 映射粒度走 TCTE 范围表颗粒度 → `ILL_MAP_2MB` |
+| 页表块描述符 | 第 2 级 2 MB、第 1 级 1 GB 均合法（`desc_kind=block`，`desc_illegal=0`）。依据第 9 章：描述符格式跟随体系结构；按 Q-A11 拆成 4 KB TLB 项。本条取代此前对 1 GB 块报 `ILL_UNSUP` 的行 |
 
 ---
 

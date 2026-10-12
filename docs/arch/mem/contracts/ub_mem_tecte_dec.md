@@ -15,7 +15,7 @@ ports:
   - {name: rst_pyc, dir: in, width: 1, desc: 同步复位，pyc_reg 原生极性}
   - {name: in_valid, dir: in, width: 1, desc: CSR 侧原始 TECT 镜像本拍有效}
   - {name: in_ready, dir: out, width: 1, desc: 本拍可收下原始镜像}
-  - {name: raw, dir: in, width: unknown, desc: 原始 TECT / CSR 规范格式镜像}
+  - {name: raw, dir: in, width: 512, desc: 原始 TECTE，64 B}
   - {name: out_valid, dir: out, width: 1, desc: 解码结果本拍有效}
   - {name: out_ready, dir: in, width: 1, desc: 下游可写下位配置表}
   - {name: cfg_v, dir: out, width: 1, desc: 表项有效}
@@ -74,7 +74,7 @@ status: draft
 | --- | --- | --- | --- |
 | `in_valid` | in | 1 | CSR 侧原始 TECT 镜像本拍有效 |
 | `in_ready` | out | 1 | 本拍可收下原始镜像 |
-| `raw` | in | **未知** | 原始 TECT / CSR 规范格式镜像。内部字段位置只在私有叶子源 |
+| `raw` | in | 512 | 原始 TECTE（64 B）。内部字段位置只在私有叶子源。**Xia 裁定 2026-10-12，依据 UB-MEM 第 9 章条目尺寸。** |
 | `out_valid` | out | 1 | 解码结果本拍有效 |
 | `out_ready` | in | 1 | `ub_mem_cfg_lkup` 可写下位配置表。第一波可以把本口 Tied 为 1。**Xia 裁定 2026-10-12。** |
 | `cfg_v` | out | 1 | 表项有效 |
@@ -157,6 +157,3 @@ status: draft
 
 ---
 
-## 7. 未知
-
-- `raw` 口宽度（CSR 镜像与规范 TECT 项宽）。

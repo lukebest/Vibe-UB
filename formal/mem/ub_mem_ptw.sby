@@ -42,10 +42,13 @@ read -formal ub_mem_ptw.v
 read -formal ub_mem_ptw_if_props.sv
 read -formal ub_mem_ptw_harness.sv
 # read -formal keeps modules as $abstract until hierarchy derives them.
-# blackbox before hierarchy does not match. After hierarchy, cut the
-# private decoder so its outputs are unconstrained (any decode result).
+# After hierarchy, drop the inlined stub and splice in the $anyseq cut
+# so decoder outputs are unconstrained (any decode result). A Yosys
+# `blackbox` cell cannot be flattened (sby prep flatten errors).
 hierarchy -check -top ub_mem_ptw_harness
-blackbox ub_mem_ptw_desc_dec
+delete ub_mem_ptw_desc_dec
+read -formal ub_mem_ptw_desc_dec_cut.sv
+hierarchy -check -top ub_mem_ptw_harness
 proc
 flatten
 opt
@@ -55,5 +58,6 @@ opt -purge
 [files]
 ub_mem_ptw_if_props.sv
 ub_mem_ptw_harness.sv
+ub_mem_ptw_desc_dec_cut.sv
 inc/pyc_reg.v
 ../../rtl/mem/ub_mem_ptw.v

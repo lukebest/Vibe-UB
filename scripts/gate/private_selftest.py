@@ -12,6 +12,7 @@ from contract_hash import contract_sha256
 from gatelib import Finding
 from private_leaves import (
     check_attests,
+    check_hash_single,
     check_role_dirs,
     check_stubs,
     collect_contract_findings,
@@ -212,11 +213,71 @@ def test_parent_description_not_row() -> None:
         )
 
 
-def _set_assertions_required(root: Path, value: bool) -> None:
+def _set_flag(root: Path, key: str, value: bool) -> None:
     yml = root / "scripts" / "gate" / "private_leaves.yml"
     yml.parent.mkdir(parents=True, exist_ok=True)
     prev = yml.read_text(encoding="utf-8") if yml.is_file() else "leaves: []\n"
-    yml.write_text(prev + f"assertions_required: {str(value).lower()}\n", encoding="utf-8")
+    yml.write_text(prev + f"{key}: {str(value).lower()}\n", encoding="utf-8")
+
+
+def _set_assertions_required(root: Path, value: bool) -> None:
+    _set_flag(root, "assertions_required", value)
+
+
+def test_hash_single_ok_and_dup() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        gate = root / "scripts" / "gate"
+        gate.mkdir(parents=True)
+        (gate / "contract_hash.py").write_text(
+            "def contract_sha256(path):\n    return '0' * 64\n",
+            encoding="utf-8",
+        )
+        importer = root / "tb" / "ok_import.py"
+        importer.parent.mkdir(parents=True)
+        importer.write_text(
+            "from scripts.gate.contract_hash import contract_sha256\n"
+            "# def contract_sha256 lives in scripts/gate/contract_hash.py\n",
+            encoding="utf-8",
+        )
+        _set_flag(root, "hash_single_required", True)
+        hits = check_hash_single(root)
+        _expect_none("hash-single-ok", hits, "CONTRACT_HASH_DUP")
+
+        copy = root / "tb" / "mem" / "stub_models" / "contract_hash.py"
+        copy.parent.mkdir(parents=True)
+        copy.write_text(
+            "def contract_sha256(path):\n    return 'deadbeef'\n",
+            encoding="utf-8",
+        )
+        hit = _expect("hash-single-module", check_hash_single(root), "CONTRACT_HASH_DUP")
+        if "stub_models/contract_hash.py" not in hit.file:
+            _fail("hash-single-module", f"expected stub_models path, got {hit.file}")
+        if hit.bucket != "new":
+            _fail("hash-single-module", "must be blocking when required")
+
+        impl = root / "scripts" / "impl" / "tests" / "fixtures" / "alt.py"
+        impl.parent.mkdir(parents=True)
+        impl.write_text("def contract_hash(obj):\n    return obj\n", encoding="utf-8")
+        files = {f.file for f in check_hash_single(root) if f.rule == "CONTRACT_HASH_DUP"}
+        if "scripts/impl/tests/fixtures/alt.py" not in files:
+            _fail("hash-single-def", f"missing def hit, got {sorted(files)}")
+        print("SELFTEST PASS hash-single-def: CONTRACT_HASH_DUP on def contract_hash")
+
+
+def test_hash_single_report_until_main() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        copy = root / "tb" / "mem" / "stub_models" / "contract_hash.py"
+        copy.parent.mkdir(parents=True)
+        copy.write_text("def contract_sha256(path):\n    return ''\n", encoding="utf-8")
+        hit = _expect(
+            "hash-single-report",
+            check_hash_single(root),
+            "CONTRACT_HASH_DUP",
+        )
+        if hit.bucket != "report":
+            _fail("hash-single-report", "must be report-only until #47 is on main")
 
 
 def test_assertions_required_ok_and_missing() -> None:
@@ -563,6 +624,8 @@ def run_all() -> None:
         test_hash_assertion_changes,
         test_parent_ok_and_unknown,
         test_parent_description_not_row,
+        test_hash_single_ok_and_dup,
+        test_hash_single_report_until_main,
         test_assertions_required_ok_and_missing,
         test_assertions_unlisted_and_unused,
         test_assertions_report_until_readme,

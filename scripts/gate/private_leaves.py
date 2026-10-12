@@ -22,6 +22,7 @@ from contract_hash import (  # noqa: E402
 )
 from gatelib import (  # noqa: E402
     Finding,
+    LOCK_SCAN_SKIP_DIRS,
     REPO_ROOT,
     load_yaml,
     run_cmd,
@@ -33,6 +34,11 @@ ASSERT_README_RE = re.compile(
     r"^\|\s*`?assertions`?\s*\|[^\n]*必填",
     re.M,
 )
+HASH_DEF_RE = re.compile(
+    r"^[ \t]*(?:async[ \t]+)?def[ \t]+(contract_sha256|contract_hash)[ \t]*\(",
+    re.M,
+)
+HASH_SINGLE_MAX_READ = 2_000_000
 LEAF_TICK_RE = re.compile(r"`(ub_[a-z0-9_]+)`")
 UARCH_H2_RE = re.compile(r"^##[ \t]+(\d+)\b", re.M)
 PLAIN_LEAF_RE = re.compile(r"\Aub_[a-z0-9_]+\Z")
@@ -125,6 +131,25 @@ def assertions_required(root: Path) -> bool:
         if ASSERT_README_RE.search(text):
             return True
     return False
+
+
+def hash_single_required(root: Path) -> bool:
+    """Blocking once #47 is on main, or yml override.
+
+    Same switch style as GATE-CONTRACT-004: `hash_single_required`
+    in private_leaves.yml wins; otherwise origin/main's verif_gate.md
+    carrying GATE-CONTRACT-HASH-SINGLE means the rule has landed.
+    """
+    flag = load_private_config(root).get("hash_single_required")
+    if flag is True or flag is False:
+        return bool(flag)
+    proc = run_cmd(
+        ["git", "show", "origin/main:docs/rules/verif_gate.md"],
+        cwd=root,
+    )
+    if proc.returncode != 0:
+        return False
+    return "GATE-CONTRACT-HASH-SINGLE" in (proc.stdout or "")
 
 
 def contract_prose(text: str) -> str:
@@ -994,6 +1019,77 @@ def check_role_dirs(
     return findings
 
 
+def _under_scripts_gate(rel: Path) -> bool:
+    return rel.parts[:2] == ("scripts", "gate")
+
+
+def _iter_tree_files(root: Path) -> list[Path]:
+    skip = set(LOCK_SCAN_SKIP_DIRS) | {"sim_build"}
+    out: list[Path] = []
+    stack = [root]
+    while stack:
+        d = stack.pop()
+        try:
+            kids = list(d.iterdir())
+        except OSError:
+            continue
+        for child in kids:
+            if child.is_symlink():
+                continue
+            if child.is_dir():
+                if child.name in skip:
+                    continue
+                stack.append(child)
+            elif child.is_file():
+                out.append(child)
+    return out
+
+
+def check_hash_single(root: Path) -> list[Finding]:
+    """GATE-CONTRACT-HASH-SINGLE: one hash impl, scripts/gate/contract_hash.py."""
+    findings: list[Finding] = []
+    bucket = "new" if hash_single_required(root) else "report"
+    for path in _iter_tree_files(root):
+        try:
+            rel = path.relative_to(root)
+        except ValueError:
+            continue
+        if _under_scripts_gate(rel):
+            continue
+        reasons: list[str] = []
+        if path.name == "contract_hash.py":
+            reasons.append("module named contract_hash.py")
+        if path.suffix == ".py":
+            try:
+                if path.stat().st_size > HASH_SINGLE_MAX_READ:
+                    continue
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            names = sorted(set(HASH_DEF_RE.findall(text)))
+            if names:
+                reasons.append("def " + "/".join(names))
+        if not reasons:
+            continue
+        findings.append(
+            Finding(
+                check="contract",
+                module="*",
+                file=rel.as_posix(),
+                rule="CONTRACT_HASH_DUP",
+                message=(
+                    "own contract-hash implementation ("
+                    + "; ".join(reasons)
+                    + "); import scripts/gate/contract_hash.py instead"
+                ),
+                bucket=bucket,
+                severity="error" if bucket == "new" else "warning",
+            )
+        )
+    findings.sort(key=lambda f: f.file)
+    return findings
+
+
 def collect_contract_findings(
     root: Path | None = None,
     *,
@@ -1004,6 +1100,7 @@ def collect_contract_findings(
     findings, contracts = check_all_contracts(root)
     findings.extend(check_stubs(root, contracts))
     findings.extend(check_attests(root, contracts))
+    findings.extend(check_hash_single(root))
     if paths is None:
         paths = changed_paths_vs_main(root)
     findings.extend(check_role_dirs(paths, title=title))

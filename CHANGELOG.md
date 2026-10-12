@@ -27,6 +27,7 @@
 
 ### Changed
 
+- 门禁 contract-check：`scripts/gate/` 以外不得自带 `contract_hash.py` / `def contract_sha256`。#47 进 main 前只报告（`GATE-CONTRACT-HASH-SINGLE`）。
 - 门禁 contract-check：`assertions:` 必填、与正文 `` `AP_*` `` 一一对应。#49 把 README §8 标成「必填 / 参与 hash」之前只报告；标记进 main（或 `assertions_required: true`）后拦截。
 - 门禁 contract-check：`parent` 只认 `UARCH.md` §3 叶子表「叶子」列的本行名字（去反引号 / 空白后全等）。描述列或其它节出现同名不算；`+` 拼在同一格里的后续名字等设计拆行（#46）之后才算。缺行 `PARENT_UNKNOWN` 拦截，不设豁免。
 - `docs/arch/mem/contracts/`：六份叶子契约 YAML 增补必填 `assertions:`（正文引用的 `AP_*` ID，去重排序，参与契约 hash）。

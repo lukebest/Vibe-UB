@@ -448,22 +448,50 @@ def test_stub_hash_match_and_mismatch() -> None:
         _expect("stub-hash-mismatch", check_stubs(root, [data]), "STUB_HASH_MISMATCH")
 
 
+def _handwritten_stub(root: Path) -> dict:
+    path = _write_contract(root, VALID_YAML)
+    _register(root, "ub_mem_toy_dec")
+    data, _ = parse_contract_file(path, root)
+    assert data is not None
+    stub = root / "rtl" / "mem" / "stub" / "ub_mem_toy_dec.v"
+    stub.parent.mkdir(parents=True, exist_ok=True)
+    stub.write_text(
+        "// contract_sha256: HANDWRITTEN\nmodule ub_mem_toy_dec; endmodule\n",
+        encoding="utf-8",
+    )
+    return data
+
+
 def test_stub_handwritten_report() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        path = _write_contract(root, VALID_YAML)
-        _register(root, "ub_mem_toy_dec")
-        data, _ = parse_contract_file(path, root)
-        assert data is not None
-        stub = root / "rtl" / "mem" / "stub" / "ub_mem_toy_dec.v"
-        stub.parent.mkdir(parents=True, exist_ok=True)
-        stub.write_text(
-            "// contract_sha256: HANDWRITTEN\nmodule ub_mem_toy_dec; endmodule\n",
-            encoding="utf-8",
+        data = _handwritten_stub(root)
+        hit = _expect(
+            "stub-handwritten-report",
+            check_stubs(root, [data], script_on_base=False),
+            "STUB_HANDWRITTEN",
         )
-        hit = _expect("stub-handwritten", check_stubs(root, [data]), "STUB_HANDWRITTEN")
         if hit.bucket != "report":
-            _fail("stub-handwritten", "must be report-only until the script is on main")
+            _fail(
+                "stub-handwritten-report",
+                "must be report-only when gen_private_stub.py is not on the base ref",
+            )
+
+
+def test_stub_handwritten_block() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        data = _handwritten_stub(root)
+        hit = _expect(
+            "stub-handwritten-block",
+            check_stubs(root, [data], script_on_base=True),
+            "STUB_HANDWRITTEN",
+        )
+        if hit.bucket != "new":
+            _fail(
+                "stub-handwritten-block",
+                "must be blocking when gen_private_stub.py exists on the base ref",
+            )
 
 
 def test_formal_cut_header() -> None:
@@ -628,6 +656,8 @@ def test_owned_paths_gatekeeper_ok() -> None:
         )
         _expect_none("owned-paths-title", hits, "GATE_FILE_TOUCHED")
         _expect_none("owned-paths-title-waiver", hits, "GATE_WAIVER_UNCHECKED")
+        no_pr = check_owned_paths(root, OWNED_TOUCH, title="", comments="")
+        _expect_none("owned-paths-no-pr", no_pr, "GATE_FILE_TOUCHED")
         if not is_gatekeeper_pr(title="gate: anything"):
             _fail("owned-paths-prefix", "title gate: must be gatekeeper")
         if is_gatekeeper_pr(title="Gate: wrong case"):
@@ -833,6 +863,7 @@ def run_all() -> None:
         test_comb_budget,
         test_stub_hash_match_and_mismatch,
         test_stub_handwritten_report,
+        test_stub_handwritten_block,
         test_formal_cut_header,
         test_attest_ok_and_missing,
         test_attest_public_path_not_private_repo,

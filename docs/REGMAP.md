@@ -83,7 +83,7 @@
 | 0x0100 | PARAM_PHY | ALLOW_ASYM | 22 | 22 | RO | 0x0 | 1=允许非对称。M1=0 | proj |
 | 0x0100 | PARAM_PHY | RSVD | 31 | 23 | RO | 0x0 | 保留 | proj |
 | 0x0104 | PARAM_FEC | FEC_MODE | 2 | 0 | RO | 0x2 | 与 LTB `fec_mode_ctrl` 同编码（§3.4.1.1）。复位 T=4 | proj; UB-PHY §3.2.2.1、§3.4.1.1 |
-| 0x0104 | PARAM_FEC | CODEC_NUM | 4 | 3 | RO | 0x1 | FEC 交织路数。默认建议 1，**待定** | proj; UB-PHY §3.2.2.3 |
+| 0x0104 | PARAM_FEC | CODEC_NUM | 4 | 3 | RO | 0x1 | FEC 交织路数。M1 用 1（§13 A-04） | proj; UB-PHY §3.2.2.3 |
 | 0x0104 | PARAM_FEC | RSVD | 31 | 5 | RO | 0x0 | 保留 | proj |
 | 0x0108 | PARAM_DLL | NUM_VL | 4 | 0 | RO | 0x2 | 使能 VL 数。M1=2 | proj; UB-DL §4.5.1 |
 | 0x0108 | PARAM_DLL | FLOW_CTRL_SIZE | 12 | 5 | RO | 0x1 | cell 对应 flit 数。M1=1 | proj; UB-DL §4.3.3.9 |

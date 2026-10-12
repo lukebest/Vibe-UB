@@ -5,4 +5,4 @@
 set -euo pipefail
 # shellcheck disable=SC1091
 source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
-exec python3 "$GATE_DIR/rtl_emit_consistency.py" --equiv-only
+exec python3 -P "$GATE_DIR/rtl_emit_consistency.py" --equiv-only

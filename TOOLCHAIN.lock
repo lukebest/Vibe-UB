@@ -32,11 +32,14 @@ eqy_lock = ""
 
 [pycircuit]
 # Single source of truth. setup_pycircuit.sh reads these keys only.
+# Keep this block in the repo-root TOOLCHAIN.lock only (no second copy).
 pycircuit_repo = "https://github.com/lukebest/pyCircuit"
 pycircuit_commit = "43cc5918e3d09ecc0c814cabef6c1384cb9980ae"
 pycircuit_release = "pyc4.0"
 pycircuit_package = "pycircuit-hisi"
 pycircuit_package_version = "0.1.0"
+# pycc is built from the pin above (flows/scripts/pyc) with LLVM 19.
+pycc_lock = "pyc4.0"
 llvm_lock = "19.1.1"
 mlir_lock = "19.1.1"
 cmake_lock = "3.28.3"

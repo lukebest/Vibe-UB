@@ -25,8 +25,12 @@ fi
 
 fail=0
 for sby in "${SBY_FILES[@]}"; do
-  echo "=== sby -f ${sby#"$REPO_ROOT/"} ==="
-  if ! sby -f "$sby"; then
+  sby_dir=$(dirname "$sby")
+  sby_base=$(basename "$sby")
+  rel_sby=${sby#"$REPO_ROOT/"}
+  echo "=== sby -f ${rel_sby} (cwd ${sby_dir#"$REPO_ROOT/"}) ==="
+  # [files] tokens are sibling-relative, same as `make -C formal` (`cd iface && sby`).
+  if ! (cd "$sby_dir" && sby -f --sequential "$sby_base"); then
     echo "formal FAIL: $sby"
     fail=1
   fi

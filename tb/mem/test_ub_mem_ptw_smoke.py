@@ -45,11 +45,13 @@ async def test_ptw_walk_cases(dut):
     cocotb.start_soon(Clock(dut.core_clk, 10, units="ns").start())
     dut.rst_pyc.value = 1
     dut.req_valid.value = 0
-    dut.rd_req_ready.value = 1
+    dut.mem2host_rd_ready.value = 1
     dut.fill_ready.value = 1
     dut.flt_ready.value = 1
-    dut.rd_rsp_valid.value = 0
-    dut.rd_rsp_err.value = 0
+    dut.evt_ready.value = 1
+    dut.mem2host_rd_rsp_valid.value = 0
+    dut.mem2host_rd_rsp_err.value = 0
+    dut.mem2host_rd_rsp_tag.value = 0
     dut.ctx_matt_wd.value = 0
     dut.ctx_affd.value = 0
     for _ in range(4):

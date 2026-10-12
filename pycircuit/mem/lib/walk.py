@@ -10,6 +10,8 @@ from mem.lib.params import (
     DESC_KIND_W,
     DESC_LVL_W,
     DESC_OFF_W,
+    DESC_SLOT_LSB,
+    DESC_SLOT_W,
     KIND_BLOCK,
     L1_BLK_PAGE_W,
     L2_BLK_PAGE_W,
@@ -46,6 +48,14 @@ def mux4(m: Circuit, sel, v0, v1, v2, v3):
             mux(m, s == u(DESC_LVL_W, LVL_L2), v2, v3),
         ),
     )
+
+
+def mux8(m: Circuit, sel, v0, v1, v2, v3, v4, v5, v6, v7):
+    lo_sel = ex(m, sel, 0, 2)
+    hi = ex(m, sel, 2, 1)
+    lo = mux4(m, lo_sel, v0, v1, v2, v3)
+    hi_v = mux4(m, lo_sel, v4, v5, v6, v7)
+    return mux(m, hi, hi_v, lo)
 
 
 def start_lvl(m: Circuit, ia_w):
@@ -112,8 +122,21 @@ def req_page(m: Circuit, uba):
     return ex(m, uba, PAGE_LSB, PAGE_W)
 
 
-def desc_raw64(m: Circuit, rd_data):
-    return ex(m, rd_data, 0, RAW_W)
+def desc_raw64(m: Circuit, rd_data, addr):
+    """从 512 bit 回读里按地址低位取出本次 8 B 描述符。"""
+    sel = ex(m, addr, DESC_SLOT_LSB, DESC_SLOT_W)
+    return mux8(
+        m,
+        sel,
+        ex(m, rd_data, 0 * RAW_W, RAW_W),
+        ex(m, rd_data, 1 * RAW_W, RAW_W),
+        ex(m, rd_data, 2 * RAW_W, RAW_W),
+        ex(m, rd_data, 3 * RAW_W, RAW_W),
+        ex(m, rd_data, 4 * RAW_W, RAW_W),
+        ex(m, rd_data, 5 * RAW_W, RAW_W),
+        ex(m, rd_data, 6 * RAW_W, RAW_W),
+        ex(m, rd_data, 7 * RAW_W, RAW_W),
+    )
 
 
 def _byte(m: Circuit, word, lsb: int):

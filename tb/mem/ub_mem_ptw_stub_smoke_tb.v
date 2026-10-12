@@ -14,17 +14,21 @@ module ub_mem_ptw_stub_smoke_tb;
   reg  [31:0] ctx_mattr1;
   reg         ctx_affd;
   reg         ctx_matt_wd;
-  reg         rd_req_ready;
-  reg         rd_rsp_valid;
-  reg  [511:0] rd_rsp_data;
-  reg         rd_rsp_err;
+  reg         mem2host_rd_ready;
+  reg         mem2host_rd_rsp_valid;
+  reg  [511:0] mem2host_rd_rsp_data;
+  reg  [3:0]  mem2host_rd_rsp_tag;
+  reg         mem2host_rd_rsp_err;
   reg         fill_ready;
   reg         flt_ready;
+  reg         evt_ready;
 
   wire        req_ready;
-  wire        rd_req_valid;
-  wire [47:0] rd_req_addr;
-  wire        rd_rsp_ready;
+  wire        mem2host_rd_valid;
+  wire [47:0] mem2host_rd_addr;
+  wire [7:0]  mem2host_rd_len;
+  wire [3:0]  mem2host_rd_tag;
+  wire        mem2host_rd_rsp_ready;
   wire        fill_valid;
   wire [3:0]  fill_ent_idx;
   wire [19:0] fill_token_id;
@@ -41,6 +45,8 @@ module ub_mem_ptw_stub_smoke_tb;
   wire [3:0]  flt_ill_cause;
   wire        flt_rd_err;
   wire        flt_af;
+  wire        evt_valid;
+  wire [3:0]  evt_code;
   wire        busy;
 
   integer errors;
@@ -60,16 +66,20 @@ module ub_mem_ptw_stub_smoke_tb;
     .ctx_mattr1(ctx_mattr1),
     .ctx_affd(ctx_affd),
     .ctx_matt_wd(ctx_matt_wd),
-    .rd_req_ready(rd_req_ready),
-    .rd_rsp_valid(rd_rsp_valid),
-    .rd_rsp_data(rd_rsp_data),
-    .rd_rsp_err(rd_rsp_err),
+    .mem2host_rd_ready(mem2host_rd_ready),
+    .mem2host_rd_rsp_valid(mem2host_rd_rsp_valid),
+    .mem2host_rd_rsp_data(mem2host_rd_rsp_data),
+    .mem2host_rd_rsp_tag(mem2host_rd_rsp_tag),
+    .mem2host_rd_rsp_err(mem2host_rd_rsp_err),
     .fill_ready(fill_ready),
     .flt_ready(flt_ready),
+    .evt_ready(evt_ready),
     .req_ready(req_ready),
-    .rd_req_valid(rd_req_valid),
-    .rd_req_addr(rd_req_addr),
-    .rd_rsp_ready(rd_rsp_ready),
+    .mem2host_rd_valid(mem2host_rd_valid),
+    .mem2host_rd_addr(mem2host_rd_addr),
+    .mem2host_rd_len(mem2host_rd_len),
+    .mem2host_rd_tag(mem2host_rd_tag),
+    .mem2host_rd_rsp_ready(mem2host_rd_rsp_ready),
     .fill_valid(fill_valid),
     .fill_ent_idx(fill_ent_idx),
     .fill_token_id(fill_token_id),
@@ -86,6 +96,8 @@ module ub_mem_ptw_stub_smoke_tb;
     .flt_ill_cause(flt_ill_cause),
     .flt_rd_err(flt_rd_err),
     .flt_af(flt_af),
+    .evt_valid(evt_valid),
+    .evt_code(evt_code),
     .busy(busy)
   );
 
@@ -107,19 +119,21 @@ module ub_mem_ptw_stub_smoke_tb;
 
   always @(posedge core_clk) begin
     if (rst_pyc) begin
-      rd_rsp_valid <= 1'b0;
-      rd_rsp_data <= 512'hDEAD_BEEF;
-      rd_rsp_err <= 1'b0;
+      mem2host_rd_rsp_valid <= 1'b0;
+      mem2host_rd_rsp_data <= 512'hDEAD_BEEF;
+      mem2host_rd_rsp_tag <= 4'b0;
+      mem2host_rd_rsp_err <= 1'b0;
       rsp_pend <= 1'b0;
     end else begin
-      if (rd_req_valid && rd_req_ready)
+      if (mem2host_rd_valid && mem2host_rd_ready)
         rsp_pend <= 1'b1;
-      if (rsp_pend && rd_rsp_ready) begin
-        rd_rsp_valid <= 1'b1;
-        rd_rsp_data <= 512'hFFFF_FFFF_FFFF_FFFF;
+      if (rsp_pend && mem2host_rd_rsp_ready) begin
+        mem2host_rd_rsp_valid <= 1'b1;
+        mem2host_rd_rsp_data <= 512'hFFFF_FFFF_FFFF_FFFF;
+        mem2host_rd_rsp_tag <= 4'd0;
         rsp_pend <= 1'b0;
-      end else if (rd_rsp_valid && rd_rsp_ready) begin
-        rd_rsp_valid <= 1'b0;
+      end else if (mem2host_rd_rsp_valid && mem2host_rd_rsp_ready) begin
+        mem2host_rd_rsp_valid <= 1'b0;
       end
     end
   end
@@ -138,12 +152,14 @@ module ub_mem_ptw_stub_smoke_tb;
     ctx_mattr1 = 32'h0;
     ctx_affd = 1'b0;
     ctx_matt_wd = 1'b0;
-    rd_req_ready = 1'b1;
+    mem2host_rd_ready = 1'b1;
     fill_ready = 1'b1;
     flt_ready = 1'b1;
-    rd_rsp_valid = 1'b0;
-    rd_rsp_data = 512'b0;
-    rd_rsp_err = 1'b0;
+    evt_ready = 1'b1;
+    mem2host_rd_rsp_valid = 1'b0;
+    mem2host_rd_rsp_data = 512'b0;
+    mem2host_rd_rsp_tag = 4'b0;
+    mem2host_rd_rsp_err = 1'b0;
     rsp_pend = 1'b0;
     repeat (4) tick;
     rst_pyc = 1'b0;
@@ -154,10 +170,14 @@ module ub_mem_ptw_stub_smoke_tb;
     tick;
     req_valid = 1'b0;
 
-    while (!fill_valid && !flt_valid) tick;
+    while (!fill_valid && !flt_valid && !evt_valid) tick;
 
     if (fill_valid) begin
       $display("FAIL: stub path filled TLB");
+      errors = errors + 1;
+    end
+    if (evt_valid) begin
+      $display("FAIL: stub path raised event");
       errors = errors + 1;
     end
     if (!flt_valid || !flt_xlat || flt_illegal || flt_ill_cause !== 4'd0) begin

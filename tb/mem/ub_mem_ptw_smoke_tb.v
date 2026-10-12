@@ -11,6 +11,7 @@ module ub_mem_ptw_smoke_tb;
   localparam integer ILL_NONE     = 0;
   localparam integer ILL_HW_AD    = 2;
   localparam integer ILL_RSVD     = 3;
+  localparam integer EVT_MATT_WD  = 0;
 
   reg         core_clk;
   reg         rst_pyc;
@@ -24,17 +25,21 @@ module ub_mem_ptw_smoke_tb;
   reg  [31:0] ctx_mattr1;
   reg         ctx_affd;
   reg         ctx_matt_wd;
-  reg         rd_req_ready;
-  reg         rd_rsp_valid;
-  reg  [511:0] rd_rsp_data;
-  reg         rd_rsp_err;
+  reg         mem2host_rd_ready;
+  reg         mem2host_rd_rsp_valid;
+  reg  [511:0] mem2host_rd_rsp_data;
+  reg  [3:0]  mem2host_rd_rsp_tag;
+  reg         mem2host_rd_rsp_err;
   reg         fill_ready;
   reg         flt_ready;
+  reg         evt_ready;
 
   wire        req_ready;
-  wire        rd_req_valid;
-  wire [47:0] rd_req_addr;
-  wire        rd_rsp_ready;
+  wire        mem2host_rd_valid;
+  wire [47:0] mem2host_rd_addr;
+  wire [7:0]  mem2host_rd_len;
+  wire [3:0]  mem2host_rd_tag;
+  wire        mem2host_rd_rsp_ready;
   wire        fill_valid;
   wire [3:0]  fill_ent_idx;
   wire [19:0] fill_token_id;
@@ -51,17 +56,22 @@ module ub_mem_ptw_smoke_tb;
   wire [3:0]  flt_ill_cause;
   wire        flt_rd_err;
   wire        flt_af;
+  wire        evt_valid;
+  wire [3:0]  evt_code;
   wire        busy;
 
   integer errors;
   integer cycles;
-  integer i;
+  integer saw_rd;
 
   reg [63:0] mem_q [0:7];
   integer mem_n;
   integer mem_i;
   reg        rsp_pend;
   reg [63:0] rsp_raw;
+  reg [2:0]  rsp_slot;
+  integer    force_slot;
+  integer    use_force_slot;
 
   ub_mem_ptw u_ptw (
     .core_clk(core_clk),
@@ -76,16 +86,20 @@ module ub_mem_ptw_smoke_tb;
     .ctx_mattr1(ctx_mattr1),
     .ctx_affd(ctx_affd),
     .ctx_matt_wd(ctx_matt_wd),
-    .rd_req_ready(rd_req_ready),
-    .rd_rsp_valid(rd_rsp_valid),
-    .rd_rsp_data(rd_rsp_data),
-    .rd_rsp_err(rd_rsp_err),
+    .mem2host_rd_ready(mem2host_rd_ready),
+    .mem2host_rd_rsp_valid(mem2host_rd_rsp_valid),
+    .mem2host_rd_rsp_data(mem2host_rd_rsp_data),
+    .mem2host_rd_rsp_tag(mem2host_rd_rsp_tag),
+    .mem2host_rd_rsp_err(mem2host_rd_rsp_err),
     .fill_ready(fill_ready),
     .flt_ready(flt_ready),
+    .evt_ready(evt_ready),
     .req_ready(req_ready),
-    .rd_req_valid(rd_req_valid),
-    .rd_req_addr(rd_req_addr),
-    .rd_rsp_ready(rd_rsp_ready),
+    .mem2host_rd_valid(mem2host_rd_valid),
+    .mem2host_rd_addr(mem2host_rd_addr),
+    .mem2host_rd_len(mem2host_rd_len),
+    .mem2host_rd_tag(mem2host_rd_tag),
+    .mem2host_rd_rsp_ready(mem2host_rd_rsp_ready),
     .fill_valid(fill_valid),
     .fill_ent_idx(fill_ent_idx),
     .fill_token_id(fill_token_id),
@@ -102,6 +116,8 @@ module ub_mem_ptw_smoke_tb;
     .flt_ill_cause(flt_ill_cause),
     .flt_rd_err(flt_rd_err),
     .flt_af(flt_af),
+    .evt_valid(evt_valid),
+    .evt_code(evt_code),
     .busy(busy)
   );
 
@@ -147,12 +163,27 @@ module ub_mem_ptw_smoke_tb;
     end
   endfunction
 
+  function [511:0] beat_place;
+    input [63:0] raw;
+    input [2:0]  slot;
+    integer k;
+    begin
+      beat_place = {8{64'hDEAD_BEEF_F00D_BAAD}};
+      for (k = 0; k < 8; k = k + 1) begin
+        if (k[2:0] == slot)
+          beat_place[k*64 +: 64] = raw;
+      end
+    end
+  endfunction
+
   task mem_reset;
     begin
       mem_n = 0;
       mem_i = 0;
       rsp_pend = 1'b0;
       rsp_raw = 64'b0;
+      rsp_slot = 3'b0;
+      use_force_slot = 0;
     end
   endtask
 
@@ -166,13 +197,27 @@ module ub_mem_ptw_smoke_tb;
 
   always @(posedge core_clk) begin
     if (rst_pyc) begin
-      rd_rsp_valid <= 1'b0;
-      rd_rsp_data <= 512'b0;
-      rd_rsp_err <= 1'b0;
+      mem2host_rd_rsp_valid <= 1'b0;
+      mem2host_rd_rsp_data <= 512'b0;
+      mem2host_rd_rsp_tag <= 4'b0;
+      mem2host_rd_rsp_err <= 1'b0;
       rsp_pend <= 1'b0;
     end else begin
-      if (rd_req_valid && rd_req_ready) begin
+      if (mem2host_rd_valid && mem2host_rd_ready) begin
+        saw_rd <= saw_rd + 1;
+        if (mem2host_rd_len !== 8'd8) begin
+          $display("FAIL: mem2host_rd_len %0d != 8", mem2host_rd_len);
+          errors = errors + 1;
+        end
+        if (mem2host_rd_tag !== 4'd0) begin
+          $display("FAIL: mem2host_rd_tag %0d != 0", mem2host_rd_tag);
+          errors = errors + 1;
+        end
         rsp_pend <= 1'b1;
+        if (use_force_slot)
+          rsp_slot <= force_slot[2:0];
+        else
+          rsp_slot <= mem2host_rd_addr[5:3];
         if (mem_i < mem_n) begin
           rsp_raw <= mem_q[mem_i];
           mem_i <= mem_i + 1;
@@ -180,17 +225,18 @@ module ub_mem_ptw_smoke_tb;
           rsp_raw <= 64'b0;
         end
       end
-      if (rsp_pend && rd_rsp_ready) begin
-        rd_rsp_valid <= 1'b1;
-        rd_rsp_data <= {448'b0, rsp_raw};
-        rd_rsp_err <= 1'b0;
+      if (rsp_pend && mem2host_rd_rsp_ready) begin
+        mem2host_rd_rsp_valid <= 1'b1;
+        mem2host_rd_rsp_data <= beat_place(rsp_raw, rsp_slot);
+        mem2host_rd_rsp_tag <= 4'd0;
+        mem2host_rd_rsp_err <= 1'b0;
         rsp_pend <= 1'b0;
-      end else if (rd_rsp_valid && rd_rsp_ready) begin
-        rd_rsp_valid <= 1'b0;
-      end else if (!rd_rsp_ready) begin
-        rd_rsp_valid <= rd_rsp_valid;
+      end else if (mem2host_rd_rsp_valid && mem2host_rd_rsp_ready) begin
+        mem2host_rd_rsp_valid <= 1'b0;
+      end else if (!mem2host_rd_rsp_ready) begin
+        mem2host_rd_rsp_valid <= mem2host_rd_rsp_valid;
       end else begin
-        rd_rsp_valid <= 1'b0;
+        mem2host_rd_rsp_valid <= 1'b0;
       end
     end
   end
@@ -207,9 +253,10 @@ module ub_mem_ptw_smoke_tb;
       ctx_mattr1 = 32'h00112233;
       ctx_affd = 1'b0;
       ctx_matt_wd = 1'b0;
-      rd_req_ready = 1'b1;
+      mem2host_rd_ready = 1'b1;
       fill_ready = 1'b1;
       flt_ready = 1'b1;
+      evt_ready = 1'b1;
     end
   endtask
 
@@ -217,11 +264,11 @@ module ub_mem_ptw_smoke_tb;
     integer guard;
     begin
       guard = 0;
-      while (!fill_valid && !flt_valid && guard <= 80) begin
+      while (!fill_valid && !flt_valid && !evt_valid && guard <= 80) begin
         tick;
         guard = guard + 1;
       end
-      if (!fill_valid && !flt_valid) begin
+      if (!fill_valid && !flt_valid && !evt_valid) begin
         $display("FAIL: walk did not complete");
         errors = errors + 1;
       end
@@ -239,8 +286,8 @@ module ub_mem_ptw_smoke_tb;
     begin
       wait_done;
       if (!fill_valid) begin
-        $display("FAIL: expected fill, got flt xlat=%0d ill=%0d cause=%0d",
-                 flt_xlat, flt_illegal, flt_ill_cause);
+        $display("FAIL: expected fill, got flt xlat=%0d ill=%0d af=%0d evt=%0d",
+                 flt_xlat, flt_illegal, flt_af, evt_valid);
         errors = errors + 1;
       end else begin
         if (fill_page !== exp_page) begin
@@ -260,15 +307,16 @@ module ub_mem_ptw_smoke_tb;
           errors = errors + 1;
         end
         if (fill_uxn !== exp_uxn || fill_pxn !== exp_pxn || fill_af !== exp_af) begin
-          $display("FAIL: fill flags uxn/pxn/af");
+          $display("FAIL: fill flags uxn/pxn/af got %0d/%0d/%0d",
+                   fill_uxn, fill_pxn, fill_af);
           errors = errors + 1;
         end
         if (fill_ent_idx !== 4'h1 || fill_token_id !== 20'hABCDE) begin
           $display("FAIL: fill tag mismatch");
           errors = errors + 1;
         end
-        if (flt_valid) begin
-          $display("FAIL: fill and fault together");
+        if (flt_valid || evt_valid) begin
+          $display("FAIL: fill with fault or event");
           errors = errors + 1;
         end
       end
@@ -280,10 +328,12 @@ module ub_mem_ptw_smoke_tb;
     input        want_xlat;
     input        want_ill;
     input [3:0]  want_cause;
+    input        want_af;
     begin
       wait_done;
       if (!flt_valid) begin
-        $display("FAIL: expected fault, got fill pfn=%h", fill_pfn);
+        $display("FAIL: expected fault, got fill=%0d evt=%0d pfn=%h",
+                 fill_valid, evt_valid, fill_pfn);
         errors = errors + 1;
       end else begin
         if (flt_xlat !== want_xlat) begin
@@ -298,8 +348,12 @@ module ub_mem_ptw_smoke_tb;
           $display("FAIL: flt_ill_cause %0d != %0d", flt_ill_cause, want_cause);
           errors = errors + 1;
         end
-        if (fill_valid) begin
-          $display("FAIL: fault also filled TLB");
+        if (flt_af !== want_af) begin
+          $display("FAIL: flt_af %0d != %0d", flt_af, want_af);
+          errors = errors + 1;
+        end
+        if (fill_valid || evt_valid) begin
+          $display("FAIL: fault also filled or raised event");
           errors = errors + 1;
         end
       end
@@ -320,13 +374,29 @@ module ub_mem_ptw_smoke_tb;
     end
   endtask
 
+  task run_l3_page;
+    input        af;
+    input        affd;
+    input [35:0] page;
+    begin
+      mem_reset;
+      ctx_affd = affd;
+      mem_push(pack_tb(1'b1, KIND_PAGE, 36'h00AB_CDEF, 3'd2, 2'b10, 1'b1, 1'b0,
+                       af, 1'b0, ILL_NONE));
+      start_walk({16'b0, page, 12'h000}, 6'd21);
+    end
+  endtask
+
   initial begin
     errors = 0;
     cycles = 0;
+    saw_rd = 0;
     rst_pyc = 1'b1;
-    rd_rsp_valid = 1'b0;
-    rd_rsp_data = 512'b0;
-    rd_rsp_err = 1'b0;
+    mem2host_rd_rsp_valid = 1'b0;
+    mem2host_rd_rsp_data = 512'b0;
+    mem2host_rd_rsp_tag = 4'b0;
+    mem2host_rd_rsp_err = 1'b0;
+    force_slot = 0;
     drive_idle;
     mem_reset;
     repeat (4) tick;
@@ -383,15 +453,87 @@ module ub_mem_ptw_smoke_tb;
     mem_reset;
     mem_push(pack_tb(1'b0, KIND_INVALID, 36'b0, 3'b0, 2'b0, 1'b0, 1'b0, 1'b0, 1'b0, ILL_NONE));
     start_walk({16'b0, 36'h0A00_0001, 12'h000}, 6'd39);
-    expect_fault(1'b1, 1'b0, ILL_NONE);
+    expect_fault(1'b1, 1'b0, ILL_NONE, 1'b0);
     $display("translation fault ok");
 
     // Config-illegal: no fill, ill_cause forwarded.
     mem_reset;
     mem_push(pack_tb(1'b0, KIND_INVALID, 36'b0, 3'b0, 2'b0, 1'b0, 1'b0, 1'b0, 1'b1, ILL_HW_AD));
     start_walk({16'b0, 36'h0A00_0002, 12'h000}, 6'd39);
-    expect_fault(1'b0, 1'b1, ILL_HW_AD);
+    expect_fault(1'b0, 1'b1, ILL_HW_AD, 1'b0);
     $display("config-illegal ok");
+
+    // AF × AFFD.
+    run_l3_page(1'b1, 1'b0, 36'h0123_4001);
+    expect_fill(36'h0123_4001, 36'h00AB_CDEF, 8'h55, 2'b10, 1'b1, 1'b0, 1'b1);
+    $display("AF=1 AFFD=0 fill ok");
+
+    run_l3_page(1'b1, 1'b1, 36'h0123_4002);
+    expect_fill(36'h0123_4002, 36'h00AB_CDEF, 8'h55, 2'b10, 1'b1, 1'b0, 1'b1);
+    $display("AF=1 AFFD=1 fill ok");
+
+    run_l3_page(1'b0, 1'b0, 36'h0123_4003);
+    expect_fault(1'b0, 1'b0, ILL_NONE, 1'b1);
+    $display("AF=0 AFFD=0 AF fault ok");
+
+    run_l3_page(1'b0, 1'b1, 36'h0123_4004);
+    expect_fill(36'h0123_4004, 36'h00AB_CDEF, 8'h55, 2'b10, 1'b1, 1'b0, 1'b0);
+    $display("AF=0 AFFD=1 fill ok");
+    ctx_affd = 1'b0;
+
+    // 8 B select from the 512-bit beat at several low-address offsets.
+    // L3 start: addr[5:3] follows page[2:0] when matt_ba[1:0]=0.
+    begin : slot_walk
+      integer s;
+      for (s = 0; s < 8; s = s + 1) begin
+        mem_reset;
+        use_force_slot = 0;
+        mem_push(pack_tb(1'b1, KIND_PAGE, 36'h00AB_CDEF, 3'd2, 2'b10, 1'b1, 1'b0,
+                         1'b1, 1'b0, ILL_NONE));
+        start_walk({16'b0, 36'h0100_0000 | s[2:0], 12'h000}, 6'd21);
+        expect_fill(36'h0100_0000 | s[2:0], 36'h00AB_CDEF, 8'h55, 2'b10, 1'b1, 1'b0, 1'b1);
+        $display("8B slot %0d ok", s);
+      end
+    end
+
+    // MATT_WD=1: no table read, event, no fill, no translation fault.
+    begin
+      integer guard;
+      integer rd_before;
+      mem_reset;
+      ctx_matt_wd = 1'b1;
+      rd_before = saw_rd;
+      start_walk({16'b0, 36'h0A00_0008, 12'h000}, 6'd39);
+      guard = 0;
+      while (!evt_valid && guard <= 20) begin
+        if (mem2host_rd_valid) begin
+          $display("FAIL: MATT_WD issued table read");
+          errors = errors + 1;
+        end
+        tick;
+        guard = guard + 1;
+      end
+      if (!evt_valid) begin
+        $display("FAIL: MATT_WD produced no event");
+        errors = errors + 1;
+      end else begin
+        if (evt_code !== EVT_MATT_WD[3:0]) begin
+          $display("FAIL: evt_code %0d", evt_code);
+          errors = errors + 1;
+        end
+        if (fill_valid || flt_valid) begin
+          $display("FAIL: MATT_WD filled or faulted");
+          errors = errors + 1;
+        end
+        if (saw_rd !== rd_before) begin
+          $display("FAIL: MATT_WD incremented table-read count");
+          errors = errors + 1;
+        end
+      end
+      tick;
+      ctx_matt_wd = 1'b0;
+      $display("MATT_WD event ok");
+    end
 
     if (errors == 0) begin
       $display("SMOKE PASS");

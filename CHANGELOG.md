@@ -4,7 +4,7 @@
 
 ### Added
 
-- `ub_mem_ptw`：C 线页表遍历器（4 KB 粒度，L0–L3；读回描述符寄存后交给 `ub_mem_ptw_desc_dec`；块/页合成 4 KB `fill_*`）。公开占位桩 `ub_mem_ptw_desc_dec`（`contract_sha256: HANDWRITTEN`）。
+- `ub_mem_ptw`：C 线页表遍历器（4 KB 粒度，L0–L3；`mem2host_rd_*` 全宽口，SPEC §14 Q-C07 / Q-A08 / Q-A18 (D20)；读回描述符寄存后交给 `ub_mem_ptw_desc_dec`；块/页合成 4 KB `fill_*`）。公开占位桩 `ub_mem_ptw_desc_dec`（源注释 `contract_sha256: HANDWRITTEN`）。
 - `docs/arch/mem/contracts/`：C 线私有解码叶子公开信号契约（D20 S-01 (b)；docs-only）。
 - `tb/models/ub_pcs_fec.py`：RS(128,120) FEC 编解码黄金模型（UB-PHY §3.2.2.1 / §3.2.3.5，SPEC §2.4 `ub_pcs_fec_enc` / `ub_pcs_fec_dec`；T=4 / T=2 / bypass）。
 - `scripts/impl/buffer_fanout.py`：Yosys JSON 上确定性 `buf_4`/`buf_8` 扇出树（quick-synth 默认在 abc 之后调用）。

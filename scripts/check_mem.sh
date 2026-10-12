@@ -57,8 +57,9 @@ if [[ ! -f "$RTL/stub/ub_mem_ptw_desc_dec.v" ]]; then
   echo "FAIL: placeholder stub missing $RTL/stub/ub_mem_ptw_desc_dec.v"
   exit 1
 fi
-if ! grep -q 'contract_sha256: HANDWRITTEN' "$RTL/stub/ub_mem_ptw_desc_dec.v"; then
-  echo "FAIL: stub header missing contract_sha256: HANDWRITTEN"
+if ! grep -q 'contract_sha256: HANDWRITTEN' \
+  "$ROOT/pycircuit/mem/stub/ub_mem_ptw_desc_dec.py"; then
+  echo "FAIL: stub source missing contract_sha256: HANDWRITTEN"
   exit 1
 fi
 if grep -E '^\s*(input|output).*tb_' "$RTL/ub_mem_tlb.v" "$RTL/ub_mem_inv.v" "$RTL/ub_mem_ptw.v"; then

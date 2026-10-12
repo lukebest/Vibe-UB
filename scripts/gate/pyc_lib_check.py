@@ -34,6 +34,9 @@ from private_leaves import load_private_config
 
 PYC_LIB_DIRNAME = "pyc_lib"
 FALLBACK_PYCLIB_NAMES = frozenset({"pyc_reg"})
+# Report-only while this exact path exists on origin/main. Remove after #5.
+PYCLIB_COPY_ALLOWLIST = ("rtl/common/pyc_reg.v",)
+ALLOWLIST_NOTE = "remove after #5"
 MODULE_RE = re.compile(
     r"^\s*module\s+([A-Za-z_][A-Za-z0-9_]*)\b",
     re.M,
@@ -119,19 +122,34 @@ def check_pyc_lib(
 
     pyc_lib = rtl_root / PYC_LIB_DIRNAME
     if not pyc_lib.is_dir():
-        findings.append(
-            Finding(
-                check=check,
-                module="*",
-                file="rtl/pyc_lib",
-                rule="PYC_LIB_SKIP",
-                message=(
-                    "rtl/pyc_lib/ is not on this tree (lands with #21); "
-                    "byte-compare skipped"
-                ),
-                bucket="report",
+        repo = rtl_root.parent if rtl_root.name == "rtl" else rtl_root
+        if main_has_pyc_lib(repo):
+            findings.append(
+                Finding(
+                    check=check,
+                    module="*",
+                    file="rtl/pyc_lib",
+                    rule="PYC_LIB_MISSING",
+                    message=(
+                        "rtl/pyc_lib/ is required once it exists on origin/main "
+                        "(#21); restore the locked primitive tree"
+                    ),
+                )
             )
-        )
+        else:
+            findings.append(
+                Finding(
+                    check=check,
+                    module="*",
+                    file="rtl/pyc_lib",
+                    rule="PYC_LIB_SKIP",
+                    message=(
+                        "rtl/pyc_lib/ is not on this tree or origin/main "
+                        "(lands with #21); byte-compare skipped"
+                    ),
+                    bucket="report",
+                )
+            )
         return findings
 
     if lock_src is None or not lock_src.is_dir():
@@ -183,6 +201,31 @@ def check_pyc_lib(
                 )
             )
     return findings
+
+
+def _git_path_on_main(root: Path, rel_posix: str) -> bool:
+    proc = run_cmd(["git", "cat-file", "-e", f"origin/main:{rel_posix}"], cwd=root)
+    return proc.returncode == 0
+
+
+def main_has_pyc_lib(root: Path) -> bool:
+    flag = load_private_config(root).get("pyc_lib_on_main")
+    if flag is True or flag is False:
+        return bool(flag)
+    return _git_path_on_main(root, "rtl/pyc_lib")
+
+
+def main_has_path(root: Path, rel_posix: str) -> bool:
+    key = "pyclib_copy_on_main"
+    cfg = load_private_config(root).get(key)
+    if isinstance(cfg, dict) and rel_posix in cfg:
+        return bool(cfg[rel_posix])
+    return _git_path_on_main(root, rel_posix)
+
+
+def stale_pyclib_copy_allowlist(root: Path) -> list[str]:
+    """Allowlist paths that origin/main no longer has — delete the entry."""
+    return [p for p in PYCLIB_COPY_ALLOWLIST if not main_has_path(root, p)]
 
 
 def pyclib_single_required(root: Path) -> bool:
@@ -285,6 +328,11 @@ def check_pyclib_copies(root: Path, rtl_root: Path, bucket: str) -> list[Finding
                 reasons.append("defines module " + "/".join(defined))
         if not reasons:
             continue
+        copy_bucket = bucket
+        note = ""
+        if rel_posix in PYCLIB_COPY_ALLOWLIST and main_has_path(root, rel_posix):
+            copy_bucket = "report"
+            note = f" ({ALLOWLIST_NOTE})"
         findings.append(
             Finding(
                 check="emit",
@@ -295,9 +343,10 @@ def check_pyclib_copies(root: Path, rtl_root: Path, bucket: str) -> list[Finding
                     "second copy of an rtl/pyc_lib primitive ("
                     + "; ".join(reasons)
                     + "); keep the single copy in rtl/pyc_lib/"
+                    + note
                 ),
-                bucket=bucket,
-                severity="error" if bucket == "new" else "warning",
+                bucket=copy_bucket,
+                severity="error" if copy_bucket == "new" else "warning",
             )
         )
     findings.sort(key=lambda f: f.file)

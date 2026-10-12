@@ -35,7 +35,12 @@ from gatelib import (
 from hooks_port_consistency import compare_ports
 from large_mem_manifest import check_large_mem_manifest
 from lint import lint_module, lint_sources_for, parse_verilator
-from pyc_lib_check import check_pyc_lib, check_pyclib_single
+from pyc_lib_check import (
+    ALLOWLIST_NOTE,
+    check_pyc_lib,
+    check_pyclib_single,
+    stale_pyclib_copy_allowlist,
+)
 from pycircuit_provenance import static_splice_check
 from private_selftest import run_all as run_private_selftests
 from rtl_emit_consistency import (
@@ -248,6 +253,18 @@ def test_pyc_lib_skip_missing_dir() -> None:
             _fail("pyc-lib-skip-missing", "must not introduce blocking findings")
 
 
+def test_pyc_lib_missing_hard_after_main() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        rtl = root / "rtl"
+        rtl.mkdir(parents=True)
+        _write_gate_yml(root, "pyc_lib_on_main", True)
+        hits = check_pyc_lib(rtl, lock_src=None)
+        hit = _expect_rule("pyc-lib-missing-hard", hits, "PYC_LIB_MISSING")
+        if hit.bucket != "new":
+            _fail("pyc-lib-missing-hard", "must block once origin/main has rtl/pyc_lib")
+
+
 def _write_gate_yml(root: Path, key: str, value: bool) -> None:
     yml = root / "scripts" / "gate" / "private_leaves.yml"
     yml.parent.mkdir(parents=True, exist_ok=True)
@@ -313,6 +330,54 @@ def test_pyclib_single_fetch_and_report() -> None:
         if hits:
             _fail("pyclib-fetch-skip-selftest", "gate selftest fixtures are excluded")
         print("SELFTEST PASS pyclib-fetch-skip-selftest: scripts/gate selftest ignored")
+
+
+def test_pyclib_copy_allowlist_transitional() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        rtl = root / "rtl"
+        _v(rtl / "pyc_lib" / "pyc_reg.v", "pyc_reg", "input clk")
+        _v(rtl / "common" / "pyc_reg.v", "pyc_reg", "input clk")
+        _write_gate_yml(root, "pyclib_single_required", True)
+        yml = root / "scripts" / "gate" / "private_leaves.yml"
+        yml.write_text(
+            yml.read_text(encoding="utf-8")
+            + "pyclib_copy_on_main:\n  rtl/common/pyc_reg.v: true\n",
+            encoding="utf-8",
+        )
+        hit = _expect_rule(
+            "pyclib-allowlist-report",
+            check_pyclib_single(root, rtl),
+            "PYCLIB_COPY",
+        )
+        if hit.file != "rtl/common/pyc_reg.v":
+            _fail("pyclib-allowlist-report", hit.file)
+        if hit.bucket != "report":
+            _fail("pyclib-allowlist-report", "allowlisted copy must stay report-only")
+        if ALLOWLIST_NOTE not in hit.message:
+            _fail("pyclib-allowlist-report", hit.message)
+        if stale_pyclib_copy_allowlist(root):
+            _fail("pyclib-allowlist-report", "entry is live on this fixture main")
+
+        yml.write_text(
+            "leaves: []\npyclib_single_required: true\n"
+            "pyclib_copy_on_main:\n  rtl/common/pyc_reg.v: false\n",
+            encoding="utf-8",
+        )
+        stale = stale_pyclib_copy_allowlist(root)
+        if "rtl/common/pyc_reg.v" not in stale:
+            _fail(
+                "pyclib-allowlist-stale",
+                "missing file on main must remind to delete the allowlist entry",
+            )
+        hit = _expect_rule(
+            "pyclib-allowlist-stale-blocks",
+            check_pyclib_single(root, rtl),
+            "PYCLIB_COPY",
+        )
+        if hit.bucket != "new":
+            _fail("pyclib-allowlist-stale-blocks", "gone from main → normal blocking")
+        print("SELFTEST PASS pyclib-allowlist-stale: delete entry after #5")
 
 
 def test_pyc_lib_byte_diff() -> None:
@@ -1519,9 +1584,11 @@ def main() -> int:
         test_manifest_unproducible,
         test_stray_pyc_reg,
         test_pyc_lib_skip_missing_dir,
+        test_pyc_lib_missing_hard_after_main,
         test_pyc_lib_byte_diff,
         test_pyclib_single_copy_and_ok,
         test_pyclib_single_fetch_and_report,
+        test_pyclib_copy_allowlist_transitional,
         test_unlisted_tb_obs,
         test_obs_must_be_output,
         test_sby_bind_missing_signal,

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from pycircuit import Circuit, module, u
 
-from mem.lib.bits import mux
+from mem.lib.bits import ex, mux
 from mem.lib.params import (
     AP_W,
     ATTR_W,
@@ -42,6 +42,7 @@ from mem.lib.params import (
     MATT_BA_W,
     MATTR_W,
     PA_W,
+    PAGE_LSB,
     PAGE_W,
     PFN_W,
     RAW_W,
@@ -59,7 +60,6 @@ from mem.lib.walk import (
     inst_desc_dec,
     leaf_pfn,
     next_walk_addr,
-    req_page,
     sel_attr_byte,
     start_lvl,
 )
@@ -110,7 +110,8 @@ def _ptw_body(m: Circuit, test_hooks: int = 0) -> None:
 
     ent_q = m.out("ent_q", clk=clk, rst=rst, width=ENT_IDX_W, init=u(ENT_IDX_W, 0), en=1)
     tok_q = m.out("tok_q", clk=clk, rst=rst, width=TOKEN_W, init=u(TOKEN_W, 0), en=1)
-    uba_q = m.out("uba_q", clk=clk, rst=rst, width=UBA_W, init=u(UBA_W, 0), en=1)
+    # 只存页号 [47:12]（36 bit）；低 12 / 高 16 不进寄存器。
+    uba_q = m.out("uba_q", clk=clk, rst=rst, width=PAGE_W, init=u(PAGE_W, 0), en=1)
     mattr0_q = m.out("mattr0_q", clk=clk, rst=rst, width=MATTR_W, init=u(MATTR_W, 0), en=1)
     mattr1_q = m.out("mattr1_q", clk=clk, rst=rst, width=MATTR_W, init=u(MATTR_W, 0), en=1)
     affd_q = m.out("affd_q", clk=clk, rst=rst, width=1, init=u(1, 0), en=1)
@@ -176,7 +177,9 @@ def _ptw_body(m: Circuit, test_hooks: int = 0) -> None:
     kind_ok = is_table | is_leaf
     lvl_l3 = lvl_q.out() == u(DESC_LVL_W, LVL_L3)
     nxt_lvl = lvl_q.out() + u(DESC_LVL_W, 1)
-    naddr = next_walk_addr(m, dec["desc_addr"], uba_q.out(), nxt_lvl)
+    uba_page = uba_q.out()
+    uba_ext = m.cat(u(UBA_W - PAGE_W - PAGE_LSB, 0), uba_page, u(PAGE_LSB, 0))
+    naddr = next_walk_addr(m, dec["desc_addr"], uba_ext, nxt_lvl)
 
     to_flt_ill = dec_fire & dec["desc_illegal"]
     # SPEC §14：desc_v=1 且 kind 不是 table/block/page 走翻译故障（与 !desc_v 同 flt_xlat）。
@@ -249,7 +252,7 @@ def _ptw_body(m: Circuit, test_hooks: int = 0) -> None:
 
     ent_q.set(req_ent_idx, when=do_req)
     tok_q.set(req_token_id, when=do_req)
-    uba_q.set(req_uba, when=do_req)
+    uba_q.set(ex(m, req_uba, PAGE_LSB, PAGE_W), when=do_req)
     mattr0_q.set(ctx_mattr0, when=do_req)
     mattr1_q.set(ctx_mattr1, when=do_req)
     affd_q.set(ctx_affd, when=do_req)
@@ -258,9 +261,9 @@ def _ptw_body(m: Circuit, test_hooks: int = 0) -> None:
     addr_q.set(mux(m, to_next, naddr, saddr), when=do_req | to_next)
     raw_q.set(desc_raw64(m, rd_rsp_data, addr_q.out()), when=to_dec)
 
-    pfn_now = leaf_pfn(m, dec["desc_addr"], uba_q.out(), kind, lvl_q.out())
+    pfn_now = leaf_pfn(m, dec["desc_addr"], uba_ext, kind, lvl_q.out())
     attr_now = sel_attr_byte(m, mattr0_q.out(), mattr1_q.out(), dec["desc_attr_idx"])
-    page_now = req_page(m, uba_q.out())
+    page_now = uba_page
     pfn_q.set(pfn_now, when=to_fill)
     page_q.set(page_now, when=to_fill)
     attr_q.set(attr_now, when=to_fill)

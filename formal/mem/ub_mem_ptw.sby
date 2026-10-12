@@ -21,8 +21,8 @@
 # proven — not a waiver). Manual: `sby -f ub_mem_ptw.sby prove`.
 # Status: bmc 24 PASS, prove not converged.
 # k=20: basecase PASS, induction FAIL (step 0). CEX start is unreachable
-# (reset deasserted; walker in st_dec with rd_valid_q=1;
-# mem2host_rd_addr all-1s vs internal addr reg 0).
+# (reset deasserted; pyc_reg_45 multi-hot st_idle+st_rd+st_dec+st_fill
+# with rd_valid_q=0; addr_q=0 vs property shadow f_rd_addr_q MSB set).
 # #48 b522fd6: HOOKS obs ports + mem2host_rd_addr = addr_q
 # (rd_addr_q dropped; first mem2host_rd_valid is +1 cycle after
 # accept). State auxiliaries live only in ub_mem_ptw_hooks.sby (#55).

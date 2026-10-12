@@ -46,6 +46,7 @@ smtbmc yices
 [script]
 read -formal ub_mem_ptw.v
 read -formal ub_mem_ptw_if_props.sv
+read -formal ub_mem_ptw_blk_exp.sv
 read -formal ub_mem_ptw_hooks_inv.sv
 read -formal ub_mem_ptw_hooks_harness.sv
 # Only definition of ub_mem_ptw_desc_dec is the cut. Walker file
@@ -54,14 +55,23 @@ read -formal ub_mem_ptw_hooks_harness.sv
 # Do not blackbox (sby prep flatten errors).
 read -formal ub_mem_ptw_desc_dec.sv
 hierarchy -check -top ub_mem_ptw_hooks_harness
+cd ub_mem_ptw_desc_dec
+setattr -mod -set keep_hierarchy 1
+cd ..
 proc
 flatten
+# Tap decoder public ports by instance name (u_dut.u_desc_dec).
+connect -set \u_blk_exp.out_valid \u_dut.u_desc_dec.out_valid
+connect -set \u_blk_exp.desc_addr \u_dut.u_desc_dec.desc_addr
+connect -set \u_blk_exp.desc_kind \u_dut.u_desc_dec.desc_kind
+connect -set \u_blk_exp.desc_lvl \u_dut.u_desc_dec.desc_lvl
 opt
 memory -nomap
 opt -purge
 
 [files]
 ub_mem_ptw_if_props.sv
+ub_mem_ptw_blk_exp.sv
 ub_mem_ptw_hooks_inv.sv
 ub_mem_ptw_hooks_harness.sv
 cut/ub_mem_ptw_desc_dec.sv

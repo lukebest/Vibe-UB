@@ -57,6 +57,7 @@ LAYER_SKIP = {
     "include",
     "__pycache__",
     "lib",
+    "stub",
     "tests",
     "out",
     "filelists",
@@ -400,13 +401,21 @@ def load_approvers() -> set[str]:
     names: set[str] = set()
     for row in data.get("gatekeepers") or []:
         login = str(row.get("login") or "").strip()
+        name = str(row.get("name") or "").strip()
         role = str(row.get("role") or "").strip().lower()
-        if login and role in {"verification", "verif", "gatekeeper", "工具守门"}:
-            names.add(login)
+        ok = row.get("gatekeeper") is True or role in {
+            "verification",
+            "verif",
+            "gatekeeper",
+            "工具守门",
+            "验证",
+        }
+        if not ok:
+            continue
         if login:
-            # login is accepted only when marked as the verification gatekeeper
-            if row.get("gatekeeper") is True or role:
-                names.add(login)
+            names.add(login)
+        if name:
+            names.add(name)
     return names
 
 
@@ -449,6 +458,30 @@ def _load_approved_list(path: Path, key: str, kind: str) -> list[dict[str, Any]]
 def load_handwritten() -> list[dict[str, Any]]:
     """Approved handwritten SV entries from scripts/gate/handwritten.yml."""
     return _load_approved_list(HANDWRITTEN_LIST, "entries", "HANDWRITTEN")
+
+
+def is_pyc_lib_path(path: Path | str) -> bool:
+    """True for files under ``rtl/pyc_lib/`` (any absolute or relative path)."""
+    return "pyc_lib" in {p.lower() for p in Path(path).parts}
+
+
+def is_library_primitive_path(path: Path | str, rules: dict | None = None) -> bool:
+    """pycc runtime primitives: pin names stay as the locked cell (clk, not core_clk)."""
+    if is_pyc_lib_path(path):
+        return True
+    rels = str(path).replace("\\", "/")
+    try:
+        rels = rel(path)
+    except Exception:
+        pass
+    rels = rels.replace("\\", "/")
+    for raw in (rules or {}).get("library_primitive_dirs") or ():
+        d = str(raw).replace("\\", "/").rstrip("/")
+        if not d:
+            continue
+        if rels == d or rels.startswith(d + "/"):
+            return True
+    return False
 
 
 def is_handwritten_path(path: Path) -> bool:

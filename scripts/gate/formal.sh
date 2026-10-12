@@ -9,7 +9,8 @@ source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
 python3 -P "$GATE_DIR/formal_bind.py"
 
-mapfile -t SBY_FILES < <(find "$REPO_ROOT/formal" -type f -name '*.sby' 2>/dev/null | sort || true)
+# formal/<iface>/*.sby only (GATE-FOR-002); PRIVATE_SKIP on stderr.
+mapfile -t SBY_FILES < <(python3 -P "$GATE_DIR/private_leaves.py" --list-sby)
 
 if [[ ${#SBY_FILES[@]} -eq 0 ]]; then
   echo "no assertions yet"
@@ -25,12 +26,23 @@ fi
 
 fail=0
 for sby in "${SBY_FILES[@]}"; do
-  echo "=== sby -f ${sby#"$REPO_ROOT/"} ==="
-  if ! sby -f "$sby"; then
+  sby_dir=$(dirname "$sby")
+  sby_base=$(basename "$sby")
+  rel_sby=${sby#"$REPO_ROOT/"}
+  echo "=== sby -f ${rel_sby} (cwd ${sby_dir#"$REPO_ROOT/"}) ==="
+  # [files] tokens are sibling-relative, same as `make -C formal` (`cd iface && sby`).
+  if ! (cd "$sby_dir" && sby -f --sequential "$sby_base"); then
     echo "formal FAIL: $sby"
     fail=1
   fi
 done
+
+# GATE-FORMAL-DEPTH (3): bmc >= deepest cover + 6. Report-only.
+python3 -P "$GATE_DIR/formal_depth.py"
+# GATE-PRIVATE-PARENT-FREE: default tasks must not assume private leaf outputs.
+if ! python3 -P "$GATE_DIR/formal_parent_free.py"; then
+  fail=1
+fi
 
 if [[ "$fail" -ne 0 ]]; then
   echo "formal: FAIL (one or more .sby jobs failed)"

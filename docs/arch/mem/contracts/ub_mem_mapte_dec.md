@@ -38,6 +38,23 @@ ports:
   - {name: mapte_ill_cause, dir: out, width: 4, desc: 共用非法原因码}
 params: []
 ill_cause_width: 4
+assertions:
+  - AP_MAPTE_CLK
+  - AP_MAPTE_HS_IN
+  - AP_MAPTE_HS_OUT
+  - AP_MAPTE_ILL_2MB
+  - AP_MAPTE_ILL_AD
+  - AP_MAPTE_ILL_EQ
+  - AP_MAPTE_ILL_OBLK
+  - AP_MAPTE_ILL_PRI
+  - AP_MAPTE_ILL_ZERO
+  - AP_MAPTE_IN_RDY_RST
+  - AP_MAPTE_LAT1
+  - AP_MAPTE_LVL
+  - AP_MAPTE_OUT_HOLD
+  - AP_MAPTE_RDY
+  - AP_MAPTE_RST
+  - AP_MAPTE_SINGLE_LAST
 status: draft
 ```
 

@@ -31,6 +31,26 @@ ports:
   - {name: desc_ill_cause, dir: out, width: 4, desc: 共用非法原因码}
 params: []
 ill_cause_width: 4
+assertions:
+  - AP_PTW_AF
+  - AP_PTW_BLOCK
+  - AP_PTW_CLK
+  - AP_PTW_FAULT
+  - AP_PTW_HS_IN
+  - AP_PTW_HS_OUT
+  - AP_PTW_ILL_AD
+  - AP_PTW_ILL_EQ
+  - AP_PTW_ILL_PRI
+  - AP_PTW_ILL_ZERO
+  - AP_PTW_IN_RDY_RST
+  - AP_PTW_KIND
+  - AP_PTW_KIND_LVL
+  - AP_PTW_LAT1
+  - AP_PTW_LVL
+  - AP_PTW_OUT_HOLD
+  - AP_PTW_RDY
+  - AP_PTW_RST
+  - AP_PTW_XCLASS
 status: draft
 ```
 

@@ -4,6 +4,9 @@
 
 ### Added
 
+- `pycircuit/cmn/ub_cmn_mem_1r1w.py` → `rtl/cmn/` 与 `rtl/cmn/hooks/` 的 `ub_cmn_mem_1r1w_{d5w8,d8w16,d64w64m16}.v`：pycc 固定网表（SPEC §2.2，`d<DEPTH>w<WIDTH>`，N>1 加 `m<WMASK_W>`）。PRODUCT=`TEST_HOOKS=0`，HOOKS=`TEST_HOOKS=1`；§10 无 `tb_*`，两套端口与模块名相同。时钟 `core_clk`；无复位口（业务叶标准名 `rst_pyc`，本原语不引出）。生成参数 `WMASK_W`（默认 = `WIDTH`，整字写；`WIDTH` 须整除）；N=`WIDTH/WMASK_W`>1 时多 `wmask[N-1:0]`，bit i 写段 i，其余段保持；同址同拍 per-segment read-old。1R1W、读 1 拍；阵列与 `rdata` 无复位 / 无零初始化；越界不截断。`scripts/emit_rtl.py` / `make emit` 再现。较大 C 线变体（如 `d512w512m64`）不在本登记表，可经清单流后补。pycc 运行时原语（`pyc_reg.v`）只放 `rtl/pyc_lib/`，从 TOOLCHAIN 钉住的 pyCircuit（`43cc5918`）原样拷贝；层目录不再放 `pyc_*`。
+- `model/ub_cmn_mem_1r1w.py` + `formal/cmn/`：1R1W 存储原语参考模型与接口断言（CODING_STYLE §10 / PR #20 时序提案；`ASSERT_NO_UNINIT_READ` 默认 1；formal 用 anyconst 单地址抽象）。
+- `scripts/gate/handwritten.yml`：`HW-PYC-REG`（`rtl/pyc_lib/pyc_reg.v`，批准人 验证）；免 emit-consistency / hooks / equiv，仍走 lint 与 Yosys。
 - `docs/arch/pcs/UARCH.md`：线 A 本批三叶（`ub_pcs_nullblk_det` / `ub_pcs_amctl_rx` / `ub_pcs_amctl_cw_dec`）。§3 表头与列同 `docs/arch/mem/UARCH.md`，供契约门禁认 `parent`（#47 `PARENT_UNKNOWN`）。
 - `docs/arch/pcs/contracts/ub_pcs_amctl_cw_dec.md`：YAML 头按 main 上 `docs/arch/mem/contracts/README.md` §8 固定键（#43 已合入 `5b0b9fc3`）。船长确认走 C 线 S-01(b)。单 lane、1 拍寄存、无 `comb_budget_ns`。口与项目枚举、`pcs_rx_sdf_seen` t/t+1/t+2 见契约与清单。
 - `docs/arch/MODULE_INVENTORY.md`：`ub_pcs_amctl_rx` 对私有叶输出的稳健性——任意 `cw_dec` 输出须保持合法状态；formal 把 `cw_dec` 出口当自由输入，默认任务无契约 assume。限定场/`*_ok` 仅 `amctl_vld=1` 采用；`amctl_vld=1` 且 `ctrl_ok=0` 或 `lid_ok=0` 视为非 AMCTL（不置 SDF/EDF、不更新 LID）。

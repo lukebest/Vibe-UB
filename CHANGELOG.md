@@ -25,7 +25,7 @@
 
 ### Changed
 
-- 门禁（#21 对接）：lint 不再把 `rtl/pyc_lib/` 原语既 `-I` 又当第二份源（`MODDUP`）；cdc 对 `rtl/pyc_lib/` 的 `clk` 不报 `CLOCK_NOT_CORE`（产品叶子仍必须 `core_clk`）；`formal.sh` 在 `.sby` 目录跑 `sby`（`[files]` 同目录相对路径，与 `make -C formal` 一致），缺文件报 `SBY_FILE_MISSING` 不抛异常；tb-selfcheck 按 `TOOLCHAIN.lock` 安装/要求 Verilator，`model/` / `tb/cmn` / `tb/models` 分别计数，pytest skip 即失败。provenance 维持 AST-only，重生成逐字节仍走 `scripts/emit_rtl.py`（不采纳自制 pycc argv 比对）。
+- 门禁（#21 对接）：lint 不再把 `rtl/pyc_lib/` 原语既 `-I` 又当第二份源（`MODDUP`）；cdc 对 `rtl/pyc_lib/` 的 `clk` 不报 `CLOCK_NOT_CORE`（产品叶子仍必须 `core_clk`）；`formal.sh` 在 `.sby` 目录跑 `sby`（`[files]` 同目录相对路径，与 `make -C formal` 一致），缺文件报 `SBY_FILE_MISSING` 不抛异常；CI 用 `setup_sby.sh` 装 YosysHQ/sby + z3（apt 没有 sby 包）；tb-selfcheck 按 `TOOLCHAIN.lock` 安装/要求 Verilator，`model/` / `tb/cmn` / `tb/models` 分别计数，pytest skip 即失败。provenance 维持 AST-only，重生成逐字节仍走 `scripts/emit_rtl.py`（不采纳自制 pycc argv 比对）。
 - SPEC §2.6：BCRC `last` 拍给出 `crc_word` 后 CRC 寄存器回到初值全 1；块首未带 `start` 的 `valid_in` 按全 1 计入，块中间未带 `start` 的 `valid_in` 接着当前 CRC 折入。上游仍应在每块首 flit 给 `start`。
 - synth-check：按 cell 类型（`$adff`/`$adffe`/`$dffsr` 等）识别异步复位触发器，对所有模块生效，不算 LATCH（豁免只作用于 LATCH，不跳过该行的 MULTI_DRIVE / COMBO_LOOP）。SCC 只对组合单元建图。真 latch、真组合环、异步 FF+真组合环三个假网表仍报失败。
 - SPEC §2.2：pyCircuit 源码目录与导入（已定）——叶子 `pycircuit/<层>/<leaf>.py`，门禁只扫该层 `*.py`（跳过 `lib/` 与 `__init__.py`）；同层 helper 在 `pycircuit/<层>/lib/` 不出网表；导入根 `pycircuit/`（`from <层>.lib import ...`），门禁 / `emit_rtl.py` / tb 把 `pycircuit/` 置于 `PYTHONPATH` 最前；仓库根目录不进 `sys.path`；工具按脚本路径调用。门禁细则见 `docs/rules/verif_gate.md`（PR #33）。架构 Xia 与守门人验证 2026-10-10 共同定。

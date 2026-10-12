@@ -24,6 +24,7 @@ scripts/gate/out/
 .pycircuit-src/
 .pycircuit_out/
 .pycircuit-venv/
+.sby-src/
 formal/**/*.sby_*
 *.sbydir/
 

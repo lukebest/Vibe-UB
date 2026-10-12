@@ -392,6 +392,14 @@ def test_cdc_pyc_lib_clk_not_core() -> None:
     _expect_rule("cdc-product-clk", prod_hits, "CLOCK_NOT_CORE")
 
 
+def test_setup_sby_refuses_missing_z3_note() -> None:
+    setup = Path(__file__).resolve().parent / "setup_sby.sh"
+    text = setup.read_text(encoding="utf-8")
+    if "SBY_REF" not in text or "z3" not in text:
+        _fail("setup-sby", "setup_sby.sh must pin a sby ref and require z3")
+    print("SELFTEST PASS setup-sby: pin + z3 required")
+
+
 def test_sby_relative_and_missing() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         repo = Path(tmp)
@@ -1010,6 +1018,7 @@ def main() -> int:
         test_lint_pyc_lib_not_passed_twice,
         test_lint_moddup_still_caught,
         test_cdc_pyc_lib_clk_not_core,
+        test_setup_sby_refuses_missing_z3_note,
         test_sby_relative_and_missing,
         test_tb_requires_verilator,
         test_tb_skip_is_fail,

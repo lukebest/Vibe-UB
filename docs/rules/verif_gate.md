@@ -217,7 +217,7 @@ M1 单时钟 `core_clk`（SPEC §4.1）。`rst_n` 异步置位、同步释放，
 | GATE-FOR-004 | `formal/**/*.sby` 及其引用的断言里，`bind` 的每个信号必须在对应网表中存在；找不到即拦 | PM | 2026-10-10 |
 | GATE-FOR-005 | `[files]` 里的相对路径先相对 `.sby` 目录解析；找不到报 `SBY_FILE_MISSING`，不得抛 `FileNotFoundError` | #21 cmn.sby | 2026-10-12 |
 
-有 `.sby` 但机器上没有 `sby`：失败（不得假装跑过）。
+有 `.sby` 但机器上没有 `sby`：失败（不得假装跑过）。ubuntu-24.04 的 apt 没有 `sby` 包；CI 用 `scripts/gate/setup_sby.sh` 装 YosysHQ/sby（默认 `v0.69`）并要求 `z3`（`smtbmc z3`）。`apt-get install sby || true` 不够。
 
 ---
 

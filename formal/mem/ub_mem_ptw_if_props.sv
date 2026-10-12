@@ -364,28 +364,10 @@ module ub_mem_ptw_if_props (
       // busy is ~idle; req_ready is idle.
       a_busy_nidle: assert (busy == !req_ready);
 
-      // One-hot port image of the walker (idle / fill / flt / evt).
-      // ST_RD / ST_DEC are the quiet-busy remainder.
-      a_idle_excl: assert (
-        !req_ready ||
-        (!fill_valid && !flt_valid && !evt_valid &&
-         !mem2host_rd_valid && !mem2host_rd_rsp_ready)
-      );
-      a_fill_excl: assert (
-        !fill_valid ||
-        (!req_ready && !flt_valid && !evt_valid &&
-         !mem2host_rd_valid && !mem2host_rd_rsp_ready)
-      );
-      a_flt_excl: assert (
-        !flt_valid ||
-        (!req_ready && !fill_valid && !evt_valid &&
-         !mem2host_rd_valid && !mem2host_rd_rsp_ready)
-      );
-      a_evt_excl: assert (
-        !evt_valid ||
-        (!req_ready && !fill_valid && !flt_valid &&
-         !mem2host_rd_valid && !mem2host_rd_rsp_ready)
-      );
+      // Port one-hot (idle/fill/flt/evt) is not inductive on PRODUCT:
+      // induction starts multi-hot in pyc_reg_45[5:0] (st_*). That
+      // image lives on HOOKS as tb_mem_ptw_obs_st / a_st_legal.
+
       // rd_valid_q and rd_sent are mutex; rsp_ready = st_rd & rd_sent.
       a_rd_valid_excl: assert (
         !mem2host_rd_valid ||

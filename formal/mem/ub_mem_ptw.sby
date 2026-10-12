@@ -20,7 +20,9 @@
 # prove is defined but not tagged `default` (gatekeeper: not fully
 # proven — not a waiver). Manual: `sby -f ub_mem_ptw.sby prove`.
 # Status vs #48 7f35b31: cover PASS; bmc 24 PASS (1s); prove
-# untagged (tracker consistency aux in progress).
+# UNKNOWN (induction FAIL a_matt_no_fill at k=20, 1s) — not default.
+# Hole is multi-hot st_* (pyc_reg_45[5:0]); needs HOOKS obs_st.
+# HOOKS prove converged (see ub_mem_ptw_hooks.sby).
 # State auxiliaries live only in ub_mem_ptw_hooks.sby (#55), on a
 # fully free decoder cut. Encoding table is SPEC §10. Hooks-port
 # registration lands in #50.

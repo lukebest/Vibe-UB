@@ -4,6 +4,7 @@
 
 ### Added
 
+- `docs/arch/pcs/UARCH.md`：线 A 本批三叶（`ub_pcs_nullblk_det` / `ub_pcs_amctl_rx` / `ub_pcs_amctl_cw_dec`）。§3 表头与列同 `docs/arch/mem/UARCH.md`，供契约门禁认 `parent`（#47 `PARENT_UNKNOWN`）。
 - `docs/arch/pcs/contracts/ub_pcs_amctl_cw_dec.md`：YAML 头按 main 上 `docs/arch/mem/contracts/README.md` §8 固定键（#43 已合入 `5b0b9fc3`）。船长确认走 C 线 S-01(b)。单 lane、1 拍寄存、无 `comb_budget_ns`。口与项目枚举、`pcs_rx_sdf_seen` t/t+1/t+2 见契约与清单。
 - `docs/arch/MODULE_INVENTORY.md`：Xia 裁定 2026-10-12 关闭 `ub_pcs_amctl_rx` 三条 MISSING。M1：无分 lane valid，锁定按 UB-PHY §3.2.4.4 在叶内做，`pcs_am_locked` = 已配置 lane 全锁定。M2：公开只写识别/场语义（表 3-7、「AMCTL Identification Mechanism」）；码字解码进私有叶 `ub_pcs_amctl_cw_dec`（S-01(b)，船长已确认）。M3：SDF/EDF 按 `CTRL_TYPE`/`CTRL_DETAIL`（§3.2.4.2「AMCTL Controlling」）。`pcs_rx_lid[3:0]` 公开只称 `LID_NULL`。不抄码字/CW/符号下标。
 - `docs/arch/MODULE_INVENTORY.md`：`ub_pcs_amctl_rx` 完备性核对表（端口 / AMCTL 识别 / SDF / 已配置 lane / `pcs_rx_lid[3:0]`+`pcs_rx_lid_vld`）。scrambler placeholder 期 LID 口 Tie，waiver `placeholder, D20`。

@@ -1,6 +1,6 @@
 # 模块清单
 
-本文件只收当前需要冻结的叶子。其余层/叶子后续补行。LMSM↔PCS 口表在 SPEC §3.3.4（仓库无 `LAYER_CONTRACTS`）。
+本文件只收当前需要冻结的叶子。其余层/叶子后续补行。LMSM↔PCS 口表在 SPEC §3.3.4（仓库无 `LAYER_CONTRACTS`）。PCS 本批三叶的 §3 表见 [pcs/UARCH.md](pcs/UARCH.md)。
 
 命名：`ub_<层>_<功能>`（[CODING_STYLE.md](../CODING_STYLE.md) §5）。PCS 已有叶子用协议词作一段：`ub_pcs_amctl_tx` / `ub_pcs_deskew` / `ub_pcs_lane_dist`。本叶用 `ub_pcs_nullblk_det`（`nullblk` 一段，`det` = 检测）。
 

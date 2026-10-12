@@ -416,7 +416,7 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 | GATE-CONTRACT-001 | `scripts/gate/contract_hash.py`：`yaml.safe_load` 后 `json.dumps(obj, sort_keys=True, separators=(',',':'), ensure_ascii=False)` 的 UTF-8 再 sha256。全部字段参与（含 `assertions`）。列表顺序保留。缩进 / 注释 / 正文不改变 digest | 本分册 | 2026-10-12 |
 | GATE-CONTRACT-002 | 字段缺失或类型不符 → FAIL。`parent` 必须等于该层 `UARCH.md` **§3 叶子表「叶子」列**某一行（去反引号 / 空白后全等）。描述列、其它列、正文、以及同一格 `+` 后面的名字都不算。缺行 → `PARENT_UNKNOWN`（拦）。`MODULE_INVENTORY` 仍可补 | README §8 / PM | 2026-10-12 |
 | GATE-CONTRACT-003 | `comb_budget_ns`：组合 / 0 拍叶子缺 → FAIL；寄存叶子带了 → FAIL | Xia | 2026-10-12 |
-| GATE-CONTRACT-004 | 正文出现 YAML `assertions` 未收录的 `` `AP_*` `` → `CONTRACT_ASSERT_UNLISTED`（warn / report-only） | 本分册 | 2026-10-12 |
+| GATE-CONTRACT-004 | `assertions:` 必填且非空。缺 / 空列表 → `CONTRACT_FIELD_MISSING`。正文 `` `AP_*` `` 未列入 → `CONTRACT_ASSERT_UNLISTED`；YAML 有、正文无 → `CONTRACT_ASSERT_UNUSED`。切换：`docs/arch/*/contracts/README.md` §8 行写 `` `assertions` `` 且含「必填」（#49 标记）后改为拦截；之前 report-only。`private_leaves.yml` `assertions_required: true\|false` 可覆盖 | Xia / PM | 2026-10-12 |
 | GATE-PRIV-001 | `scripts/gate/private_leaves.yml` 登记私有叶子 | D20 | 2026-10-12 |
 | GATE-PRIV-002 | `gen_private_stub.py` 写 `pycircuit/<layer>/stub/<leaf>.py`，经 pycc 生成 `rtl/<layer>/stub/<leaf>.v`（D5，不手写拼 Verilog）。`.py` 与 `.v` 头两行：`contract_sha256: <hex>`、`generated-by: scripts/gate/gen_private_stub.py`。门禁核 `.v` 头 hash == 当前契约 | D5 | 2026-10-12 |
 | GATE-PRIV-003 | 手写占位桩同路径、头写 `contract_sha256: HANDWRITTEN`。脚本进 main 前 report-only，之后 FAIL | PM | 2026-10-12 |

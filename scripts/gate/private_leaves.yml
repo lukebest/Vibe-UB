@@ -1,4 +1,5 @@
 # S-01(b) private leaves. Bit layout stays in the private repo.
 # Public tree: contract + pyCircuit/RTL stub + reports/private/<layer>/<leaf>.yml.
 # Empty until contracts land on main (#43).
+# assertions_required: auto  # true|false overrides README §8「必填」switch (#49)
 leaves: []

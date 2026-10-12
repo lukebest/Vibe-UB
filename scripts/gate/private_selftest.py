@@ -212,6 +212,117 @@ def test_parent_description_not_row() -> None:
         )
 
 
+def _set_assertions_required(root: Path, value: bool) -> None:
+    yml = root / "scripts" / "gate" / "private_leaves.yml"
+    yml.parent.mkdir(parents=True, exist_ok=True)
+    prev = yml.read_text(encoding="utf-8") if yml.is_file() else "leaves: []\n"
+    yml.write_text(prev + f"assertions_required: {str(value).lower()}\n", encoding="utf-8")
+
+
+def test_assertions_required_ok_and_missing() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _write_uarch(root, SECTION3_EXACT)
+        _set_assertions_required(root, True)
+        path = _write_contract(root, VALID_YAML)
+        data, errs = parse_contract_file(path, root)
+        if errs or data is None:
+            _fail("assert-ok", f"parse failed: {errs}")
+        hits = validate_contract(data, root)
+        _expect_none("assert-ok", hits, "CONTRACT_FIELD_MISSING")
+        _expect_none("assert-ok", hits, "CONTRACT_ASSERT_UNLISTED")
+        _expect_none("assert-ok", hits, "CONTRACT_ASSERT_UNUSED")
+
+        missing = VALID_YAML.replace(
+            "assertions:\n  - AP_TOY_CLK\n  - AP_TOY_HS\n",
+            "",
+        )
+        path = _write_contract(root, missing)
+        data, _ = parse_contract_file(path, root)
+        assert data is not None
+        hit = _expect(
+            "assert-missing",
+            validate_contract(data, root),
+            "CONTRACT_FIELD_MISSING",
+        )
+        if hit.bucket != "new":
+            _fail("assert-missing", "must be blocking when required")
+
+        empty = VALID_YAML.replace(
+            "assertions:\n  - AP_TOY_CLK\n  - AP_TOY_HS\n",
+            "assertions: []\n",
+        )
+        path = _write_contract(root, empty)
+        data, _ = parse_contract_file(path, root)
+        assert data is not None
+        _expect(
+            "assert-empty",
+            validate_contract(data, root),
+            "CONTRACT_FIELD_MISSING",
+        )
+
+
+def test_assertions_unlisted_and_unused() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _write_uarch(root, SECTION3_EXACT)
+        _set_assertions_required(root, True)
+        drop = VALID_YAML.replace("  - AP_TOY_HS\n", "")
+        path = _write_contract(root, drop)
+        data, _ = parse_contract_file(path, root)
+        assert data is not None
+        _expect(
+            "assert-unlisted",
+            validate_contract(data, root),
+            "CONTRACT_ASSERT_UNLISTED",
+        )
+        extra = VALID_YAML.replace(
+            "  - AP_TOY_HS\n",
+            "  - AP_TOY_HS\n  - AP_TOY_GHOST\n",
+        )
+        path = _write_contract(root, extra)
+        data, _ = parse_contract_file(path, root)
+        assert data is not None
+        _expect(
+            "assert-unused",
+            validate_contract(data, root),
+            "CONTRACT_ASSERT_UNUSED",
+        )
+
+
+def test_assertions_report_until_readme() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _write_uarch(root, SECTION3_EXACT)
+        missing = VALID_YAML.replace(
+            "assertions:\n  - AP_TOY_CLK\n  - AP_TOY_HS\n",
+            "",
+        )
+        path = _write_contract(root, missing)
+        data, _ = parse_contract_file(path, root)
+        assert data is not None
+        hit = _expect(
+            "assert-report-before-readme",
+            validate_contract(data, root),
+            "CONTRACT_FIELD_MISSING",
+        )
+        if hit.bucket != "report":
+            _fail("assert-report-before-readme", "must be report-only until README 必填")
+        readme = root / "docs" / "arch" / "mem" / "contracts" / "README.md"
+        readme.write_text(
+            "| 键 | 类型 | 含义 |\n| --- | --- | --- |\n"
+            "| `assertions` | 列表 | 必填。参与契约 hash。 |\n",
+            encoding="utf-8",
+        )
+        hit = _expect(
+            "assert-blocking-after-readme",
+            validate_contract(data, root),
+            "CONTRACT_FIELD_MISSING",
+        )
+        if hit.bucket != "new":
+            _fail("assert-blocking-after-readme", "README 必填 must flip to blocking")
+
+
 def test_comb_budget() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -452,6 +563,9 @@ def run_all() -> None:
         test_hash_assertion_changes,
         test_parent_ok_and_unknown,
         test_parent_description_not_row,
+        test_assertions_required_ok_and_missing,
+        test_assertions_unlisted_and_unused,
+        test_assertions_report_until_readme,
         test_comb_budget,
         test_stub_hash_match_and_mismatch,
         test_stub_handwritten_report,

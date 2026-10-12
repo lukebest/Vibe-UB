@@ -15,6 +15,8 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from contract_hash import (  # noqa: E402
+    FENCE_RE,
+    FRONT_MATTER_RE,
     contract_sha256,
     extract_contract_yaml,
 )
@@ -27,6 +29,10 @@ from gatelib import (  # noqa: E402
 
 PRIVATE_LIST = Path(__file__).resolve().parent / "private_leaves.yml"
 AP_RE = re.compile(r"`(AP_[A-Z0-9_]+)`")
+ASSERT_README_RE = re.compile(
+    r"^\|\s*`?assertions`?\s*\|[^\n]*必填",
+    re.M,
+)
 LEAF_TICK_RE = re.compile(r"`(ub_[a-z0-9_]+)`")
 UARCH_H2_RE = re.compile(r"^##[ \t]+(\d+)\b", re.M)
 PLAIN_LEAF_RE = re.compile(r"\Aub_[a-z0-9_]+\Z")
@@ -84,15 +90,56 @@ def discover_contract_files(root: Path) -> list[Path]:
     return files
 
 
-def load_private_names(root: Path | None = None) -> set[str]:
-    path = (
-        (root / "scripts" / "gate" / "private_leaves.yml")
-        if root is not None
-        else PRIVATE_LIST
-    )
+def _private_yml(root: Path | None) -> Path:
+    if root is not None:
+        return root / "scripts" / "gate" / "private_leaves.yml"
+    return PRIVATE_LIST
+
+
+def load_private_config(root: Path | None = None) -> dict[str, Any]:
+    path = _private_yml(root)
     if not path.is_file():
-        return set()
+        return {}
     data = load_yaml(path)
+    return data if isinstance(data, dict) else {}
+
+
+def assertions_required(root: Path) -> bool:
+    """Blocking once README §8 marks assertions 必填, or yml override.
+
+    `private_leaves.yml` `assertions_required: true|false` wins.
+    Otherwise any `docs/arch/*/contracts/README.md` row
+    `| assertions | … 必填` (the #49 mark) flips the gate on.
+    """
+    flag = load_private_config(root).get("assertions_required")
+    if flag is True or flag is False:
+        return bool(flag)
+    arch = root / "docs" / "arch"
+    if not arch.is_dir():
+        return False
+    for readme in sorted(arch.glob("*/contracts/README.md")):
+        try:
+            text = readme.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if ASSERT_README_RE.search(text):
+            return True
+    return False
+
+
+def contract_prose(text: str) -> str:
+    """Markdown after the leading YAML segment (front matter or ```yaml)."""
+    m = FRONT_MATTER_RE.match(text)
+    if m:
+        return text[m.end() :]
+    m = FENCE_RE.match(text)
+    if m:
+        return text[m.end() :]
+    return text
+
+
+def load_private_names(root: Path | None = None) -> set[str]:
+    data = load_private_config(root)
     names: set[str] = set()
     for item in data.get("leaves") or []:
         if isinstance(item, str) and item.strip():
@@ -322,15 +369,79 @@ def parse_contract_file(
             )
         )
         return None, findings
-    after = text
-    m_end = re.search(r"\n---[ \t]*(?:\n|\Z)", text)
-    if m_end:
-        after = text[m_end.end() :]
     data["_yaml_hash"] = digest
-    data["_body"] = after
+    data["_body"] = contract_prose(text)
     data["_path"] = file_rel
     data["_layer"] = layer_of_contract(path, root)
     return data, findings
+
+
+def _assert_bucket(root: Path) -> str:
+    return "new" if assertions_required(root) else "report"
+
+
+def _assertion_findings(
+    data: dict[str, Any], root: Path, file_rel: str, module: str
+) -> list[Finding]:
+    """assertions: required non-empty list; body `AP_*` must match 1-1.
+
+    Report-only until README §8 marks the field 必填 (or yml override).
+    """
+    findings: list[Finding] = []
+    bucket = _assert_bucket(root)
+    raw = data.get("assertions") if "assertions" in data else None
+    if raw is None or raw == []:
+        findings.append(
+            Finding(
+                check="contract",
+                module=module,
+                file=file_rel,
+                rule="CONTRACT_FIELD_MISSING",
+                message="assertions is required and must be a non-empty list",
+                bucket=bucket,
+                severity="error" if bucket == "new" else "warning",
+            )
+        )
+    elif not isinstance(raw, list) or not all(isinstance(x, str) for x in raw):
+        findings.append(
+            Finding(
+                check="contract",
+                module=module,
+                file=file_rel,
+                rule="CONTRACT_FIELD",
+                message="assertions must be a list of strings",
+                bucket=bucket,
+                severity="error" if bucket == "new" else "warning",
+            )
+        )
+        raw = []
+    listed = {str(x).strip() for x in (raw or []) if isinstance(x, str) and str(x).strip()}
+    body = set(AP_RE.findall(str(data.get("_body") or "")))
+    for name in sorted(body - listed):
+        findings.append(
+            Finding(
+                check="contract",
+                module=module,
+                file=file_rel,
+                rule="CONTRACT_ASSERT_UNLISTED",
+                message=f"body assertion {name} is not in YAML assertions",
+                bucket=bucket,
+                severity="error" if bucket == "new" else "warning",
+            )
+        )
+    for name in sorted(listed - body):
+        findings.append(
+            Finding(
+                check="contract",
+                module=module,
+                file=file_rel,
+                rule="CONTRACT_ASSERT_UNUSED",
+                message=f"YAML assertion {name} is not referenced in the body",
+                bucket=bucket,
+                severity="error" if bucket == "new" else "warning",
+            )
+        )
+    return findings
 
 
 def validate_contract(data: dict[str, Any], root: Path) -> list[Finding]:
@@ -552,20 +663,7 @@ def validate_contract(data: dict[str, Any], root: Path) -> list[Finding]:
                 message="ill_cause_width must be an int",
             )
         )
-    if "assertions" in data:
-        assertions = data["assertions"]
-        if not isinstance(assertions, list) or not all(
-            isinstance(x, str) for x in assertions
-        ):
-            findings.append(
-                Finding(
-                    check="contract",
-                    module=module,
-                    file=file_rel,
-                    rule="CONTRACT_FIELD",
-                    message="assertions must be a list of strings",
-                )
-            )
+    findings.extend(_assertion_findings(data, root, file_rel, module))
 
     parent = data.get("parent")
     if isinstance(parent, str) and parent:
@@ -586,24 +684,6 @@ def validate_contract(data: dict[str, Any], root: Path) -> list[Finding]:
                 )
             )
 
-    listed = (
-        set(data["assertions"])
-        if isinstance(data.get("assertions"), list)
-        else set()
-    )
-    for name in sorted(set(AP_RE.findall(str(data.get("_body") or "")))):
-        if name not in listed:
-            findings.append(
-                Finding(
-                    check="contract",
-                    module=module,
-                    file=file_rel,
-                    rule="CONTRACT_ASSERT_UNLISTED",
-                    message=f"body assertion {name} is not in YAML assertions",
-                    bucket="report",
-                    severity="warning",
-                )
-            )
     return findings
 
 

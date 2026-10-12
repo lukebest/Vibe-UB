@@ -515,9 +515,13 @@ def abc_kind(log: str) -> str:
 def sat_kind(log: str) -> str:
     if re.search(r"time ?out|timed out", log, re.I):
         return "unproven"
-    if re.search(r"SAT [Mm]odel|Assert failed|failed to prove|SATISFIABLE", log, re.I):
+    if re.search(r"SAT [Mm]odel|Assert failed|failed to prove|SATISFIABLE|proof did fail", log, re.I):
         return "not_equivalent"
-    if re.search(r"proved|UNSAT|verified successfully|successful proof", log, re.I):
+    if re.search(
+        r"no model found: SUCCESS|SAT proof finished - no model found|proved|UNSAT|verified successfully|successful proof",
+        log,
+        re.I,
+    ):
         return "equivalent"
     return "unproven"
 
@@ -1190,11 +1194,12 @@ def sat_one_po(
         for name in all_pos:
             if name != po:
                 ys.append(f"delete -output {yosys_id(name)}")
+        ys.append("opt_clean")
     ys += [
-        "miter -equiv -make_assert -flatten gold gate miter",
-        "sat -verify -prove-asserts -show-inputs",
+        "miter -equiv -flatten gold gate miter",
+        "sat -verify -prove trigger 0 -show-inputs",
     ]
-    print(f"equiv_ref REGPAIR sat_cmd=sat -verify -prove-asserts po={po}")
+    print(f"equiv_ref REGPAIR sat_cmd=sat -verify -prove trigger 0 po={po}")
     proc = run_yosys_p("\n".join(ys) + "\n", tmo, quiet=False)
     log = proc.stdout or ""
     print(log[-2000:] if len(log) > 2000 else log)

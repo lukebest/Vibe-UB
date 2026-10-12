@@ -76,27 +76,35 @@ flowchart LR
 
 ## 3. 叶子划分（对照 PR #18 MODULE_INVENTORY §7）
 
-| PR #18 模块 | 本草案叶子 | 类型 | 职责（一句话） |
-| --- | --- | --- | --- |
-| `ub_mem_ummu` | `ub_mem_ummu` | 层次 | 例化下列叶子，对外一个查询口、一个表读口、一个表写口、一组 CSR |
-| （新增） | `ub_mem_req_chk` | 结构 | 输入寄存、UBA 越界检查（等 TCTE 回来后做最终判定）、算各缓存下标 |
-| `ub_mem_cfg_lkup` | `ub_mem_cfg_lkup` + `ub_mem_tecte_dec` | 结构 + 解码 | 按 ENT_IDX 读 TECT；TECT 由 CSR 写入，写入时经解码叶子转成信号束 |
-| `ub_mem_ctx_lkup` | `ub_mem_ctx_lkup` + `ub_mem_tcte_dec` + `ub_mem_l1tct_dec` | 结构 + 解码 | TCT 缓存查找；缺失时读线性或两级 TCT，填充前解码 |
-| `ub_mem_xlat` | `ub_mem_tlb` | 结构 | 4 路组相联 TLB；例化页表遍历器 `ub_mem_ptw` |
-| — | `ub_mem_ptw` | 结构 | 页表遍历器（VMSAv8-64）；例化私有解码叶子 `ub_mem_ptw_desc_dec`；块描述符拆成 4 KB 页并驱动 TLB 填充 |
-| `ub_mem_perm` | `ub_mem_plb` + `ub_mem_perm_cmp` | 结构 + 组合 | PLB 范围匹配；例化权限 / MAPT 遍历器 `ub_mem_perm_walk`；TokenValue、排他位、访问类型比较与合成 |
-| — | `ub_mem_perm_walk` | 结构 | 权限 / MAPT 遍历器；例化 `ub_mem_mapte_dec`；单项 / 多级 MAPT 遍历 |
-| （新增） | `ub_mem_tbl_rd` | 结构 | UMMU 内部所有内存表读汇成一个 valid/ready 读口，按 tag 回送 |
-| （新增） | `ub_mem_inv` | 结构 | 全部失效（一拍清 valid）、按条件扫描失效、SYNC |
-| （新增） | `ub_mem_cmdq` / `ub_mem_evtq` | 结构 | UMMU 命令队列消费、事件记录写回（格式待后续批 Q-E09） |
-| `ub_mem_decoder` | `ub_mem_decoder` | 层次 | 例化译码器叶子 |
-| — | `ub_mem_dec_tlb` | 结构 | 按 1 MB 粒度缓存最终译码结果 |
-| — | `ub_mem_dec_walk` | 结构 | 从内存先读 L0 再读 L1，读回寄存，只输出原始表项数据 |
-| — | `ub_mem_dec_ent_dec` | 解码 | 在 `ub_mem_decoder` 这一层例化，接 `ub_mem_dec_walk` 寄存后的 L0 / L1 原始数据，输出 §5.5 信号束；L0 与 L1 均寄存 1 拍；选 PTE、比 PTRE 范围在其下游结构逻辑里做 |
-| — | `ub_mem_dec_uba` | 组合 | 按 §9.5.2 由 UBA 基值与 PA 低位算 UBA |
-| — | `ub_mem_dec_cmdq` / `ub_mem_dec_evtq` | 结构 | App. D.4.1 的 CMDQ / EVENTQ |
-| `ub_mem_ubmd` | 并入解码叶子 | 解码 | UBMD 与各信号束的拆包只在设计侧解码叶子里；参考模型由 Xia 独立拆包，两边只共享 §5 的信号名和位宽（D17） |
-| — | `ub_cmn_mem_1r1w_<tag>` | 原语 | 所有片上大表的存储本体（CODING_STYLE §10）。原语 RTL 由设计-B 在 PR #21 写；线 C 结构叶子先照 `model/ub_cmn_mem_1r1w.py` 的端口和时序写 |
+叶子名列每行只写一个叶子名。
+
+| PR #18 模块 | 本草案叶子 | 父级 | 类型 | 职责（一句话） |
+| --- | --- | --- | --- | --- |
+| `ub_mem_ummu` | `ub_mem_ummu` | — | 层次 | 例化下列叶子，对外一个查询口、一个表读口、一个表写口、一组 CSR |
+| （新增） | `ub_mem_req_chk` | `ub_mem_ummu` | 结构 | 输入寄存、UBA 越界检查（等 TCTE 回来后做最终判定）、算各缓存下标 |
+| `ub_mem_cfg_lkup` | `ub_mem_cfg_lkup` | `ub_mem_ummu` | 结构 | 按 ENT_IDX 读 TECT；例化 `ub_mem_tecte_dec` |
+| — | `ub_mem_tecte_dec` | `ub_mem_cfg_lkup` | 解码 | CSR 写 TECT 时把原始表项转成 §5.1 信号束 |
+| `ub_mem_ctx_lkup` | `ub_mem_ctx_lkup` | `ub_mem_ummu` | 结构 | TCT 缓存查找；例化 `ub_mem_tcte_dec`、`ub_mem_l1tct_dec`；缺失时读线性或两级 TCT，填充前解码 |
+| — | `ub_mem_tcte_dec` | `ub_mem_ctx_lkup` | 解码 | 填充前把 TCTE 拆成 §5.2 信号束 |
+| — | `ub_mem_l1tct_dec` | `ub_mem_ctx_lkup` | 解码 | 两级 TCT 的 L1 描述符拆成 §5.3 信号束 |
+| `ub_mem_xlat` | `ub_mem_tlb` | `ub_mem_xlat` | 结构 | 4 路组相联 TLB；例化页表遍历器 `ub_mem_ptw` |
+| — | `ub_mem_ptw` | `ub_mem_xlat` | 结构 | 页表遍历器（VMSAv8-64）；例化私有解码叶子 `ub_mem_ptw_desc_dec`；块描述符拆成 4 KB 页并驱动 TLB 填充 |
+| `ub_mem_perm` | `ub_mem_plb` | `ub_mem_perm` | 结构 | PLB 范围匹配 |
+| — | `ub_mem_perm_walk` | `ub_mem_perm` | 结构 | 权限 / MAPT 遍历器；例化 `ub_mem_mapte_dec`；单项 / 多级 MAPT 遍历 |
+| — | `ub_mem_perm_cmp` | `ub_mem_perm` | 组合 | TokenValue、排他位、访问类型比较与合成 |
+| （新增） | `ub_mem_tbl_rd` | `ub_mem_ummu` | 结构 | UMMU 内部所有内存表读汇成一个 valid/ready 读口，按 tag 回送 |
+| （新增） | `ub_mem_inv` | `ub_mem_ummu` | 结构 | 全部失效（一拍清 valid）、按条件扫描失效、SYNC |
+| （新增） | `ub_mem_cmdq` | `ub_mem_ummu` | 结构 | UMMU 命令队列消费（格式待后续批 Q-E09） |
+| （新增） | `ub_mem_evtq` | `ub_mem_ummu` | 结构 | 事件记录写回（格式待后续批 Q-E09） |
+| `ub_mem_decoder` | `ub_mem_decoder` | — | 层次 | 例化译码器叶子 |
+| — | `ub_mem_dec_tlb` | `ub_mem_decoder` | 结构 | 按 1 MB 粒度缓存最终译码结果 |
+| — | `ub_mem_dec_walk` | `ub_mem_decoder` | 结构 | 从内存先读 L0 再读 L1，读回寄存，只输出原始表项数据 |
+| — | `ub_mem_dec_ent_dec` | `ub_mem_dec_walk` | 解码 | 接 `ub_mem_dec_walk` 寄存后的 L0 / L1 原始数据，输出 §5.5 信号束；L0 与 L1 均寄存 1 拍；选 PTE、比 PTRE 范围在其下游结构逻辑里做 |
+| — | `ub_mem_dec_uba` | `ub_mem_decoder` | 组合 | 按 §9.5.2 由 UBA 基值与 PA 低位算 UBA |
+| — | `ub_mem_dec_cmdq` | `ub_mem_decoder` | 结构 | App. D.4.1 的 CMDQ |
+| — | `ub_mem_dec_evtq` | `ub_mem_decoder` | 结构 | App. D.4.1 的 EVENTQ |
+| `ub_mem_ubmd` | `ub_mem_ubmd` | — | 解码 | 并入解码叶子；UBMD 与各信号束的拆包只在设计侧解码叶子里；参考模型由 Xia 独立拆包，两边只共享 §5 的信号名和位宽（D17） |
+| — | `ub_cmn_mem_1r1w_<tag>` | — | 原语 | 所有片上大表的存储本体（CODING_STYLE §10）。原语 RTL 由设计-B 在 PR #21 写；线 C 结构叶子先照 `model/ub_cmn_mem_1r1w.py` 的端口和时序写 |
 
 EID→ENT_IDX 映射放在 RSC（Xia 答复 Q-A02），UMMU 只接 ENT_IDX 和「映射命中」位。
 
@@ -123,7 +131,7 @@ EID→ENT_IDX 映射放在 RSC（Xia 答复 Q-A02），UMMU 只接 ENT_IDX 和�
 | `ub_mem_dec_ent_dec` | `ub_mem_dec_walk` 寄存后的 L0 / L1 原始数据 | §5.5 信号束 | L0 与 L1 均寄存 1 拍 |
 | `ub_mem_dec_uba` | UBA 基值、PA 低位 | UBA 64 bit | 64 bit 加法，进位丢弃（Xia 答复 D-L09） |
 
-`ub_mem_ptw` 经 `ub_mem_tbl_rd` 接主机表读口，前缀 `mem2host_rd_*`（SPEC §14 Q-C07，PR #50）。请求：`mem2host_rd_valid`、`mem2host_rd_ready`、`mem2host_rd_addr`（48 bit）、`mem2host_rd_len`（8 bit 字节数，合法 8 / 32 / 64，其余取值接口断言失败；第一波遍历器驱 8）、`mem2host_rd_tag`（4 bit；第一波遍历器驱 0，一个未决）。响应：`mem2host_rd_rsp_valid`、`mem2host_rd_rsp_ready`、`mem2host_rd_rsp_data`（512 bit）、`mem2host_rd_rsp_tag`（4 bit）、`mem2host_rd_rsp_err`（1 bit）。
+`ub_mem_ptw` 经 `ub_mem_tbl_rd` 接主机表读口，前缀 `mem2host_rd_*`（SPEC §14 Q-C07，PR #50）。请求：`mem2host_rd_valid`、`mem2host_rd_ready`、`mem2host_rd_addr`（48 bit）、`mem2host_rd_len`（8 bit 字节数，合法 8 / 32 / 64，其余取值接口断言失败；第一波遍历器驱 8）、`mem2host_rd_tag`（4 bit；第一波遍历器驱 0，一个未决）。其中 `mem2host_rd_valid`、`mem2host_rd_addr`、`mem2host_rd_len`、`mem2host_rd_tag` 从寄存器送出；`mem2host_rd_valid && !mem2host_rd_ready` 期间请求束保持（断言 `AP_TBLRD_REQ_HOLD`，SPEC §14）。请求成交到第一次 `mem2host_rd_valid` 为 2 拍（与 PR #48 head `d1f42ab9` 一致）。响应：`mem2host_rd_rsp_valid`、`mem2host_rd_rsp_ready`、`mem2host_rd_rsp_data`（512 bit）、`mem2host_rd_rsp_tag`（4 bit）、`mem2host_rd_rsp_err`（1 bit）。
 
 事件口（SPEC §14 Q-A08，PR #50）：`evt_valid`、`evt_ready`、`evt_code`（宽 `EVT_CODE_W`，参数默认 4）。码 0 保留。`ctx_matt_wd=1` 且 TLB 缺失时发出 `EVT_MATT_WD_MISS`（暂定取值 1），请求经事件路径结束。常量取值随 Q-E09，引用命名常量。
 

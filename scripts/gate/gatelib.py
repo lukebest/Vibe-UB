@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import ast
 import fnmatch
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -99,7 +101,7 @@ class Finding:
     rule: str
     message: str
     severity: str = "error"
-    bucket: str = "new"  # new | legacy | migrate | report
+    bucket: str = "new"  # new | legacy | migrate | report | deleted
     waived_by: str = ""
 
     def key(self) -> tuple[str, str, str, str]:
@@ -132,8 +134,94 @@ def load_yaml(path: Path) -> Any:
     return data if data is not None else {}
 
 
+LOCK_SCAN_SKIP_DIRS = {
+    ".git",
+    ".venv",
+    "venv",
+    ".pycircuit-venv",
+    ".pycircuit-src",
+    ".pycircuit_out",
+    "node_modules",
+    "__pycache__",
+    "out",
+}
+
+
+def find_extra_toolchain_locks() -> list[Path]:
+    """Any TOOLCHAIN.lock other than the repo-root copy is a conflict."""
+    extras: list[Path] = []
+    root = TOOLCHAIN_LOCK.resolve() if TOOLCHAIN_LOCK.is_file() else TOOLCHAIN_LOCK
+    stack = [REPO_ROOT]
+    while stack:
+        d = stack.pop()
+        try:
+            kids = list(d.iterdir())
+        except OSError:
+            continue
+        for child in kids:
+            if child.is_dir():
+                if child.name in LOCK_SCAN_SKIP_DIRS:
+                    continue
+                stack.append(child)
+            elif child.name == "TOOLCHAIN.lock":
+                try:
+                    if child.resolve() != root:
+                        extras.append(child)
+                except OSError:
+                    extras.append(child)
+    return extras
+
+
+def collect_lock_completeness_findings(
+    check: str, lock: dict[str, str] | None = None
+) -> list[Finding]:
+    """Required pyCircuit / pycc / LLVM keys must be present on the root lock."""
+    data = lock if lock is not None else parse_lock()
+    missing = [k for k in REQUIRED_PYC_LOCK_KEYS if not str(data.get(k) or "").strip()]
+    if not missing:
+        return []
+    return [
+        Finding(
+            check=check,
+            module="*",
+            file="TOOLCHAIN.lock",
+            rule="TOOLCHAIN_LOCK_INCOMPLETE",
+            message=(
+                "repo-root TOOLCHAIN.lock is missing required pins: "
+                + ", ".join(missing)
+            ),
+        )
+    ]
+
+
+def collect_toolchain_lock_findings(check: str) -> list[Finding]:
+    extras = find_extra_toolchain_locks()
+    findings: list[Finding] = []
+    if extras:
+        findings.append(
+            Finding(
+                check=check,
+                module="*",
+                file="TOOLCHAIN.lock",
+                rule="TOOLCHAIN_LOCK_CONFLICT",
+                message=(
+                    "tool versions must come from the repo-root TOOLCHAIN.lock only; "
+                    f"extra copies: {[rel(p) for p in extras]}"
+                ),
+            )
+        )
+    findings.extend(collect_lock_completeness_findings(check))
+    return findings
+
+
 def parse_lock(path: Path = TOOLCHAIN_LOCK) -> dict[str, str]:
-    """Read TOOLCHAIN.lock key = \"value\" pairs (comment-tolerant, not full TOML)."""
+    """Read the repo-root TOOLCHAIN.lock only. A second copy is a conflict."""
+    if path.resolve() != TOOLCHAIN_LOCK.resolve():
+        print(
+            f"NOTE: ignoring non-root lock {rel(path)}; "
+            f"versions from {rel(TOOLCHAIN_LOCK)} only"
+        )
+        path = TOOLCHAIN_LOCK
     out: dict[str, str] = {}
     if not path.is_file():
         return out
@@ -151,6 +239,7 @@ def run_cmd(
     argv: list[str],
     cwd: Path | None = None,
     timeout: int | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         argv,
@@ -160,6 +249,7 @@ def run_cmd(
         stderr=subprocess.STDOUT,
         timeout=timeout,
         check=False,
+        env=env,
     )
 
 
@@ -185,13 +275,19 @@ def print_tool_versions(needed: Iterable[str]) -> None:
         "yosys": ("yosys_lock", ["yosys", "-V"]),
         "eqy": ("eqy_lock", ["eqy", "--version"]),
         "sby": ("sby_lock", ["sby", "--version"]),
-        "pycc": ("llvm_lock", ["pycc", "--version"]),
+        "pycc": ("pycc_lock", ["pycc", "--version"]),
         "python": ("python_lock", [sys.executable, "--version"]),
         "llvm": ("llvm_lock", ["llvm-config-19", "--version"]),
         "cmake": ("cmake_lock", ["cmake", "--version"]),
         "ninja": ("ninja_lock", ["ninja", "--version"]),
     }
-    print("=== tool versions (TOOLCHAIN.lock vs actual) ===")
+    extras = find_extra_toolchain_locks()
+    print("=== tool versions (repo-root TOOLCHAIN.lock vs actual) ===")
+    if extras:
+        print(
+            "TOOLCHAIN.lock CONFLICT: extra copies "
+            f"{[rel(p) for p in extras]} (root is the only allowed source)"
+        )
     for name in needed:
         lock_key, argv = mapping[name]
         locked = lock.get(lock_key, "")
@@ -599,8 +695,19 @@ def load_hooks_ports() -> dict[str, list[str]]:
 
 # Xia: HOOKS-only backdoors. tb_<inst>_bd_* and companion tb_<inst>_bd_vld_*.
 # Gated by tb_test_mode; must be on the SPEC §10 list (hooks_ports.yml).
+# Leaf observe: tb_<inst>_obs_* (HOOKS-only output; not gated by tb_test_mode).
 _TB_BD_VLD_RE = re.compile(r"^tb_[A-Za-z_][A-Za-z0-9_]*_bd_vld_")
 _TB_BD_RE = re.compile(r"^tb_[A-Za-z_][A-Za-z0-9_]*_bd_")
+_TB_INST_OBS_RE = re.compile(r"^tb_[A-Za-z_][A-Za-z0-9_]*_obs_")
+
+REQUIRED_PYC_LOCK_KEYS = (
+    "pycircuit_repo",
+    "pycircuit_commit",
+    "pycircuit_release",
+    "pycc_lock",
+    "llvm_lock",
+    "mlir_lock",
+)
 
 
 def is_tb_port(name: str) -> bool:
@@ -615,12 +722,17 @@ def is_tb_bd_port(name: str) -> bool:
     return bool(_TB_BD_RE.match(name)) and not is_tb_bd_vld_port(name)
 
 
+def is_tb_obs_port(name: str) -> bool:
+    """Top-level tb_obs_* or leaf-local tb_<inst>_obs_* (HOOKS-only output)."""
+    return name.startswith("tb_obs_") or bool(_TB_INST_OBS_RE.match(name))
+
+
 def is_listed_hook_style(name: str) -> bool:
     """Allowed tb_* shapes on the §10 / hooks_ports.yml list."""
     return (
         name == "tb_test_mode"
         or name.startswith("tb_inj_")
-        or name.startswith("tb_obs_")
+        or is_tb_obs_port(name)
         or is_tb_bd_port(name)
         or is_tb_bd_vld_port(name)
     )
@@ -753,16 +865,79 @@ def split_findings(
     return blocking, legacy, migrate, report, waived
 
 
+def repo_file_exists(rel_path: str, root: Path | None = None) -> bool:
+    """True if the path (or its glob) exists under root. Does not create files."""
+    base = root or REPO_ROOT
+    cleaned = _file_for_class(rel_path).replace("\\", "/")
+    if not cleaned:
+        return True
+    direct = base / cleaned
+    if direct.is_file() or direct.is_dir():
+        return True
+    if any(ch in cleaned for ch in "*?["):
+        return any(base.glob(cleaned))
+    return False
+
+
+def is_on_deletion_roster(rel_path: str) -> bool:
+    """legacy.txt or pycircuit_migrate.txt — report-only '待删除' names."""
+    cleaned = _file_for_class(rel_path).replace("\\", "/")
+    if not cleaned:
+        return False
+    for pat in read_legacy_patterns() + read_migrate_patterns():
+        if cleaned == pat or fnmatch.fnmatch(cleaned, pat):
+            return True
+        p = Path(pat)
+        if len(p.parts) >= 3 and p.parts[0] == "pycircuit":
+            layer, stem = p.parts[1], p.stem
+            if cleaned in {
+                f"rtl/{layer}/{stem}.v",
+                f"rtl/{layer}/hooks/{stem}.v",
+            }:
+                return True
+    return False
+
+
+def mark_deleted_findings(
+    findings: list[Finding], root: Path | None = None
+) -> tuple[list[Finding], list[Finding]]:
+    """Split findings whose roster file is gone. Missing → 已删除, not an error."""
+    keep: list[Finding] = []
+    deleted: list[Finding] = []
+    for f in findings:
+        if f.bucket == "deleted":
+            deleted.append(f)
+            continue
+        if not repo_file_exists(f.file, root=root) and is_on_deletion_roster(f.file):
+            f.bucket = "deleted"
+            if "已删除" not in f.message:
+                f.message = f"已删除; {f.message}"
+            deleted.append(f)
+        else:
+            keep.append(f)
+    return keep, deleted
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
 def emit_report(check: str, findings: list[Finding]) -> int:
     """Print the multi-column report. Return process exit code."""
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    apply_waivers(findings, check)
+    merged = list(findings) + collect_toolchain_lock_findings(check)
+    apply_waivers(merged, check)
+    findings, deleted = mark_deleted_findings(merged)
     blocking, legacy, migrate, report, waived = split_findings(findings)
+    live_total = len(findings)
     print(f"=== {check} findings ===")
     print(
-        f"total={len(findings)} blocking={len(blocking)} "
+        f"total={live_total} blocking={len(blocking)} "
         f"legacy_report_only={len(legacy)} migrate_backlog={len(migrate)} "
-        f"report_only={len(report)} waived={len(waived)}"
+        f"report_only={len(report)} waived={len(waived)} "
+        f"deleted={len(deleted)} (已删除, excluded from total)"
     )
     print()
     print("## New leaves (blocking)")
@@ -771,23 +946,41 @@ def emit_report(check: str, findings: list[Finding]) -> int:
     else:
         _print_table(blocking)
     print()
-    print("## D10 legacy (report-only; 待 legacy 迁移 PR 处理、守门人批准)")
-    if not legacy:
-        print("(none)")
-    else:
+    print("## D10 legacy (report-only; 待删除名单由设计清理 PR 处理，本栏不删文件)")
+    legacy_roster = read_legacy_roster()
+    if legacy_roster:
+        print("| path | status |")
+        print("| --- | --- |")
+        for row in legacy_roster:
+            print(f"| {row['path']} | {row['status'] or ''} |")
+    if not legacy and not any(r.get("status") == "已删除" for r in legacy_roster):
+        if not legacy_roster:
+            print("(none)")
+    elif legacy:
         _print_table(legacy)
     print()
     print("## pyCircuit migrate (main / PR #5 / #7 / #11 / #12; 迁移待办)")
     roster = read_migrate_roster()
+    live_roster = [r for r in roster if r.get("status") != "已删除"]
     if roster:
         print("| path | group | status |")
         print("| --- | --- | --- |")
         for row in roster:
             print(f"| {row['path']} | {row['group']} | {row['status'] or ''} |")
+        n_del = len(roster) - len(live_roster)
+        if n_del:
+            print(
+                f"migrate roster live={len(live_roster)} "
+                f"已删除={n_del} (excluded from backlog total)"
+            )
     if migrate:
         _print_table(migrate)
-    elif not roster:
+    elif not live_roster:
         print("(none)")
+    if deleted:
+        print()
+        print("## 已删除 (roster file gone; excluded from totals; not an error)")
+        _print_table(deleted)
     pending = list_pending_waivers()
     placeholders = [
         leaf
@@ -834,6 +1027,7 @@ def emit_report(check: str, findings: list[Finding]) -> int:
         "migrate": [asdict(f) for f in migrate],
         "report": [asdict(f) for f in report],
         "waived": [asdict(f) for f in waived],
+        "deleted": [asdict(f) for f in deleted],
     }
     (OUT_DIR / f"{check}.json").write_text(
         json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
@@ -875,7 +1069,27 @@ def read_migrate_roster() -> list[dict[str, str]]:
         if key in seen:
             continue
         seen.add(key)
-        rows.append({"path": line, "group": group, "status": status})
+        row_status = status
+        if not repo_file_exists(line):
+            row_status = "已删除"
+        rows.append({"path": line, "group": group, "status": row_status})
+    return rows
+
+
+def read_legacy_roster() -> list[dict[str, str]]:
+    """D10 待删除名单. Missing files are 已删除; this does not delete anything."""
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for pat in read_legacy_patterns():
+        if pat in seen:
+            continue
+        seen.add(pat)
+        rows.append(
+            {
+                "path": pat,
+                "status": "" if repo_file_exists(pat) else "已删除",
+            }
+        )
     return rows
 
 
@@ -1209,14 +1423,200 @@ def discover_rtl_variants(layer: str, leaf: str) -> list[str]:
     return names
 
 
-def discover_pycircuit_leaves() -> list[dict[str, Any]]:
-    """Leaves from pycircuit/<layer>/*.py, expanded per SPEC §2.2 variant."""
-    root = REPO_ROOT / "pycircuit"
+def layer_import_root(repo: Path | None = None) -> Path:
+    """Directory that must be first on PYTHONPATH so `from <layer>.lib` works."""
+    return (repo or REPO_ROOT) / "pycircuit"
+
+
+def leaf_process_env(repo: Path | None = None) -> dict[str, str]:
+    """Env for invoking pyCircuit leaves / emit_rtl.py.
+
+    ``<repo>/pycircuit`` is first. The repo root is never on PYTHONPATH
+    (that directory is also named pycircuit and would shadow the install).
+    PYTHONSAFEPATH=1 plus ``python -P`` keep cwd off sys.path.
+    """
+    root = (repo or REPO_ROOT).resolve()
+    env = os.environ.copy()
+    front = [str(layer_import_root(root)), str(GATE_DIR)]
+    seen: set[str] = set()
+    parts: list[str] = []
+    for item in front + env.get("PYTHONPATH", "").split(os.pathsep):
+        if not item or item in {".", ""}:
+            continue
+        try:
+            resolved = Path(item).resolve()
+        except OSError:
+            continue
+        if resolved == root:
+            continue
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        parts.append(str(Path(item)))
+    env["PYTHONPATH"] = os.pathsep.join(parts)
+    env["PYTHONSAFEPATH"] = "1"
+    env["GATE_REPO_ROOT"] = str(root)
+    return env
+
+
+def leaf_python_argv(script: Path, *args: str, python: str | None = None) -> list[str]:
+    """Invoke a script by path. Never ``python -m``. ``-P`` keeps cwd off sys.path."""
+    exe = python or sys.executable
+    return [exe, "-P", str(script), *args]
+
+
+def repo_root_on_sys_path(sys_path: list[str], repo: Path | None = None) -> bool:
+    """True if the repo root (not ``<repo>/pycircuit``) is on *sys_path*."""
+    root = (repo or REPO_ROOT).resolve()
+    for item in sys_path:
+        if item in {"", "."}:
+            return True
+        try:
+            if Path(item).resolve() == root:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def pycircuit_shadowed_by_tree(sys_path: list[str], repo: Path | None = None) -> bool:
+    """True if ``import pycircuit`` would bind to the leaf tree.
+
+    Only the *repo root* on ``sys.path`` causes that (``<repo>/pycircuit``
+    is a directory, not an installed package). Putting ``<repo>/pycircuit``
+    itself first on PYTHONPATH is required so ``from <layer>.lib`` works
+    and is *not* a shadow.
+    """
+    return repo_root_on_sys_path(sys_path, repo)
+
+
+def import_root_shadow_findings(
+    sys_path: list[str],
+    check: str = "provenance",
+    repo: Path | None = None,
+) -> list[Finding]:
+    """Blocking findings when *sys_path* would shadow the installed package."""
+    if not pycircuit_shadowed_by_tree(sys_path, repo):
+        return []
+    return [
+        Finding(
+            check=check,
+            module="*",
+            file="pycircuit",
+            rule="IMPORT_ROOT_SHADOW",
+            message=(
+                "repo root is on sys.path; pycircuit/ would shadow the "
+                "installed pyCircuit package (use <repo>/pycircuit on "
+                "PYTHONPATH, python -P / PYTHONSAFEPATH, never python -m)"
+            ),
+        )
+    ]
+
+
+def pycircuit_cli_argv(*args: str, python: str | None = None) -> list[str]:
+    """Invoke the installed pycircuit CLI by script path. Never ``python -m``."""
+    exe = python or sys.executable
+    script = Path(exe).resolve().parent / "pycircuit"
+    if script.is_file():
+        return [str(script), *args]
+    # -P -c keeps cwd / repo root off sys.path (unlike python -m).
+    return [
+        exe,
+        "-P",
+        "-c",
+        (
+            "import runpy, sys;"
+            "sys.argv = ['pycircuit'] + sys.argv[1:];"
+            "runpy.run_module('pycircuit.cli', run_name='__main__')"
+        ),
+        *args,
+    ]
+
+
+def collect_import_root_findings(
+    check: str = "provenance", repo: Path | None = None
+) -> list[Finding]:
+    """Probe a leaf-style python -P process; repo root on sys.path is blocking."""
+    root = repo or REPO_ROOT
+    probe = (
+        "import os, sys\n"
+        "from pathlib import Path\n"
+        "root = Path(os.environ['GATE_REPO_ROOT']).resolve()\n"
+        "hits = []\n"
+        "for p in sys.path:\n"
+        "    try:\n"
+        "        rp = root if p in ('', '.') else Path(p).resolve()\n"
+        "    except OSError:\n"
+        "        continue\n"
+        "    if rp == root:\n"
+        "        hits.append(p or '.')\n"
+        "print('SHADOW' if hits else 'OK')\n"
+        "print('hits=' + repr(hits))\n"
+    )
+    proc = run_cmd(
+        [sys.executable, "-P", "-c", probe],
+        cwd=root,
+        env=leaf_process_env(root),
+        timeout=30,
+    )
+    text = proc.stdout or ""
+    print(f"import-root probe: {(text.strip().splitlines() or [''])[0]}")
+    if proc.returncode != 0:
+        return [
+            Finding(
+                check=check,
+                module="*",
+                file="pycircuit",
+                rule="IMPORT_ROOT_SHADOW",
+                message=(
+                    "import-root probe failed; "
+                    f"probe={text.strip()[:200]}"
+                ),
+            )
+        ]
+    hits = import_root_shadow_findings(
+        # Reconstruct from the probe: any printed hits mean the live path
+        # still contained the repo root (should be empty with -P + env).
+        ["."] if "SHADOW" in text else [],
+        check=check,
+        repo=root,
+    )
+    if hits:
+        hits[0].message += f" probe={text.strip()[:200]}"
+    return hits
+
+
+def discover_pycircuit_lib_helpers(pyc_root: Path | None = None) -> list[Path]:
+    """pycircuit/<layer>/lib/**/*.py — not leaves; splice-scan only."""
+    root = pyc_root or (REPO_ROOT / "pycircuit")
+    out: list[Path] = []
+    if not root.is_dir():
+        return out
+    for layer in discover_layers(root):
+        lib = root / layer / "lib"
+        if not lib.is_dir():
+            continue
+        for path in sorted(lib.rglob("*.py")):
+            out.append(path)
+    return out
+
+
+def discover_pycircuit_leaves(pyc_root: Path | None = None) -> list[dict[str, Any]]:
+    """Leaves from pycircuit/<layer>/*.py only (not lib/, not __init__.py)."""
+    root = pyc_root or (REPO_ROOT / "pycircuit")
     skip_py = {"__init__.py", "emit.py", "selfcheck.py"}
     leaves: list[dict[str, Any]] = []
+    if not root.is_dir():
+        return leaves
     for layer in discover_layers(root):
-        for path in sorted((root / layer).glob("*.py")):
+        layer_dir = root / layer
+        if not layer_dir.is_dir():
+            continue
+        for path in sorted(layer_dir.glob("*.py")):
             if path.name in skip_py:
+                continue
+            if path.parent.name == "lib":
                 continue
             table = parse_variant_table(path)
             rtl_names = discover_rtl_variants(layer, path.stem)
@@ -1605,26 +2005,170 @@ def discover_leaf_pairs() -> list[dict[str, str]]:
     return pairs
 
 
-PORT_CHUNK_RE = re.compile(
-    r"\b(input|output|inout)\b((?:\s+(?:wire|reg|logic|signed))*"
-    r"(?:\s+\[[^\]]+\])?\s*"
-    r"[A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)",
-    re.I,
-)
-PORT_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_MODULE_DECL_RE = re.compile(r"^\s*module\s+([A-Za-z_][A-Za-z0-9_]*)\b", re.M)
 
 
-def parse_ports(path: Path) -> list[tuple[str, str]]:
-    """Return (direction, name) in declaration order."""
-    text = strip_verilog_comments(path.read_text(encoding="utf-8", errors="replace"))
-    skip = {"input", "output", "inout", "wire", "reg", "logic", "signed"}
-    ports: list[tuple[str, str]] = []
-    for kind, blob in PORT_CHUNK_RE.findall(text):
-        for name in PORT_IDENT_RE.findall(blob):
-            if name.lower() in skip:
+def declared_module_name(text: str) -> str | None:
+    m = _MODULE_DECL_RE.search(text)
+    return m.group(1) if m else None
+
+
+def verilog_equal_except_module_name(left: Path, right: Path) -> bool:
+    """True if the two netlists match after substituting the declared module name."""
+    ta = left.read_text(encoding="utf-8", errors="replace")
+    tb = right.read_text(encoding="utf-8", errors="replace")
+    na, nb = declared_module_name(ta), declared_module_name(tb)
+    if not na or not nb:
+        return ta == tb
+    token = "__GATE_MOD__"
+
+    def norm(text: str, name: str) -> str:
+        return re.sub(rf"\b{re.escape(name)}\b", token, text)
+
+    return norm(ta, na) == norm(tb, nb)
+
+
+def collect_layer_netlists(rtl_root: Path) -> dict[str, Path]:
+    """rtl/<layer>/*.v and rtl/<layer>/hooks/*.v, keyed by layer-relative path."""
+    out: dict[str, Path] = {}
+    if not rtl_root.is_dir():
+        return out
+    for layer_dir in sorted(rtl_root.iterdir()):
+        if not layer_dir.is_dir():
+            continue
+        if layer_dir.name in LAYER_SKIP or layer_dir.name == "gen":
+            continue
+        for path in sorted(layer_dir.iterdir()):
+            if path.is_file() and path.suffix.lower() in RTL_SOURCE_SUFFIXES:
+                out[f"{layer_dir.name}/{path.name}"] = path
+        hooks = layer_dir / "hooks"
+        if hooks.is_dir():
+            for path in sorted(hooks.iterdir()):
+                if path.is_file() and path.suffix.lower() in RTL_SOURCE_SUFFIXES:
+                    out[f"{layer_dir.name}/hooks/{path.name}"] = path
+    return out
+
+
+def packed_width(packed: str) -> int:
+    """Bits in a packed range like ``[15:0]`` / ``[108:0]``. Scalar → 1."""
+    text = (packed or "").strip()
+    if not text:
+        return 1
+    m = re.fullmatch(r"\[\s*(\d+)\s*:\s*(\d+)\s*\]", text)
+    if not m:
+        return 1
+    hi, lo = int(m.group(1)), int(m.group(2))
+    return abs(hi - lo) + 1
+
+
+def packed_range_for_width(width: int) -> str:
+    if width <= 1:
+        return ""
+    return f"[{width - 1}:0]"
+
+
+def default_verilog_incdirs(extra: list[Path] | None = None) -> list[Path]:
+    """``rtl/pyc_lib`` when present, then any caller extras. No regex include hunt."""
+    out: list[Path] = []
+    pyc = REPO_ROOT / "rtl" / "pyc_lib"
+    if pyc.is_dir():
+        out.append(pyc.resolve())
+    for item in extra or []:
+        path = Path(item)
+        if path.is_dir():
+            resolved = path.resolve()
+            if resolved not in out:
+                out.append(resolved)
+    return out
+
+
+_PORT_CACHE: dict[tuple[str, int, str, str], list[tuple[str, str, str]]] = {}
+
+
+def parse_port_decls(
+    path: Path,
+    incdirs: list[Path] | None = None,
+    module: str | None = None,
+) -> list[tuple[str, str, str]]:
+    """Ports via Yosys ``read_verilog -sv`` + ``write_json``. No text regex.
+
+    Returns (direction, name, packed_range) in Yosys port order.
+    packed_range is '' for 1-bit or '[15:0]' (including brackets).
+    Include path: ``-I rtl/pyc_lib`` when that directory exists, else extras only.
+    """
+    yosys = shutil_which("yosys")
+    if not yosys:
+        die("yosys is required to parse Verilog ports (no regex fallback)")
+    src = path.resolve()
+    incs = default_verilog_incdirs(incdirs)
+    key = (
+        str(src),
+        src.stat().st_mtime_ns if src.is_file() else 0,
+        module or "",
+        ":".join(str(p) for p in incs),
+    )
+    cached = _PORT_CACHE.get(key)
+    if cached is not None:
+        return list(cached)
+    inc_args = " ".join(f"-I{d}" for d in incs)
+    with tempfile.TemporaryDirectory(prefix="gate-ports-") as tmp:
+        js = Path(tmp) / "ports.json"
+        script = (
+            f"read_verilog -sv {inc_args} {src}\n"
+            "proc\n"
+            f"write_json {js}\n"
+        )
+        proc = run_cmd([yosys, "-q", "-p", script], timeout=90)
+        if proc.returncode != 0 or not js.is_file() or js.stat().st_size == 0:
+            log = (proc.stdout or "").strip()[-400:]
+            die(
+                f"yosys failed to read ports from {rel(src)} "
+                f"(exit {proc.returncode}): {log}"
+            )
+        data = json.loads(js.read_text(encoding="utf-8"))
+    modules = (data or {}).get("modules") or {}
+    want = module or src.stem
+    chosen = None
+    if want in modules:
+        chosen = want
+    else:
+        for name in modules:
+            if name == "pyc_reg" or name.startswith("$paramod"):
                 continue
-            ports.append((kind.lower(), name))
-    return ports
+            chosen = name
+            break
+    if chosen is None:
+        die(f"yosys JSON has no module for {rel(src)} (wanted {want})")
+    ports: list[tuple[str, str, str]] = []
+    for name, spec in (modules[chosen].get("ports") or {}).items():
+        kind = str(spec.get("direction") or "input").lower()
+        width = len(spec.get("bits") or [])
+        ports.append((kind, name, packed_range_for_width(width)))
+    _PORT_CACHE[key] = ports
+    return list(ports)
+
+
+def parse_ports(
+    path: Path,
+    incdirs: list[Path] | None = None,
+    module: str | None = None,
+) -> list[tuple[str, str]]:
+    """Return (direction, name) from the Yosys port table."""
+    return [
+        (kind, name)
+        for kind, name, _packed in parse_port_decls(path, incdirs=incdirs, module=module)
+    ]
+
+
+def port_width_map(
+    path: Path,
+    incdirs: list[Path] | None = None,
+    module: str | None = None,
+) -> dict[str, int]:
+    return {
+        name: packed_width(packed)
+        for _k, name, packed in parse_port_decls(path, incdirs=incdirs, module=module)
+    }
 
 
 def collect_blackbox_findings(check: str = "lint") -> list[Finding]:

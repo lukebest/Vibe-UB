@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -34,6 +35,10 @@ from gatelib import (
 
 # HOOKS netlists are lint/CDC only (CODING_STYLE §1). Synth-check is PRODUCT.
 HOOKS_DIR_PARTS = {"hooks", "hooks1"}
+# Observed wall on main is ~8.5–12.5 min (several modules hit the old 120s
+# cap). Per-module 180s + job timeout-minutes 25 leaves headroom without
+# hanging the runner for the GHA default 360 min.
+MODULE_TIMEOUT_S = 180
 
 
 def is_product(path: Path) -> bool:
@@ -43,30 +48,70 @@ def is_product(path: Path) -> bool:
     return not (parts & HOOKS_DIR_PARTS)
 
 
+# Async-reset FF cell types. Latch exemption only — never skip the line.
+_ASYNC_FF_CELL = re.compile(
+    r"\$(?:adff|adffe|aldff|aldffe|dffsr|dffsre)\b|\$_DFF_(?:PN|NP)|_DFFSR_",
+    re.I,
+)
+# Real latches only. Do not match $adff / select-command text / $_DFF_PN0_.
+_LATCH_STAT = re.compile(
+    r"^\s+(\$(?:dlatch|adlatch|dlatchsr)\b|\$_DLATCH\S*)\s+\d+\s*$",
+    re.I,
+)
+_LATCH_INFERRED = re.compile(r"^Latch inferred for signal\b", re.I)
+_COMBO_LOOP_HIT = re.compile(
+    r"Warning:\s+found logic loop|"
+    r"combinational loop|"
+    r"Found an SCC:|"
+    r"Found [1-9]\d* SCCs\b",
+    re.I,
+)
+_MULTI_DRIVE = re.compile(r"multiple conflicting drivers|multiple drivers", re.I)
+# Sequential / memory / latch cells excluded from the SCC graph so a Q→D
+# cycle through $adff/$dff is not reported as a combinational loop.
+_SCC_SEQ_TYPES = (
+    "t:$dff t:$dffe t:$adff t:$adffe t:$aldff t:$aldffe "
+    "t:$dffsr t:$dffsre t:$sdff t:$sdffe t:$sdffce t:$ff "
+    "t:$dlatch t:$adlatch t:$dlatchsr "
+    "t:$mem t:$mem_v2 t:$memrd t:$memwr t:$meminit t:$meminit_v2 "
+    "t:$_DFF* t:$_SDFF* t:$_DLATCH* t:$_FF*"
+)
+
+
 def parse_yosys(text: str, module: str, file: str) -> list[Finding]:
+    """Parse Yosys synth-check log.
+
+    Async-reset FFs ($adff / $adffe / $dffsr and mapped $_DFF_PN*) are not
+    latches. That exemption applies only to LATCH: do not `continue` the
+    line, so MULTI_DRIVE and COMBO_LOOP still fire. Ignore the
+    `select -list t:$dlatch …` command echo and the
+    `Executing SCC pass (detecting logic loops)` banner.
+    """
     findings: list[Finding] = []
-    latch_cells = []
+    latch_cells: list[str] = []
     for line in text.splitlines():
-        if re.search(r"\$dlatch|\$adlatch|\$dlatchsr", line, re.I):
-            latch_cells.append(line.strip())
-        if re.search(r"multiple conflicting drivers|multiple drivers", line, re.I):
+        stripped = line.strip()
+        if _LATCH_STAT.match(line) or _LATCH_INFERRED.match(stripped):
+            if not _ASYNC_FF_CELL.search(stripped):
+                latch_cells.append(stripped)
+        if _MULTI_DRIVE.search(line):
             findings.append(
                 Finding(
                     check="synth",
                     module=module,
                     file=file,
                     rule="MULTI_DRIVE",
-                    message=line.strip(),
+                    message=stripped,
                 )
             )
-        if re.search(r"logic loop|combinational loop|found loop", line, re.I):
+        if _COMBO_LOOP_HIT.search(line):
             findings.append(
                 Finding(
                     check="synth",
                     module=module,
                     file=file,
                     rule="COMBO_LOOP",
-                    message=line.strip(),
+                    message=stripped,
                 )
             )
         if re.search(r"ERROR:", line):
@@ -77,7 +122,7 @@ def parse_yosys(text: str, module: str, file: str) -> list[Finding]:
                         module=module,
                         file=file,
                         rule="YOSYS_ERROR",
-                        message=line.strip(),
+                        message=stripped,
                     )
                 )
     if latch_cells:
@@ -158,7 +203,11 @@ def synth_module(
             "opt_clean",
             "select -list t:$dlatch t:$adlatch t:$dlatchsr",
             "check",
-            "scc",
+            # Combo-only SCC: invert sequential/memory/latch cells so the
+            # graph keeps wires + combo cells. Yosys 0.33 `scc` default
+            # walks all internal non-memory cells, including $adff/$dff.
+            f"select -set _gate_seq {_SCC_SEQ_TYPES}",
+            "scc @_gate_seq %n",
             # -noabc: structural pass/fail only. QoR ABC mapping is not a gate
             # (implementation owns scripts/impl/quick_synth.sh).
             f"synth -top {module} -noabc",
@@ -167,12 +216,12 @@ def synth_module(
         ]
     )
     try:
-        proc = run_cmd(["yosys", "-p", script], timeout=120)
+        proc = run_cmd(["yosys", "-p", script], timeout=MODULE_TIMEOUT_S)
         text = proc.stdout or ""
         rc = proc.returncode
     except subprocess.TimeoutExpired as exc:
         text = (exc.stdout or "") if isinstance(exc.stdout, str) else ""
-        text += f"\nTIMEOUT after 120s on {module}"
+        text += f"\nTIMEOUT after {MODULE_TIMEOUT_S}s on {module}"
         rc = 124
     print(f"--- yosys synth {module} ({rel(file)}) ---")
     # Keep the log readable: last 40 lines always include stat / errors.
@@ -188,7 +237,7 @@ def synth_module(
                 module=module,
                 file=rel(file),
                 rule="SYNTH_TIMEOUT",
-                message="yosys exceeded 120s (structural synth -noabc)",
+                message=f"yosys exceeded {MODULE_TIMEOUT_S}s (structural synth -noabc)",
             )
         )
     elif rc != 0 and not findings:
@@ -227,6 +276,8 @@ def main() -> int:
     if not modules:
         print("synth-check: no PRODUCT modules; PASS")
         return emit_report("synth", [])
+    timings: list[tuple[str, float]] = []
+    t_job = time.monotonic()
     for unit in modules:
         if unit.module in skip:
             print(f"synth-check skip top {unit.module}: listed in blackbox.yml (used as -lib)")
@@ -263,10 +314,21 @@ def main() -> int:
                 f"synth-check {unit.module}: -lib large ub_cmn_mem_1r1w "
                 f"{[rel(p) for p in extra_lib]}"
             )
+        t0 = time.monotonic()
         f, _ = synth_module(
             unit.module, unit.file, needed, disc["incdirs"], lib_extra=extra_lib
         )
+        elapsed = time.monotonic() - t0
+        timings.append((unit.module, elapsed))
         findings.extend(f)
+    timings.sort(key=lambda item: item[1], reverse=True)
+    print(
+        f"synth-check wall {time.monotonic() - t_job:.1f}s; "
+        f"per-module timeout={MODULE_TIMEOUT_S}s"
+    )
+    print("synth-check slowest 3 modules:")
+    for name, sec in timings[:3]:
+        print(f"  {name}: {sec:.1f}s")
     return emit_report("synth", findings)
 
 

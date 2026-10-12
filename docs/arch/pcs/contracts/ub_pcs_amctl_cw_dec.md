@@ -31,7 +31,7 @@ status: draft
 
 # 公开信号契约 — `ub_pcs_amctl_cw_dec`
 
-YAML 机读头按 [docs/arch/mem/contracts/README.md](../../mem/contracts/README.md) §8 的固定键写（`leaf` / `parent` / `clock` / `latency` / `ports` / `params` / `ill_cause_width` / `status`）。寄存叶子不写 `comb_budget_ns`。该 README 现于 PR #43，尚未合入 main；本 PR 不把它并进来。schema 源就是那一份，本文件不另立键。
+YAML 机读头按 [docs/arch/mem/contracts/README.md](../../mem/contracts/README.md) §8 的固定键写（`leaf` / `parent` / `clock` / `latency` / `ports` / `params` / `ill_cause_width` / `status`）。寄存叶子不写 `comb_budget_ns`。schema 源是 main 上那一份（#43 已合入 `5b0b9fc3`）。本文件不另立键。
 
 | 项 | 值 |
 | --- | --- |

@@ -17,9 +17,9 @@
 # hooks-port-consistency may be red until #50 registers the ports.
 
 [tasks]
-cover default
-bmc
-prove
+cover default uncon
+bmc uncon
+prove uncon
 bmc_contract
 
 [options]
@@ -59,6 +59,7 @@ opt
 memory -nomap
 opt -purge
 --
+uncon:
 read -formal ub_mem_ptw.v
 read -formal ub_mem_ptw_if_props.sv
 read -formal ub_mem_ptw_hooks_inv.sv
@@ -72,6 +73,7 @@ flatten
 opt
 memory -nomap
 opt -purge
+--
 
 [files]
 ub_mem_ptw_if_props.sv

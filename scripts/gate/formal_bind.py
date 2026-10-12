@@ -47,9 +47,35 @@ SBY_FILE_RE = re.compile(
 LITERAL_RE = re.compile(r"^(\d+'[sS]?[bBhHdD][0-9a-fA-FxXzZ_]+|\d+)$")
 
 
-def sby_listed_paths(sby_path: Path, repo_root: Path) -> list[Path]:
+def sby_run_cwd(sby_path: Path) -> Path:
+    """SymbiYosys [files] tokens are relative to the .sby directory."""
+    return sby_path.resolve().parent
+
+
+def resolve_sby_file_token(
+    token: str, sby_path: Path, repo_root: Path
+) -> Path | None:
+    token = token.strip().strip("\"'")
+    if not token:
+        return None
+    path = Path(token)
+    candidates: list[Path] = []
+    if path.is_absolute():
+        candidates.append(path)
+    else:
+        # Sibling first — same as `cd formal/<iface> && sby -f <iface>.sby`.
+        candidates.append(sby_path.parent / token)
+        candidates.append(repo_root / token)
+    for cand in candidates:
+        if cand.is_file():
+            return cand.resolve()
+    return None
+
+
+def sby_files_section_tokens(sby_path: Path) -> list[str]:
+    """Tokens from the [files] section only (script `read -sv` is not a path)."""
     text = sby_path.read_text(encoding="utf-8", errors="replace")
-    listed: list[Path] = []
+    tokens: list[str] = []
     section = ""
     for raw in text.splitlines():
         line = raw.strip()
@@ -58,27 +84,28 @@ def sby_listed_paths(sby_path: Path, repo_root: Path) -> list[Path]:
             continue
         if not line or line.startswith("#"):
             continue
-        candidates: list[str] = []
         if section == "files":
-            candidates.append(line.split()[0])
-        for m in SBY_FILE_RE.finditer(line):
-            candidates.append(m.group(1))
-        for token in candidates:
-            token = token.strip("\"'")
-            path = Path(token)
-            if not path.is_absolute():
-                path = (repo_root / token).resolve() if (repo_root / token).exists() else (
-                    sby_path.parent / token
-                ).resolve()
-            if path.is_file():
-                listed.append(path)
+            tokens.append(line.split()[0].strip("\"'"))
+    return tokens
+
+
+def sby_listed_paths(sby_path: Path, repo_root: Path) -> list[Path]:
+    listed: list[Path] = []
+    for token in sby_files_section_tokens(sby_path):
+        path = resolve_sby_file_token(token, sby_path, repo_root)
+        if path is not None:
+            listed.append(path)
+    text = sby_path.read_text(encoding="utf-8", errors="replace")
+    for m in SBY_FILE_RE.finditer(text):
+        path = resolve_sby_file_token(m.group(1), sby_path, repo_root)
+        if path is not None:
+            listed.append(path)
     # Also accept sibling assertion files referenced by name only.
     for m in re.finditer(r"([A-Za-z0-9_./-]+\.(?:sv|v|svh|vh))", text):
         token = m.group(1)
-        for base in (repo_root, sby_path.parent):
-            cand = (base / token).resolve()
-            if cand.is_file():
-                listed.append(cand)
+        path = resolve_sby_file_token(token, sby_path, repo_root)
+        if path is not None:
+            listed.append(path)
     # unique, stable
     seen: set[Path] = set()
     out: list[Path] = []
@@ -89,6 +116,18 @@ def sby_listed_paths(sby_path: Path, repo_root: Path) -> list[Path]:
         seen.add(rp)
         out.append(rp)
     return out
+
+
+def sby_missing_files(sby_path: Path, repo_root: Path) -> list[str]:
+    missing: list[str] = []
+    seen: set[str] = set()
+    for token in sby_files_section_tokens(sby_path):
+        if token in seen:
+            continue
+        seen.add(token)
+        if resolve_sby_file_token(token, sby_path, repo_root) is None:
+            missing.append(token)
+    return missing
 
 
 def extract_bind_signals(text: str) -> list[tuple[str, list[str]]]:
@@ -154,13 +193,38 @@ def find_netlist_for_module(
     return hooks[0] if hooks else found[0]
 
 
+def discover_sby_files(repo_root: Path) -> list[Path]:
+    """Only ``formal/<iface>/*.sby``. Skip sby workdirs (``*_bmc/config.sby``)."""
+    formal = repo_root / "formal"
+    if not formal.is_dir():
+        return []
+    out: list[Path] = []
+    for iface in sorted(p for p in formal.iterdir() if p.is_dir()):
+        for sby in sorted(iface.glob("*.sby")):
+            out.append(sby)
+    return out
+
+
 def check_formal_binds(repo_root: Path, check: str = "formal") -> list[Finding]:
     findings: list[Finding] = []
     formal = repo_root / "formal"
     if not formal.is_dir():
         return findings
-    sby_files = sorted(formal.rglob("*.sby"))
+    sby_files = discover_sby_files(repo_root)
     for sby in sby_files:
+        for token in sby_missing_files(sby, repo_root):
+            findings.append(
+                Finding(
+                    check=check,
+                    module="*",
+                    file=rel(sby),
+                    rule="SBY_FILE_MISSING",
+                    message=(
+                        f"[files] {token} not found next to {rel(sby)} "
+                        f"(cwd must be {rel(sby_run_cwd(sby))}) or at repo root"
+                    ),
+                )
+            )
         listed = sby_listed_paths(sby, repo_root)
         sources = [p for p in listed if p.suffix.lower() in {".sv", ".v", ".svh"}]
         if sby not in sources:
@@ -212,9 +276,7 @@ def check_formal_binds(repo_root: Path, check: str = "formal") -> list[Finding]:
 def main() -> int:
     print_tool_versions(["python", "sby", "yosys"])
     findings = check_formal_binds(REPO_ROOT)
-    n_sby = len(list((REPO_ROOT / "formal").rglob("*.sby"))) if (
-        REPO_ROOT / "formal"
-    ).is_dir() else 0
+    n_sby = len(discover_sby_files(REPO_ROOT))
     print(f"formal bind-existence: {n_sby} .sby file(s), {len(findings)} finding(s)")
     return emit_report("formal", findings)
 

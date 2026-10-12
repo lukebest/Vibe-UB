@@ -4,11 +4,11 @@
 #
 # ub_mem_ptw_desc_dec is supplied only by ub_mem_ptw_desc_dec_cut.sv
 # ($anyseq on every output). Never the PRODUCT stub, never a module
-# inlined in rtl/mem/ub_mem_ptw.v. After read of the walker, `delete`
-# drops a leftover stub if the walker file still has one (#48
-# 7f35b31); missing-module delete is a warning. Then the cut is the
-# only definition. No duplicate. Properties must hold for ANY decode
-# result. No private bit-layout is read or written.
+# inlined in rtl/mem/ub_mem_ptw.v. After read -formal of the walker,
+# `delete $abstract\ub_mem_ptw_desc_dec` drops a leftover stub AST
+# (#48 7f35b31 still inlines one); missing delete is a warning.
+# Then the cut is the only definition. No duplicate. Properties
+# must hold for ANY decode result. No private bit-layout.
 #
 # pyc_reg.v is only rtl/pyc_lib/pyc_reg.v (#21). This PR does not
 # copy it. formal.sh / sby [files] stay red until #21 lands.
@@ -57,10 +57,11 @@ smtbmc yices
 read -formal ub_mem_ptw.v
 read -formal ub_mem_ptw_if_props.sv
 read -formal ub_mem_ptw_harness.sv
-# Only definition of ub_mem_ptw_desc_dec is the cut. Drop a stub
-# that may still be in the walker file; then read the cut; then
-# hierarchy once. Do not blackbox (sby prep flatten errors).
-delete ub_mem_ptw_desc_dec
+# Only definition of ub_mem_ptw_desc_dec is the cut. read -formal
+# keeps an inlined stub as $abstract\ub_mem_ptw_desc_dec; delete
+# that (warning if #48 already split the stub out), then read the
+# cut, then hierarchy once. Do not blackbox (sby prep flatten errors).
+delete $abstract\ub_mem_ptw_desc_dec
 read -formal ub_mem_ptw_desc_dec_cut.sv
 hierarchy -check -top ub_mem_ptw_harness
 proc

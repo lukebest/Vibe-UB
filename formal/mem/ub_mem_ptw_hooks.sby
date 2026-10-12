@@ -47,7 +47,7 @@ read -formal ub_mem_ptw.v
 read -formal ub_mem_ptw_if_props.sv
 read -formal ub_mem_ptw_hooks_inv.sv
 read -formal ub_mem_ptw_hooks_harness.sv
-delete ub_mem_ptw_desc_dec
+delete $abstract\ub_mem_ptw_desc_dec
 read -formal ub_mem_ptw_desc_dec_cut.sv
 hierarchy -check -top ub_mem_ptw_hooks_harness
 proc

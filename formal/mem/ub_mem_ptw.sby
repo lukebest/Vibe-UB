@@ -16,14 +16,15 @@
 #   cover — reach event, MATT_WD complete, read+rsp, fill,
 #           backpressured table-read then accept
 #   bmc   — port safety (Q-A08 / Q-C07) + AP_TBLRD_REQ_HOLD (SPEC §14)
-# prove is not a default task (k-induction is not needed for these
-# port properties; keep the gate under ~90 s).
+# prove is defined but not tagged `default`, so the gate does not run
+# it yet. Manual: `sby -f ub_mem_ptw.sby prove` (k-induction, yices).
 #
 # [files] are relative to this directory (sby_dir = formal/mem/).
 
 [tasks]
-cover
-bmc
+cover default
+bmc default
+prove
 
 [options]
 cover:
@@ -33,6 +34,10 @@ depth 16
 bmc:
 mode bmc
 depth 16
+--
+prove:
+mode prove
+depth 20
 --
 
 [engines]

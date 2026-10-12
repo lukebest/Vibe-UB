@@ -5,10 +5,14 @@ Does not splice Verilog by hand (D5). Both .py and .v carry:
 
     // contract_sha256: <hex>
     // generated-by: scripts/gate/gen_private_stub.py
+
+``--formal-free`` writes formal/<layer>/cut/<leaf>.sv: outputs driven by
+``(* anyseq *)`` free inputs (Yosys/SBY cut). Same header.
 """
 
 from __future__ import annotations
 
+import argparse
 import shutil
 import sys
 from pathlib import Path
@@ -86,6 +90,77 @@ def header_lines(digest: str) -> str:
     return f"// contract_sha256: {digest}\n// generated-by: {GENERATED_BY}\n"
 
 
+def formal_cut_path(root: Path, layer: str, leaf: str) -> Path:
+    return root / "formal" / layer / "cut" / f"{leaf}.sv"
+
+
+def _sv_range(width: object) -> str:
+    try:
+        n = int(width)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        n = 1
+    if n <= 1:
+        return ""
+    return f"[{n - 1}:0] "
+
+
+def render_formal_cut(data: dict, digest: str) -> str:
+    """Cut module: outputs are (* anyseq *) free wires, not stub constants."""
+    leaf = str(data["leaf"])
+    ports = data.get("ports") if isinstance(data.get("ports"), list) else []
+    clock = data.get("clock") if isinstance(data.get("clock"), dict) else {}
+    clk_name = str(clock.get("name") or "core_clk")
+    rst_name = str(clock.get("reset") or "rst_pyc")
+    decls: list[str] = [f"  input {clk_name}", f"  input {rst_name}"]
+    assigns: list[str] = []
+    seen = {clk_name, rst_name}
+    for port in ports:
+        if not isinstance(port, dict):
+            continue
+        name = str(port.get("name") or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        rng = _sv_range(port.get("width"))
+        direction = port.get("dir")
+        if direction == "in":
+            decls.append(f"  input {rng}{name}")
+        else:
+            decls.append(f"  output {rng}{name}")
+            assigns.append(f"  (* anyseq *) logic {rng}{name}_free;")
+            assigns.append(f"  assign {name} = {name}_free;")
+    lines = [
+        header_lines(digest).rstrip(),
+        f"// formal-free cut: outputs are free inputs (anyseq)",
+        f"module {leaf} (",
+        ",\n".join(decls),
+        ");",
+        *assigns,
+        "endmodule",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def generate_formal_cut(path: Path, root: Path, out: Path | None = None) -> Path:
+    data, errs = parse_contract_file(path, root)
+    if data is None or errs:
+        msg = "; ".join(e.message for e in errs) if errs else "parse failed"
+        raise SystemExit(f"ERROR: {path}: {msg}")
+    digest = contract_sha256(path)
+    layer = str(data["_layer"])
+    leaf = str(data["leaf"])
+    dest = out or formal_cut_path(root, layer, leaf)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(render_formal_cut(data, digest), encoding="utf-8")
+    try:
+        shown = dest.relative_to(root)
+    except ValueError:
+        shown = dest
+    print(f"wrote {shown}")
+    return dest
+
+
 def _find_pycc() -> str | None:
     found = shutil.which("pycc")
     if found:
@@ -148,18 +223,26 @@ def generate_one(path: Path, root: Path) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = list(sys.argv[1:] if argv is None else argv)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--formal-free", action="store_true")
+    parser.add_argument("--output", type=Path, help="cut .sv path (one contract)")
+    parser.add_argument("--all", action="store_true")
+    parser.add_argument("contracts", nargs="*", type=Path)
+    ns = parser.parse_args(list(sys.argv[1:] if argv is None else argv))
     root = REPO_ROOT
-    if args == ["--all"] or not args:
+    files = list(ns.contracts)
+    if ns.all or not files:
         files = discover_contract_files(root)
         if not files:
             print("gen_private_stub: no docs/arch/*/contracts/*.md")
             return 0
-        for path in files:
+    if ns.output is not None and len(files) != 1:
+        raise SystemExit("ERROR: --output requires exactly one contract")
+    for path in files:
+        if ns.formal_free:
+            generate_formal_cut(path, root, ns.output)
+        else:
             generate_one(path, root)
-        return 0
-    for raw in args:
-        generate_one(Path(raw), root)
     return 0
 
 

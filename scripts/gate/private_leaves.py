@@ -963,6 +963,91 @@ def check_stubs(root: Path, contracts: list[dict[str, Any]]) -> list[Finding]:
     return findings
 
 
+def iter_formal_cuts(root: Path) -> list[Path]:
+    formal = root / "formal"
+    if not formal.is_dir():
+        return []
+    out: list[Path] = []
+    for layer in sorted(p for p in formal.iterdir() if p.is_dir()):
+        cut = layer / "cut"
+        if not cut.is_dir():
+            continue
+        for path in sorted(cut.glob("*")):
+            if path.suffix.lower() in {".sv", ".v"} and path.is_file():
+                out.append(path)
+    return out
+
+
+def formal_cut_handwritten_required(root: Path) -> bool:
+    proc = run_cmd(
+        ["git", "show", "origin/main:docs/rules/verif_gate.md"],
+        cwd=root,
+    )
+    if proc.returncode != 0:
+        return False
+    return "CUT_HANDWRITTEN" in (proc.stdout or "") or "formal/<layer>/cut" in (
+        proc.stdout or ""
+    )
+
+
+def check_formal_cuts(root: Path, contracts: list[dict[str, Any]]) -> list[Finding]:
+    """formal/<layer>/cut/<leaf>.sv must carry contract_sha256 or HANDWRITTEN."""
+    findings: list[Finding] = []
+    by_leaf = {str(c.get("leaf")): c for c in contracts if c.get("leaf")}
+    hw_bucket = "new" if formal_cut_handwritten_required(root) else "report"
+    for path in iter_formal_cuts(root):
+        leaf = path.stem
+        file_rel = path.relative_to(root).as_posix()
+        text = path.read_text(encoding="utf-8", errors="replace")
+        got = read_contract_hash_header(text)
+        if got is None:
+            findings.append(
+                Finding(
+                    check="contract",
+                    module=leaf,
+                    file=file_rel,
+                    rule="STUB_HASH_MISSING",
+                    message="cut header missing contract_sha256: <hex>|HANDWRITTEN",
+                )
+            )
+            continue
+        if got == "HANDWRITTEN":
+            findings.append(
+                Finding(
+                    check="contract",
+                    module=leaf,
+                    file=file_rel,
+                    rule="STUB_HANDWRITTEN",
+                    message=(
+                        "handwritten formal cut (contract_sha256: HANDWRITTEN); "
+                        "regenerate with gen_private_stub.py --formal-free"
+                    ),
+                    bucket=hw_bucket,
+                    severity="error" if hw_bucket == "new" else "warning",
+                )
+            )
+            continue
+        data = by_leaf.get(leaf)
+        if data is None:
+            continue
+        expect = str(data.get("_yaml_hash") or "")
+        if expect and got.lower() != expect:
+            findings.append(
+                Finding(
+                    check="contract",
+                    module=leaf,
+                    file=file_rel,
+                    rule="STUB_HASH_MISMATCH",
+                    message=(
+                        f"formal cut contract_sha256 {got[:12]}… != "
+                        f"current contract {expect[:12]}…; "
+                        "re-run gen_private_stub.py --formal-free"
+                    ),
+                )
+            )
+    return findings
+
+
 def attest_path(root: Path, layer: str, leaf: str) -> Path:
     return root / ATTEST_DIR / layer / f"{leaf}.yml"
 
@@ -1310,6 +1395,7 @@ def collect_contract_findings(
     root = root or REPO_ROOT
     findings, contracts = check_all_contracts(root)
     findings.extend(check_stubs(root, contracts))
+    findings.extend(check_formal_cuts(root, contracts))
     findings.extend(check_attests(root, contracts))
     findings.extend(check_hash_single(root))
     if paths is None:

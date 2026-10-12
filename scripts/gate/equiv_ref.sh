@@ -189,7 +189,9 @@ if [[ "$LEAF" == ub_dll_bcrc_check ]] \
   gate_read="read_verilog -sv ${ROOT}/formal/dll/ref/ub_dll_bcrc.sv; ${gate_read}"
 fi
 
-BB_YS="$(python3 -P "$(cd "$(dirname "$0")" && pwd)/equiv_blackbox.py" --ys 2>/dev/null || true)"
+GATE_PY="$(cd "$(dirname "$0")" && pwd)"
+BB_YS="$(python3 -P "$GATE_PY/equiv_blackbox.py" --ys 2>/dev/null || true)"
+python3 -P "$GATE_PY/equiv_blackbox.py" --log-parent "$LEAF" --files "${GOLD_FILES[@]}" "$NET_ABS" || true
 prep_gold="
 ${gold_read}
 ${gold_ch}

@@ -1454,6 +1454,7 @@ def main() -> int:
         f"equiv_ref REGPAIR pairs={len(pairs)} unmatched={len(unmatched_gold) + len(unmatched_gate)} "
         f"unmatched_gold={len(unmatched_gold)} unmatched_gate={len(unmatched_gate)}"
     )
+    print(f"EQUIV_COMPARE {args.leaf} outputs=0 pairs={len(pairs)}")
     for key, g, t in pairs:
         print(
             f"equiv_ref REGPAIR pair key={key} width={g.width} "

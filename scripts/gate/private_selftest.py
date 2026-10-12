@@ -16,6 +16,7 @@ from private_leaves import (
     WAIVER_UNCHECKED_MSG,
     check_attests,
     check_hash_single,
+    check_formal_cuts,
     check_owned_paths,
     check_role_dirs,
     check_stubs,
@@ -465,6 +466,38 @@ def test_stub_handwritten_report() -> None:
             _fail("stub-handwritten", "must be report-only until the script is on main")
 
 
+def test_formal_cut_header() -> None:
+    from gen_private_stub import generate_formal_cut, render_formal_cut
+
+    yaml = VALID_YAML.replace(
+        "  - {name: rst_pyc, dir: in, width: 1, desc: rst}\n",
+        "  - {name: rst_pyc, dir: in, width: 1, desc: rst}\n"
+        "  - {name: dec_out, dir: out, width: 4, desc: free}\n",
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        path = _write_contract(root, yaml)
+        data, _ = parse_contract_file(path, root)
+        assert data is not None
+        cut = generate_formal_cut(path, root)
+        text = cut.read_text(encoding="utf-8")
+        if "(* anyseq *)" not in text or "dec_out_free" not in text:
+            _fail("formal-cut-anyseq", "cut outputs must be anyseq free inputs")
+        if data["_yaml_hash"] not in text:
+            _fail("formal-cut-hash", "cut must carry contract_sha256")
+        if any(f.rule == "STUB_HASH_MISMATCH" for f in check_formal_cuts(root, [data])):
+            _fail("formal-cut-ok", "matching cut hash must pass")
+        print("SELFTEST PASS formal-cut-ok: anyseq + contract_sha256")
+        cut.write_text(
+            "// contract_sha256: HANDWRITTEN\nmodule ub_mem_toy_dec; endmodule\n",
+            encoding="utf-8",
+        )
+        hit = _expect("formal-cut-handwritten", check_formal_cuts(root, [data]), "STUB_HANDWRITTEN")
+        if hit.bucket != "report":
+            _fail("formal-cut-handwritten", "HANDWRITTEN cut is report-only until #47")
+        _ = render_formal_cut(data, data["_yaml_hash"])
+
+
 def test_attest_ok_and_missing() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -800,6 +833,7 @@ def run_all() -> None:
         test_comb_budget,
         test_stub_hash_match_and_mismatch,
         test_stub_handwritten_report,
+        test_formal_cut_header,
         test_attest_ok_and_missing,
         test_attest_public_path_not_private_repo,
         test_attest_hash_mismatch,

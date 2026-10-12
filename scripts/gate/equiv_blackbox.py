@@ -57,11 +57,27 @@ def ys_blackbox_cmds(names: list[str] | None = None, root: Path | None = None) -
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ys", action="store_true", help="print Yosys blackbox lines")
+    parser.add_argument("--log-parent", default="", help="print EQUIV_BLACKBOX lines")
+    parser.add_argument("--files", nargs="*", default=[], help="RTL to scan for instances")
     args = parser.parse_args()
     names = equiv_blackbox_set(REPO_ROOT)
     if args.ys:
         for line in ys_blackbox_cmds(names):
             print(line)
+        return 0
+    if args.log_parent:
+        from formal_parent_free import instantiated_leaf_instances
+
+        parent = args.log_parent
+        leaves = set(names)
+        for raw in args.files:
+            path = Path(raw)
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for leaf in instantiated_leaf_instances(text, leaves):
+                print(f"EQUIV_BLACKBOX {leaf} in {parent}")
         return 0
     print(f"equiv blackbox set ({len(names)}): {', '.join(names) or '(empty)'}")
     return 0

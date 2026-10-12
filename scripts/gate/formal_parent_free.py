@@ -163,10 +163,11 @@ def assume_bodies(text: str) -> list[str]:
     return bodies
 
 
-def instantiated_leaves(text: str, leaves: set[str]) -> set[str]:
+def instantiated_leaf_instances(text: str, leaves: set[str]) -> list[str]:
+    """One entry per instance (same leaf may repeat)."""
     clean = strip_verilog_comments(text)
-    found: set[str] = set()
-    for leaf in leaves:
+    found: list[str] = []
+    for leaf in sorted(leaves):
         pat = re.compile(
             rf"\b{re.escape(leaf)}\s+(?:#\s*\([^;]*?\))?\s*"
             rf"(?:[A-Za-z_][A-Za-z0-9_]*\s*)?(?:\[[^\]]*\]\s*)?\(",
@@ -178,8 +179,12 @@ def instantiated_leaves(text: str, leaves: set[str]) -> set[str]:
                 continue
             if before.endswith("bind") or re.search(r"\bbind$", before):
                 continue
-            found.add(leaf)
+            found.append(leaf)
     return found
+
+
+def instantiated_leaves(text: str, leaves: set[str]) -> set[str]:
+    return set(instantiated_leaf_instances(text, leaves))
 
 
 def check_formal_parent_free(root: Path) -> list[Finding]:

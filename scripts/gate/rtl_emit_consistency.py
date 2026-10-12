@@ -60,7 +60,7 @@ from hooks_port_consistency import compare_ports
 from large_mem_manifest import check_large_mem_manifest
 from equiv_blackbox import contract_leaf_names, equiv_blackbox_set
 from formal_depth import write_equiv_status
-from formal_parent_free import instantiated_leaves
+from formal_parent_free import instantiated_leaf_instances
 from private_leaves import is_private_leaf, private_skip_finding
 from pyc_lib_check import check_pyc_lib, check_pyclib_single
 
@@ -563,18 +563,28 @@ def run_emit_rtl_isolated() -> tuple[list[Finding], Path | None, dict[str, objec
     return compare_emitted_rtl(tmp / "rtl", REPO_ROOT / "rtl"), tmp / "rtl", meta
 
 
+def private_flatten_required(root: Path) -> bool:
+    proc = run_cmd(
+        ["git", "show", "origin/main:docs/rules/verif_gate.md"],
+        cwd=root,
+    )
+    if proc.returncode != 0:
+        return False
+    return "EQUIV_PRIVATE_FLATTENED" in (proc.stdout or "")
+
+
 def private_instances_in_files(paths: list[Path], root: Path) -> list[str]:
     leaves = contract_leaf_names(root)
     if not leaves:
         return []
-    found: set[str] = set()
+    found: list[str] = []
     for path in paths:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        found |= instantiated_leaves(text, leaves)
-    return sorted(found)
+        found.extend(instantiated_leaf_instances(text, leaves))
+    return found
 
 
 def product_outputs(product: Path, module: str, incdirs: list[Path] | None) -> list[str]:
@@ -638,8 +648,11 @@ def run_equiv(
         else equiv_blackbox_set(REPO_ROOT)
     )
     detected = private_instances_in_files([product, hooks], REPO_ROOT)
+    boxed_set = set(boxes)
+    missed = [leaf for leaf in detected if leaf not in boxed_set]
     flatten_hit = None
-    if detected and not boxes:
+    if missed:
+        bucket = "new" if private_flatten_required(REPO_ROOT) else "report"
         flatten_hit = Finding(
             check="emit",
             module=module,
@@ -647,20 +660,21 @@ def run_equiv(
             rule="EQUIV_PRIVATE_FLATTENED",
             message=(
                 "private-leaf stub flattened instead of blackboxed: "
-                + ",".join(detected)
+                + ",".join(missed)
             ),
-            bucket="report",
-            severity="warning",
+            bucket=bucket,
+            severity="error" if bucket == "new" else "warning",
         )
         print(
             f"EQUIV_PRIVATE_FLATTENED {module}: instantiated "
-            f"{','.join(detected)} but not blackboxed"
+            f"{','.join(missed)} but not blackboxed"
         )
-    for leaf in boxes:
-        print(f"EQUIV_BLACKBOX {leaf} in {module}")
+    for leaf in detected:
+        if leaf in boxed_set:
+            print(f"EQUIV_BLACKBOX {leaf} in {module}")
     outs = product_outputs(product, module, incs)
     print(
-        f"EQUIV_COMPARE {module} outputs={len(outs)} pairs={len(outs)}"
+        f"EQUIV_COMPARE {module} outputs={len(outs)} pairs=0"
     )
     if status_out is not None:
         status_out[module] = {

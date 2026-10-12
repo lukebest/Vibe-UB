@@ -4,6 +4,7 @@
 
 ### Added
 
+- `tb/tp/`：`ub_tp_bypass` cocotb + Verilator 记分板（LAYER_CONTRACTS §2/§3，UB §6.3.2 / CFG9）。以 `model/tp/ub_tp_bypass.py` 为黄金答案，事务级比对净荷 / dcna / bypass / 置 0 边带 / eop-err；定向 + 随机 + 反压 + flush / link-down。含无 DUT 的 pytest 自检。未知宽口不比对。
 - `model/tp/ub_tp_bypass.py`：CFG9 bypass 传输事务级黄金模型（契约 §2/§3，UB §6.3.2）；净荷直通、无 TPH；TA 字段映到 NW 边带；err/flush/drop 按契约传播。测试在 `model/tests/`。
 - `pycircuit/tp/ub_tp_bypass.py` → `rtl/tp/` 与 `rtl/tp/hooks/`：wave-1 CFG9 bypass 叶（LAYER_CONTRACTS §2/§3；160 b、1 flit/拍、valid/ready；优先通路 16 b DCNA；无 ICRC / RTP / CTP / GBN）。`scripts/emit_rtl.py` / `make emit` 再现。SPEC §10 无 `tb_*`，PRODUCT 与 HOOKS 端口相同。未知宽口不引出，见 `docs/uarch/tp_uarch.md` §11。`formal/tp/` 接口断言；`tb/tp/` 端口自检（无 `model/tp/`）。
 - `docs/uarch/tp_uarch.md`：线 B 第 6 章传输层微架构草案 v0（8 模块；对照 LAYER_CONTRACTS / MODULE_INVENTORY 的 M-1..M-9；15 条开放问题待 Xia）。`RETRY_WAIT_CYC` / `PROBE_WAIT_CYC`（323 拍）归 DLL / LMSM。docs-only。

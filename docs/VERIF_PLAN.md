@@ -570,7 +570,7 @@ FEC / BCRC 错由 D3 PMA 模型改符号，无对应钩子。
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | TP-DEF-NW-001 | UB-NW §5.2 | NTH 解析 / 改写 | — | — | — | — | 推迟 |
 | TP-DEF-NW-002 | UB-NW §5.3 | 路由、隔离、QoS、拥塞标记、ICRC | — | — | — | — | 推迟 |
-| TP-DEF-TP-001 | UB-TP §6.2–§6.4 | RTP/CTP/UTP 与传输重传 | — | — | — | — | 推迟 |
+| TP-DEF-TP-001 | UB-TP §6.2–§6.4 | RTP/CTP/UTP 与传输重传（CFG9 bypass 叶见 §8.9） | — | — | — | — | 推迟 |
 | TP-DEF-TP-002 | UB-TP §6.5–§6.6 | 多路径与拥塞控制 | — | — | — | — | 推迟 |
 | TP-DEF-TA-001 | UB-TA §7.2–§7.4 | 事务头与事务类型 | — | — | — | — | 推迟 |
 | TP-DEF-UP-001 | 第 8、10、11 章 | FUN/RSC/SEC（内存管理见 §8.8） | — | — | — | — | 推迟 |
@@ -784,6 +784,24 @@ FEC / BCRC 错由 D3 PMA 模型改符号，无对应钩子。
 
 本小节范围内：第 9 章已列功能需求均有 TP。App. D.4.1.6 中断接 RSC，等 ch10 契约，不记本小节漏项。
 
+### 8.9 单元级 — wave-1 `ub_tp_bypass`（CFG9）
+
+优先通路 CFG9 bypass 叶（LAYER_CONTRACTS §2 / §3，UB §6.3.2 / B.2.6）。标准答案是 `model/tp/ub_tp_bypass.py`；TB 在 `tb/tp/`（cocotb + Verilator，GATE-TB-SB-001）。契约标 **未知** 的口不比对：`ta2tp_op_len`、`ta2tp_mode`、rspst/rspinfo、24-bit DCNA、NTH.NLP→TAH。wave-1 叶不引出 drop / icrc_err / done / fail / tassn；那些只在模型自检。
+
+| ID | 规范 | 描述 | 激励 | 检查 | 覆盖 | 里程碑 | 状态 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TP-UNIT-TPB-001 | LAYER_CONTRACTS §2 / §3；UB §6.3.2 | 160 b、1 flit/拍；`sop&&eop` 单拍合法 | 定向 1-flit TX | `model/` `UbTpBypass` | cp_tpb_flit | M1 | 计划 |
+| TP-UNIT-TPB-002 | LAYER_CONTRACTS §2 | 多 flit 连续 sop…eop，中间不插包 | 定向 4-flit TX | 同上 | cp_tpb_contig | M1 | 计划 |
+| TP-UNIT-TPB-003 | LAYER_CONTRACTS §2；UB §6.3.2 / B.2.6 | CFG9：净荷直通、无 TPH；`tp2nw_bypass=1` | 定向 + 随机 | 同上 | cp_tpb_notph | M1 | 计划 |
+| TP-UNIT-TPB-004 | LAYER_CONTRACTS §2 | `ta2tp_dcna` → `tp2nw_dcna`；本叶 `sl/nlp/lbf/rt/cci` 置 0 | 定向 dcna / one-hot 数据 | 同上 | cp_tpb_dcna | M1 | 计划 |
+| TP-UNIT-TPB-005 | LAYER_CONTRACTS §2 | `nw2tp_err` 与 eop 对齐 → `tp2ta_err` | RX eop ± err | `receive` | cp_tpb_err | M1 | 计划 |
+| TP-UNIT-TPB-006 | LAYER_CONTRACTS §2；SPEC §3.1 | valid/ready 反压；`ready` 不组合看本拍 `valid` | 拉低 `tp2nw_ready` / `tp2ta_ready` | 无丢 flit；事务与模型一致 | cp_tpb_bp | M1 | 计划 |
+| TP-UNIT-TPB-007 | LAYER_CONTRACTS §2 | `nw_link_up==0` / flush：不得开新 TX 包 | flush / link-down | 无成交；模型拒 `submit` | cp_tpb_flush | M1 | 计划 |
+| TP-UNIT-TPB-008 | LAYER_CONTRACTS §2；B.2.6 | CFG9 无 ICRC；`drop` 丢包（模型口；RTL 未引出） | 模型自检 | `icrc_err=0`；drop 无递交 | cp_tpb_drop | M1 | 计划 |
+| TP-UNIT-TPB-009 | LAYER_CONTRACTS §2；D8 | `randomize` 流量，日志写 seed | 多种子 | `n_compare>0` 且 = 声明；0 mismatch / 0 skip | cp_tpb_rand | M1 | 计划 |
+
+本小节 9 行，皆 M1 / 计划。RTP / CTP / UTP / 多径仍见 §8.7 `TP-DEF-TP-*`（推迟）。
+
 ---
 
 ## 9. 覆盖率门限与豁免（D12）
@@ -960,11 +978,12 @@ Xia 已写死：存在两份网表，不得混用验收口径。
 | 单元译码器（§8.8.2） | 19 | 19 | 0 | 0 | 0 |
 | 子系统内存管理（§8.8.3） | 13 | 13 | 0 | 0 | 0 |
 | 推迟占位 NW/TP/TA/钩子 | 7 | 0 | 0 | 7 | 0 |
-| **合计** | **311** | **274** | **14** | **13** | **10** |
+| 单元 TP bypass（§8.9） | 9 | 9 | 0 | 0 | 0 |
+| **合计** | **320** | **283** | **14** | **13** | **10** |
 
-274 + 14 + 13 + 10 = 311。内存管理三行与 §8.8.4 一致（122 = 113 + 9）。
+283 + 14 + 13 + 10 = 320。内存管理三行与 §8.8.4 一致（122 = 113 + 9）。§8.9 = 9。
 
-M1 分母拆分：计划 116 + 计划（waiver）2 + RTL未就绪 120 + 待定 36 = 274。其中内存管理 RTL未就绪 92 + 待定 21 = 113（§8.8.4）。未实现的 RTL未就绪 / 待定 记 SKIP，不算 PASS，也不算功能覆盖达成。
+M1 分母拆分：计划 125 + 计划（waiver）2 + RTL未就绪 120 + 待定 36 = 283。其中内存管理 RTL未就绪 92 + 待定 21 = 113（§8.8.4）；wave-1 bypass 计划 9（§8.9）。未实现的 RTL未就绪 / 待定 记 SKIP，不算 PASS，也不算功能覆盖达成。
 
 待定 36 条：原 SPEC §13 映射 14 + unpack drain 1（PCS-026）+ 内存管理 21（§8.8.5）。无等 SPEC 澄清项。矛盾清单空。
 
@@ -1081,6 +1100,7 @@ Xia 标准：每条 SPEC **功能需求**至少一条 TP。下表按 SPEC 章节
 | §11 (a)–(e) | 两套网表、双 mode、PRODUCT 冒烟（含 TEST 窗）、eqy、CRD_UF waiver | TOP-015–018/021、CSR-019、DLL-024 |
 | §12 | 与现网冲突（重写对齐） | 非功能需求；PCS-006、PMA-002、RST-001、CDC-004 覆盖偏差 |
 | §13 | 开放问题 | 见 §14.1，0 条无映射 |
+| UB §6.3.2 / B.2.6 | CFG9 bypass 叶（无 TPH / 无 ICRC；优先通路） | 见 §8.9；TP-UNIT-TPB-001–009 |
 | UB 第 9 章 | UMMU + 译码器（Home / User 内存管理） | 见 §8.8.6；MEM-*、DEC-*、SUB-MEM-* |
 | UB §9.1–§9.3 | 总述、Home-User、UBMD | 见 §8.8.6 |
 | UB §9.4 | UMMU：配置 / 上下文 / 翻译 / 权限 | 见 §8.8.6 |

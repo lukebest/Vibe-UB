@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cdc_rdc import analyze_module
 from formal_bind import check_formal_binds, discover_sby_files, sby_run_cwd
 from formal_depth import check_formal_depth, parse_sby_bmc_depth
+from formal_parent_free import check_formal_parent_free
 from gatelib import (
     Finding,
     collect_lock_completeness_findings,
@@ -495,6 +496,101 @@ def test_formal_bmc_vs_cover_depth() -> None:
         if any(f.rule == "FORMAL_BMC_SHALLOW" for f in hits):
             _fail("formal-bmc-ok", "depth 20 covers step 8 + 6")
         print("SELFTEST PASS formal-bmc-ok: bmc >= cover + 6")
+
+
+def _parent_free_tree(root: Path, *, assume_default: bool, assume_diag: bool) -> Path:
+    """#45-shaped: contract leaf + parent that instantiates it."""
+    yml = root / "scripts" / "gate" / "private_leaves.yml"
+    yml.parent.mkdir(parents=True, exist_ok=True)
+    yml.write_text("leaves: []\nparent_free_required: true\n", encoding="utf-8")
+    contract = root / "docs" / "arch" / "mem" / "contracts" / "ub_mem_toy_dec.md"
+    contract.parent.mkdir(parents=True, exist_ok=True)
+    contract.write_text(
+        "```yaml\n"
+        "leaf: ub_mem_toy_dec\n"
+        "parent: ub_mem_ptw\n"
+        "clock: {name: core_clk, period_ns: 12.412, reset: rst_pyc, reset_type: sync}\n"
+        "latency: {kind: registered, cycles: 1, max_cycles: 1}\n"
+        "ports:\n"
+        "  - {name: core_clk, dir: in, width: 1, desc: clk}\n"
+        "  - {name: rst_pyc, dir: in, width: 1, desc: rst}\n"
+        "  - {name: desc_v, dir: out, width: 1, desc: decoded valid}\n"
+        "params: []\n"
+        "ill_cause_width: 4\n"
+        "assertions: [AP_TOY_CLK]\n"
+        "status: draft\n"
+        "```\n\n# toy\n`AP_TOY_CLK`\n",
+        encoding="utf-8",
+    )
+    parent = root / "formal" / "mem" / "parent.sv"
+    props = root / "formal" / "mem" / "props.sv"
+    diag = root / "formal" / "mem" / "assume_diag.sv"
+    sby = root / "formal" / "mem" / "parent.sby"
+    parent.parent.mkdir(parents=True, exist_ok=True)
+    parent.write_text(
+        "module ub_mem_ptw(input core_clk, input rst_pyc, input desc_v);\n"
+        "  ub_mem_toy_dec u_dec (.core_clk(core_clk), .rst_pyc(rst_pyc), .desc_v(desc_v));\n"
+        "endmodule\n",
+        encoding="utf-8",
+    )
+    assume_line = (
+        "  a_leaf: assume property (@(posedge core_clk) desc_v == 1'b1);\n"
+        if assume_default
+        else "  a_legal: assert property (@(posedge core_clk) desc_v === desc_v);\n"
+    )
+    props.write_text(
+        "module props(input core_clk, input desc_v);\n" + assume_line + "endmodule\n",
+        encoding="utf-8",
+    )
+    diag.write_text(
+        "module assume_diag(input core_clk, input desc_v);\n"
+        + (
+            "  a_leaf: assume property (@(posedge core_clk) desc_v == 1'b1);\n"
+            if assume_diag
+            else ""
+        )
+        + "endmodule\n",
+        encoding="utf-8",
+    )
+    sby.write_text(
+        "[tasks]\nbmc\ndiag\n"
+        "[options]\nbmc: mode bmc\ndiag: mode bmc\n"
+        "[script]\nread -sv parent.sv\nread -sv props.sv\n"
+        "diag: read -sv assume_diag.sv\nprep -top ub_mem_ptw\n"
+        "[files]\nparent.sv\nprops.sv\ndiag: assume_diag.sv\n",
+        encoding="utf-8",
+    )
+    return sby
+
+
+def test_formal_parent_free() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _parent_free_tree(root, assume_default=False, assume_diag=True)
+        hits = check_formal_parent_free(root)
+        if any(f.rule == "FORMAL_PRIVATE_ASSUME" for f in hits):
+            _fail("parent-free-ok", f"diag-only assume must pass: {hits[0].message}")
+        print("SELFTEST PASS parent-free-ok: assume only in named diag task")
+
+        _parent_free_tree(root, assume_default=True, assume_diag=False)
+        hit = _expect_rule("parent-free-neg", check_formal_parent_free(root), "FORMAL_PRIVATE_ASSUME")
+        if hit.bucket != "new":
+            _fail("parent-free-neg", "must be blocking when parent_free_required")
+        if "desc_v" not in hit.message or "ub_mem_toy_dec" not in hit.message:
+            _fail("parent-free-neg", hit.message)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _parent_free_tree(root, assume_default=True, assume_diag=False)
+        yml = root / "scripts" / "gate" / "private_leaves.yml"
+        yml.write_text("leaves: []\n", encoding="utf-8")
+        hit = _expect_rule(
+            "parent-free-report",
+            check_formal_parent_free(root),
+            "FORMAL_PRIVATE_ASSUME",
+        )
+        if hit.bucket != "report":
+            _fail("parent-free-report", "must be report-only until #47 is on main")
 
 
 def test_tb_selfcheck_sh_drops_pycircuit_venv() -> None:
@@ -1366,6 +1462,7 @@ def main() -> int:
         test_setup_sby_refuses_missing_z3_note,
         test_sby_relative_and_missing,
         test_formal_bmc_vs_cover_depth,
+        test_formal_parent_free,
         test_tb_selfcheck_sh_drops_pycircuit_venv,
         test_tb_requires_verilator,
         test_tb_skip_is_fail,

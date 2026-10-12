@@ -3,4 +3,5 @@
 # Empty until contracts land on main (#43).
 # assertions_required: auto  # true|false overrides README §8「必填」switch (#49)
 # hash_single_required: auto  # true|false overrides origin/main GATE-CONTRACT-HASH-SINGLE
+# parent_free_required: auto  # true|false overrides origin/main GATE-PRIVATE-PARENT-FREE
 leaves: []

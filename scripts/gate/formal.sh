@@ -39,6 +39,10 @@ done
 
 # GATE-FORMAL-DEPTH (3): bmc >= deepest cover + 6. Report-only.
 python3 -P "$GATE_DIR/formal_depth.py"
+# GATE-PRIVATE-PARENT-FREE: default tasks must not assume private leaf outputs.
+if ! python3 -P "$GATE_DIR/formal_parent_free.py"; then
+  fail=1
+fi
 
 if [[ "$fail" -ne 0 ]]; then
   echo "formal: FAIL (one or more .sby jobs failed)"

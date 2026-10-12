@@ -427,6 +427,7 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 | GATE-PRIV-005 | 公开门禁读 `reports/private/<layer>/<leaf>.yml`（私有 CI 产出 `attest/<layer>/<leaf>.yml`，拷入公开仓库时放这里）。缺文件 → FAIL | PM | 2026-10-12 |
 | GATE-PRIV-006 | attest 字段：`leaf`、`contract_sha256`、`netlist_sha256`、`toolchain_sha256`、`clock{name,period_ns}`、`cells`、`area_um2`、`regs`、`logic_depth`、`depth_incl_buf`、`wns_ns`、`crit_path`（`public` / `私有叶子内部`）、`status`（PASS/FAIL）。`contract_sha256` 必须等于当前契约；`clock` 与契约 YAML 一致；`status==PASS`；`wns_ns>=0`。任一不符 FAIL | 实现 / PM | 2026-10-12 |
 | GATE-PRIV-007 | 私有仓库角色目录（report 先行）：PR 改动只落在一个 `design/` `model/` `verif/` `impl/`（`public/` 视为共享）。跨角色 → `ROLE_CROSS` FAIL。标题须带 `[角色]` | PM | 2026-10-12 |
+| GATE-PRIVATE-PARENT-FREE | formal 里每个私有叶子实例的输出当自由输入（桩切掉）。父级状态合法性断言必须在叶子输出自由下成立。契约派生的、约束私有叶子**输出口**的 `assume` 只允许出现在单独命名的诊断 sby 任务（不是默认 `bmc`/`cover`/`prove`，也不是无前缀共享文件）。默认任务命中 → `FORMAL_PRIVATE_ASSUME`。#47 进 main 前 report-only（看 `origin/main` 的本条，或 `parent_free_required`） | 验证 | 2026-10-12 |
 
 CLI：`python3 -P scripts/gate/contract_hash.py <contract.md>` 打印 hex。
 

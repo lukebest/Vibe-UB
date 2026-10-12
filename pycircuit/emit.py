@@ -68,12 +68,11 @@ def _find_pycc() -> Path:
     )
 
 
-def _find_pyc_reg(pycc: Path) -> Path:
-    install = pycc.resolve().parent.parent
-    cand = install / "include" / "verilog" / "pyc_reg.v"
+def _find_pyc_reg() -> Path:
+    cand = REPO / "rtl" / "pyc_lib" / "pyc_reg.v"
     if cand.is_file():
         return cand
-    raise SystemExit(f"pyc_reg.v not found next to pycc ({cand})")
+    raise SystemExit("missing rtl/pyc_lib/pyc_reg.v — depends on PR #21")
 
 
 def _ensure_pycircuit() -> None:
@@ -205,7 +204,7 @@ def emit_all(out_root: Path = RTL) -> list[Path]:
     if str(HERE) not in os.sys.path:
         os.sys.path.insert(0, str(HERE))
     pycc = _find_pycc()
-    pyc_reg = _find_pyc_reg(pycc)
+    pyc_reg = _find_pyc_reg()
     written: list[Path] = []
     pyc_copy = _write_pyc_reg(out_root, pyc_reg)
     if pyc_copy is not None:

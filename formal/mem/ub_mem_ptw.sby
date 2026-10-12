@@ -6,7 +6,7 @@
 # ($anyseq on every output). Never the PRODUCT stub, never a module
 # inlined in rtl/mem/ub_mem_ptw.v. After read -formal of the walker,
 # `delete $abstract\ub_mem_ptw_desc_dec` drops a leftover stub AST
-# (#48 7f35b31 still inlines one); missing delete is a warning.
+# if present; after #48 52dfc26 the walker file has none (warning).
 # Then the cut is the only definition. No duplicate. Properties
 # must hold for ANY decode result. No private bit-layout.
 #
@@ -23,9 +23,9 @@
 # `ub_mem_ptw` equiv is a real PASS (not SKIP/PRIVATE_SKIP) covering
 # all PRODUCT outputs except tb_*. Otherwise: bmc 24 PASS, prove
 # not converged.
-# Local: cover PASS; bmc 24 PASS 1s; prove UNKNOWN (induction FAIL
-# a_matt_no_fill, k=20, 1s) — multi-hot st_* needs HOOKS obs_st.
-# HOOKS prove PASS k=20 ~1s (default). Encoding table is SPEC §10.
+# Local vs #48 52dfc26: cover PASS; bmc 24 PASS 1s; prove UNKNOWN
+# (induction FAIL a_matt_no_fill, k=20, 1s). HOOKS prove PASS k=20
+# ~1s (default). Encoding table is SPEC §10.
 #
 # [files] are relative to this directory (sby_dir = formal/mem/).
 

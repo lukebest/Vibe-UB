@@ -28,7 +28,8 @@
 ### Changed
 
 - 门禁 formal：`GATE-FORMAL-DEPTH` (4)：PRODUCT prove 仅在同次 CI equiv 对该叶子真实 PASS 时可继承 HOOKS prove；否则回退 (2)。report-only `FORMAL_INHERIT_NO_EQUIV`。继承还要求该模块实例化的每个私有叶子都有 `EQUIV_BLACKBOX`。
-- 门禁 equiv：私有叶子两边 `blackbox`（桩不得 flatten）；flatten 则 `EQUIV_PRIVATE_FLATTENED`（#47 进 main 前 report-only）。
+- 门禁 equiv：blackbox 集合 = `blackbox.yml` ∪ 契约叶子；PRODUCT≡HOOKS / regpair / emit flatten 前都 `blackbox`。flatten 则 `EQUIV_PRIVATE_FLATTENED`（#47 进 main 前 report-only）。
+- 门禁 lint：`GATE-ONE-MODULE-PER-FILE`。`MULTI_MODULE` 先 report-only；`PRIVATE_IN_PARENT` 在 #47 进 main 后拦。
 - 门禁 emit：`GATE-PYCLIB-SINGLE`：`rtl/pyc_lib/` 以外不得再有同名 / 同模块原语副本（`PYCLIB_COPY`），脚本不得从其它 ref 或 toolchain 拉取（`PYCLIB_FETCH`）。`rtl/common/pyc_reg.v` 在 main 仍有该文件时只报告（#5 删后自检提醒去 allowlist）。缺 `rtl/pyc_lib/` 仅在 main 已有该目录后硬拦。`PYCLIB_FETCH` / 其它 COPY 在 #47 进 main 后拦。
 - 门禁 contract-check：`GATE-OWNED-PATHS`：非守门人 PR 改 `scripts/gate/`、`.github/workflows/` → `GATE_FILE_TOUCHED`（「门禁文件由守门人维护」）。守门人 = PR 标题以 `gate:` 开头。`waivers/` 可在任意 PR 添加，须守门人评论 `GATE-WAIVER-APPROVED: <path>`；API 未接通前只报告。#47 进 main 前 `GATE_FILE_TOUCHED` report-only。
 - 门禁 formal：`GATE-PRIVATE-PARENT-FREE`：默认 sby 任务不得 `assume` 私有叶子输出口（桩切掉，父级断言在自由输出下成立）。诊断任务可单独命名。#47 进 main 前 report-only。

@@ -23,6 +23,7 @@ from gatelib import (
     verilator_inc_args,
     module_closure,
 )
+from one_module import check_one_module
 from private_leaves import is_private_leaf, private_skip_finding
 
 WARN_RE = re.compile(
@@ -138,6 +139,7 @@ def main() -> int:
     for u in modules:
         print(f"  {u.kind:4} {u.module:24} {rel(u.file)}")
     findings: list[Finding] = collect_stub_findings("lint")
+    findings.extend(check_one_module(REPO_ROOT))
     if not modules:
         print("lint: no RTL modules discovered")
         return emit_report("lint", findings)

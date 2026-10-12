@@ -818,7 +818,8 @@ def write_named_aig(
         f"read_rtlil {cleaned}\n"
         f"read_verilog {wrap}\n"
         f"hierarchy -check -top {wname}\n"
-        "proc; flatten; opt_expr; opt_clean\n"
+        + ("\n".join(__import__("equiv_blackbox").ys_blackbox_cmds()) + "\n")
+        + "proc; flatten; opt_expr; opt_clean\n"
         "techmap; opt; aigmap; opt\n"
         "setundef -undriven -zero\n"
         "opt_clean\n"

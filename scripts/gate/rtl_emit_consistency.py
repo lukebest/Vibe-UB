@@ -58,14 +58,10 @@ from gatelib import (
 )
 from hooks_port_consistency import compare_ports
 from large_mem_manifest import check_large_mem_manifest
+from equiv_blackbox import contract_leaf_names, equiv_blackbox_set
 from formal_depth import write_equiv_status
 from formal_parent_free import instantiated_leaves
-from private_leaves import (
-    discover_contract_files,
-    is_private_leaf,
-    parse_contract_file,
-    private_skip_finding,
-)
+from private_leaves import is_private_leaf, private_skip_finding
 from pyc_lib_check import check_pyc_lib, check_pyclib_single
 
 # Call only this script. Do not add pycc flags here.
@@ -567,15 +563,6 @@ def run_emit_rtl_isolated() -> tuple[list[Finding], Path | None, dict[str, objec
     return compare_emitted_rtl(tmp / "rtl", REPO_ROOT / "rtl"), tmp / "rtl", meta
 
 
-def contract_leaf_names(root: Path) -> set[str]:
-    names: set[str] = set()
-    for path in discover_contract_files(root):
-        data, _errs = parse_contract_file(path, root)
-        if data and data.get("leaf"):
-            names.add(str(data["leaf"]).strip())
-    return names
-
-
 def private_instances_in_files(paths: list[Path], root: Path) -> list[str]:
     leaves = contract_leaf_names(root)
     if not leaves:
@@ -648,7 +635,7 @@ def run_equiv(
     boxes = (
         list(blackboxes)
         if blackboxes is not None
-        else private_instances_in_files([product, hooks], REPO_ROOT)
+        else equiv_blackbox_set(REPO_ROOT)
     )
     detected = private_instances_in_files([product, hooks], REPO_ROOT)
     flatten_hit = None

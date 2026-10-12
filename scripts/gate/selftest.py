@@ -20,6 +20,7 @@ from formal_depth import (
     parse_sby_bmc_depth,
     sby_inherits_hooks_prove,
 )
+from equiv_blackbox import equiv_blackbox_set
 from formal_parent_free import check_formal_parent_free
 from gatelib import (
     Finding,
@@ -41,6 +42,7 @@ from gatelib import (
 from hooks_port_consistency import compare_ports
 from large_mem_manifest import check_large_mem_manifest
 from lint import lint_module, lint_sources_for, parse_verilator
+from one_module import check_one_module
 from pyc_lib_check import (
     ALLOWLIST_NOTE,
     check_pyc_lib,
@@ -797,6 +799,80 @@ def test_equiv_private_blackbox_hides_const_stub() -> None:
                 "blackboxed stub outputs must be free; mismatch must FAIL",
             )
         print("SELFTEST PASS equiv-blackbox-shows: const stub no longer hides parent diff")
+
+
+def test_one_module_per_file() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        parent = repo / "rtl" / "mem" / "ub_mem_ptw.v"
+        parent.parent.mkdir(parents=True)
+        parent.write_text(
+            "module ub_mem_ptw(input clk, output q);\n"
+            "  assign q = 1'b0;\n"
+            "endmodule\n"
+            "module ub_mem_ptw_desc_dec(input clk, output d);\n"
+            "  assign d = 1'b0;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        (repo / "docs" / "arch" / "mem" / "contracts").mkdir(parents=True)
+        (repo / "docs" / "arch" / "mem" / "contracts" / "desc.md").write_text(
+            "---\nleaf: ub_mem_ptw_desc_dec\nports:\n  - {name: d, dir: out, width: 1}\n---\n",
+            encoding="utf-8",
+        )
+        hits = check_one_module(repo)
+        priv = _expect_rule("one-module-private", hits, "PRIVATE_IN_PARENT")
+        if priv.bucket != "report":
+            _fail("one-module-private", "PRIVATE_IN_PARENT must stay report-only until #47")
+        two = repo / "rtl" / "pcs" / "ub_pcs_two.v"
+        two.parent.mkdir(parents=True)
+        two.write_text(
+            "module ub_pcs_a(input clk, output q);\n  assign q = 1'b0;\nendmodule\n"
+            "module ub_pcs_b(input clk, output r);\n  assign r = 1'b1;\nendmodule\n",
+            encoding="utf-8",
+        )
+        # drop the private pair so only MULTI_MODULE remains from ub_pcs_two
+        parent.write_text(
+            "module ub_mem_ptw(input clk, output q);\n  assign q = 1'b0;\nendmodule\n",
+            encoding="utf-8",
+        )
+        multi = _expect_rule("one-module-multi", check_one_module(repo), "MULTI_MODULE")
+        if multi.bucket != "report":
+            _fail("one-module-multi", "MULTI_MODULE is report-only")
+        lib = repo / "rtl" / "pyc_lib" / "pyc_two.v"
+        lib.parent.mkdir(parents=True)
+        lib.write_text(
+            "module pyc_a(input clk, output q);\n  assign q = 1'b0;\nendmodule\n"
+            "module pyc_b(input clk, output r);\n  assign r = 1'b1;\nendmodule\n",
+            encoding="utf-8",
+        )
+        two.write_text(
+            "module ub_pcs_a(input clk, output q);\n  assign q = 1'b0;\nendmodule\n",
+            encoding="utf-8",
+        )
+        if any(f.rule in {"MULTI_MODULE", "PRIVATE_IN_PARENT"} for f in check_one_module(repo)):
+            _fail("one-module-ok", "pyc_lib helpers and single-module files must pass")
+        print("SELFTEST PASS one-module-ok: pyc_lib excluded, single module clean")
+
+
+def test_equiv_blackbox_set_union() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        (repo / "scripts" / "gate").mkdir(parents=True)
+        (repo / "scripts" / "gate" / "blackbox.yml").write_text(
+            "entries:\n  - {module: ub_cmn_mem_1r1w, file: rtl/cmn/ub_cmn_mem_1r1w.v}\n",
+            encoding="utf-8",
+        )
+        (repo / "docs" / "arch" / "mem" / "contracts").mkdir(parents=True)
+        (repo / "docs" / "arch" / "mem" / "contracts" / "toy.md").write_text(
+            "---\nleaf: ub_mem_toy_dec\nports:\n  - {name: out, dir: out, width: 1}\n---\n",
+            encoding="utf-8",
+        )
+        names = equiv_blackbox_set(repo)
+        if "ub_mem_toy_dec" not in names:
+            _fail("equiv-blackbox-set", f"contract leaf missing: {names}")
+        # yml module is included when the file parses; stub_modules() reads REPO_ROOT yml
+        print(f"SELFTEST PASS equiv-blackbox-set: {names}")
 
 
 def _parent_free_tree(root: Path, *, assume_default: bool, assume_diag: bool) -> Path:
@@ -1769,6 +1845,8 @@ def main() -> int:
         test_formal_bmc_vs_cover_depth,
         test_formal_inherit_equiv,
         test_equiv_private_blackbox_hides_const_stub,
+        test_one_module_per_file,
+        test_equiv_blackbox_set_union,
         test_formal_parent_free,
         test_tb_selfcheck_sh_drops_pycircuit_venv,
         test_tb_requires_verilator,

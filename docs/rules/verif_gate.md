@@ -153,6 +153,7 @@ spec-leak finding 一律按新叶子拦截，不用 `legacy.txt` 放行。
 | GATE-LINT-003 | warning 必须命中已批准豁免，否则按 §1 分栏处理 | CODING_STYLE §7 | 2026-10-10 |
 | GATE-LINT-004 | 未登记桩 / 黑盒拦截；已登记桩照常 lint | §1.2 | 2026-10-10 |
 | GATE-LINT-005 | `rtl/pyc_lib/` 原语只经 `-I` + `` `include `` 读入；不得再当作第二份源文件（否则 `%Warning-MODDUP`）。原语自己仍单独 lint | #21 pyc_reg | 2026-10-12 |
+| GATE-ONE-MODULE-PER-FILE | `rtl/`（不含 `rtl/pyc_lib/`）每个文件只定义一个 `module`（CODING_STYLE）。多模块 → `MULTI_MODULE`（先 report-only）。多出来的模块若是契约私有叶子 → `PRIVATE_IN_PARENT`（#47 进 main 后拦） | CODING_STYLE；PM | 2026-10-12 |
 
 **发现方式：** 若存在 `rtl/**/*.f` 或 `scripts/gate/filelists/*.f` 则读 filelist（支持 `+incdir+` / `-I`）；否则扫描 `rtl/<layer>/` 与 `rtl/<layer>/hooks/`，以及 `rtl/` 根下手写残留。排除 `*_tb.v` 与 `tb/`。
 

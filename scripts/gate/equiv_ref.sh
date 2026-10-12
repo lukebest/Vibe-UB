@@ -189,10 +189,12 @@ if [[ "$LEAF" == ub_dll_bcrc_check ]] \
   gate_read="read_verilog -sv ${ROOT}/formal/dll/ref/ub_dll_bcrc.sv; ${gate_read}"
 fi
 
+BB_YS="$(python3 -P "$(cd "$(dirname "$0")" && pwd)/equiv_blackbox.py" --ys 2>/dev/null || true)"
 prep_gold="
 ${gold_read}
 ${gold_ch}
 hierarchy -check -top ${LEAF}
+${BB_YS}
 rename -top gold
 proc; flatten; opt_expr; opt_clean
 design -stash gold
@@ -201,6 +203,7 @@ prep_gate="
 ${gate_read}
 ${gate_ch}
 hierarchy -check -top ${GATE_TOP}
+${BB_YS}
 rename -top gate
 proc; flatten; opt_expr; opt_clean
 design -stash gate

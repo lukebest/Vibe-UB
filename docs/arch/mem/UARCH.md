@@ -102,7 +102,7 @@ EID→ENT_IDX 映射放在 RSC（Xia 答复 Q-A02），UMMU 只接 ENT_IDX 和�
 
 ## 4. 叶子职责与接口概要
 
-接口一律同时钟 valid/ready；带 `tag` 的口按 tag 回送。宽度用到的项目参数：`ENT_IDX_W=4`、`PA_W=48`、UBA 64 bit、TokenID 20 bit、TokenValue 32 bit（§7.2.3、§7.2.5）。
+接口一律同时钟 valid/ready；带 `tag` 的口按 tag 回送。宽度用到的项目参数：`ENT_IDX_W=4`、`PA_W=48`、UBA 64 bit、TokenID 20 bit、TokenValue 32 bit（§7.2.3、§7.2.5）、`EVT_CODE_W=4`（SPEC §14 Q-A08，PR #50）。
 
 | 叶子 | 输入 | 输出 | 关键行为 |
 | --- | --- | --- | --- |
@@ -111,7 +111,7 @@ EID→ENT_IDX 映射放在 RSC（Xia 答复 Q-A02），UMMU 只接 ENT_IDX 和�
 | `ub_mem_cfg_lkup` | ENT_IDX；CSR 写（经 `ub_mem_tecte_dec`） | 配置信号束（§5.1） | 读 1 拍；CSR 读回与查找共用读口，查找优先 |
 | `ub_mem_ctx_lkup` | {ENT_IDX, TokenID}；填充数据（经 `ub_mem_tcte_dec`） | 上下文信号束（§5.2）、命中 / 缺失 | 直接映射；缺失时经 `ub_mem_tbl_rd` 读 64 B（两级多一次 8 B） |
 | `ub_mem_tlb` | {ENT_IDX, TokenID, 页号}；填充；失效 | 翻译信号束（PFN、已解析的属性字节、页权限、AF）、命中 / 缺失 | 4 路并读、标签比较、伪 LRU 替换 |
-| `ub_mem_ptw` | 上下文信号束、UBA | 填充项或翻译故障 | 由输入宽度推起始级，最多 4 次 8 B 读；块描述符拆成 4 KB 项 |
+| `ub_mem_ptw` | 上下文信号束、UBA；表读响应 `mem2host_rd_rsp_*`（经 `ub_mem_tbl_rd`）；`evt_ready` | 填充项或翻译故障；表读请求 `mem2host_rd_*`（经 `ub_mem_tbl_rd`）；`evt_valid` / `evt_code` | 由输入宽度推起始级，最多 4 次 8 B 读；块描述符拆成 4 KB 页并驱动 TLB 填充。表读口与事件口见下（SPEC §14 Q-C07 / Q-A08，PR #50） |
 | `ub_mem_plb` | {ENT_IDX, TokenID}、UBA；填充；失效 | 权限信号束、命中 | 所有项并行比范围 |
 | `ub_mem_perm_walk` | 上下文信号束、UBA | 权限信号束或 MAPT 故障 | 单项 1 次 32 B 读；多级 4 KB 最多 4 次 32 B 读，逐级比范围、看终止位 |
 | `ub_mem_perm_cmp` | 权限信号束、请求的 TokenValue / E_bit / 访问类型、上下文排他位、页权限 | 通过 / 失败与原因 | 纯组合；§9.4.4.3.2–§9.4.4.3.5 |
@@ -122,6 +122,10 @@ EID→ENT_IDX 映射放在 RSC（Xia 答复 Q-A02），UMMU 只接 ENT_IDX 和�
 | `ub_mem_dec_walk` | 译码翻译缓存缺失、主机 PA | 原始 L0 大项 512 bit（一次取 64 B）；L1 原始表项 | 从内存先读 L0 再读 L1，读回寄存后交给 `ub_mem_dec_ent_dec` |
 | `ub_mem_dec_ent_dec` | `ub_mem_dec_walk` 寄存后的 L0 / L1 原始数据 | §5.5 信号束 | L0 与 L1 均寄存 1 拍 |
 | `ub_mem_dec_uba` | UBA 基值、PA 低位 | UBA 64 bit | 64 bit 加法，进位丢弃（Xia 答复 D-L09） |
+
+`ub_mem_ptw` 经 `ub_mem_tbl_rd` 接主机表读口，前缀 `mem2host_rd_*`（SPEC §14 Q-C07，PR #50）。请求：`mem2host_rd_valid`、`mem2host_rd_ready`、`mem2host_rd_addr`（48 bit）、`mem2host_rd_len`（8 bit 字节数，合法 8 / 32 / 64，其余取值接口断言失败；第一波遍历器驱 8）、`mem2host_rd_tag`（4 bit；第一波遍历器驱 0，一个未决）。响应：`mem2host_rd_rsp_valid`、`mem2host_rd_rsp_ready`、`mem2host_rd_rsp_data`（512 bit）、`mem2host_rd_rsp_tag`（4 bit）、`mem2host_rd_rsp_err`（1 bit）。
+
+事件口（SPEC §14 Q-A08，PR #50）：`evt_valid`、`evt_ready`、`evt_code`（宽 `EVT_CODE_W`，参数默认 4）。码 0 保留。`ctx_matt_wd=1` 且 TLB 缺失时发出 `EVT_MATT_WD_MISS`（暂定取值 1），请求经事件路径结束。常量取值随 Q-E09，引用命名常量。
 
 ## 5. 解码叶子 ↔ 结构叶子 具名信号契约
 

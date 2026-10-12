@@ -10,6 +10,9 @@ Earlier PR #9 closures kept: CTRL.LMSM_START, lane_id_mode never 3,
 LTB type bytes, Change_Speed bit7=0, LinkReady = Active.
 Architectural ``link_up`` is Null|Active|Retrain (SPEC §6.1 / A-22);
 ``tb_obs_link_up`` stays Null|Active (§10.2).
+``lmsm2pcs_nb_phase`` (#45 pending, Xia 2026-10-12): registered
+level, rst 0, 1 in Send_NullBlock or Link_Active; next-state decode
+so it is already 1 on the cycle ``st`` first equals Send_NullBlock.
 
 Does not compute LMB CRC (PCS). Does not generate the 16-cycle PORT_RST
 pulse (ub_csr); ``port_rst`` is a sync clear to Link_Idle.
@@ -286,6 +289,9 @@ def _ports(m: Circuit, *, test_hooks: int, ntx: int, nrx: int, probe_wait_def: i
     probe_lim = m.out(
         "probe_lim", clk=clk, rst=rst, width=PROBE_W, init=u(PROBE_W, probe_wait_def)
     )
+    # #45 (pending), Xia 2026-10-12: registered from next-state so it is
+    # already 1 on the cycle st first equals Send_NullBlock.
+    nb_phase = m.out("nb_phase", clk=clk, rst=rst, width=1, init=u(1, 0))
 
     unused_aux = _red_xor(
         [
@@ -571,7 +577,15 @@ def _ports(m: Circuit, *, test_hooks: int, ntx: int, nrx: int, probe_wait_def: i
     tmr_inc = _sat_add(tmr_q, step32)
     probe_inc = _sat_add(probe_tmr_q, step16)
 
-    st.set(mux(port_rst, u(5, ST_LINK_IDLE), st_n))
+    st_reg_n = mux(port_rst, u(5, ST_LINK_IDLE), st_n)
+    st.set(st_reg_n)
+    # #45 (pending), Xia 2026-10-12: Q tracks (st in {Null, Active})
+    # every cycle with no combo path from inputs. Same next-state as st
+    # (incl. port_rst → Idle) so it is 1 on entry cycle s and drops the
+    # cycle the state register leaves both states.
+    nb_phase.set(
+        (st_reg_n == ST_SEND_NULLBLOCK) | (st_reg_n == ST_LINK_ACTIVE)
+    )
     sub.set(mux(port_rst, u(2, SUB_0), sub_n))
     tmr.set(mux(port_rst | st_enter, u(TMR_W, 0), tmr_inc))
     probe_try_n = mux(enter_probe_from_idle, u(8, 0), probe_try_q)
@@ -697,6 +711,7 @@ def _ports(m: Circuit, *, test_hooks: int, ntx: int, nrx: int, probe_wait_def: i
     m.output("link_up", link_up)
     m.output("link_ready", link_ready)
     m.output("lmsm_retrain_ack", lmsm_retrain_ack)
+    m.output("lmsm2pcs_nb_phase", nb_phase.out())
     m.output("lmsm2pcs_pattern", pattern)
     m.output("lmsm2pcs_ltb_valid", use_rxeq | use_dltb | use_cltb | use_rltb | use_eltb)
     m.output("lmsm2pcs_lane_id_mode", lane_mode)

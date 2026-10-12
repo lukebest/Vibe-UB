@@ -186,6 +186,8 @@ def check_netlist_text() -> None:
             _fail("product-ports", f"missing {name}")
     if "link_up" not in prod_ports or "link_ready" not in prod_ports:
         _fail("product-ports", "missing link_up/link_ready")
+    if "lmsm2pcs_nb_phase" not in prod_ports:
+        _fail("product-ports", "missing lmsm2pcs_nb_phase")
     _ok("netlist-text", f"PRODUCT {len(prod_ports)} ports; HOOKS +{len(extra)} tb_*")
 
 
@@ -265,12 +267,20 @@ def check_logic_depth() -> None:
 
 
 def check_equiv() -> None:
+    """PRODUCT ≡ HOOKS on product outputs only, tb_* inputs tied inactive.
+
+    pycc hashes internals differently, so Yosys ``equiv_make`` / ``equiv_induct``
+    leave unpaired ``$equiv`` cells even when the folded netlists match.
+    Proof is ABC ``dsec`` on flatten+opt+dffunmap+techmap BLIFs of the
+    product-port wrappers (tb_obs_* omitted, tb_test_mode/tb_inj_*=0).
+    """
     product_text = PRODUCT_V.read_text(encoding="utf-8")
     hooks_text = HOOKS_V.read_text(encoding="utf-8")
     prod_decls = _port_decls(product_text)
     prod_ports = [name for _d, _w, name in prod_decls]
     hooks_ports = _port_names(hooks_text)
     extras = [n for n in hooks_ports if n not in prod_ports]
+
     def _strip_includes(text: str) -> str:
         lines = [
             ln
@@ -279,11 +289,10 @@ def check_equiv() -> None:
         ]
         return "".join(lines)
 
-    # Distinct module name; drop `include so pyc_reg is read once.
-    hooks_src = _strip_includes(HOOKS_V.read_text(encoding="utf-8")).replace(
+    hooks_src = _strip_includes(hooks_text).replace(
         "module ub_lmsm (", "module ub_lmsm_hooks (", 1
     )
-    product_src = _strip_includes(PRODUCT_V.read_text(encoding="utf-8"))
+    product_src = _strip_includes(product_text)
     prod_list = ",\n  ".join(f"{d} {w}{n}" for d, w, n in prod_decls)
     prod_conn = ",\n    ".join(f".{n}({n})" for n in prod_ports)
     extra_conn = ",\n    ".join(
@@ -309,6 +318,10 @@ module gate (
   );
 endmodule
 """
+    abc = shutil.which("yosys-abc")
+    if abc is None:
+        _fail("product-equiv-hooks", "yosys-abc not on PATH")
+
     with tempfile.TemporaryDirectory(prefix="ub-eq-") as td:
         td_path = Path(td)
         (td_path / "product.v").write_text(product_src, encoding="utf-8")
@@ -318,65 +331,44 @@ endmodule
         pyc_reg = _incdir() / "pyc_reg.v"
         product_v = td_path / "product.v"
         hooks_v = td_path / "hooks_renamed.v"
-        script = f"""
+        gold_blif = td_path / "gold.blif"
+        gate_blif = td_path / "gate.blif"
+
+        def _prep(mod: str, src: Path, wrap: Path, blif: Path) -> str:
+            return f"""
 read_verilog -sv {pyc_reg}
-read_verilog -sv {product_v}
-read_verilog -sv {td_path / "wrap_gold.v"}
-hierarchy -check -top gold
+read_verilog -sv {src}
+read_verilog -sv {wrap}
+hierarchy -check -top {mod}
 proc
 flatten
 opt -full
-design -save gold
-design -reset
-read_verilog -sv {pyc_reg}
-read_verilog -sv {hooks_v}
-read_verilog -sv {td_path / "wrap_gate.v"}
-hierarchy -check -top gate
-proc
-flatten
-opt -full
-design -save gate
-design -copy-from gold -as gold gold
-design -copy-from gate -as gate gate
-equiv_make gold gate equiv
-prep -top equiv
-equiv_simple -undef
-equiv_induct -undef
-equiv_status -assert
-"""
-        # Cell-count compare after flatten+opt (tb_* tied). pycc hash
-        # names differ so equiv_induct cannot pair internals; SPEC §11
-        # still requires the folded HOOKS to match PRODUCT.
-        stat_script = f"""
-read_verilog -sv {pyc_reg}
-read_verilog -sv {product_v}
-read_verilog -sv {td_path / "wrap_gold.v"}
-hierarchy -check -top gold
-proc; flatten; opt -full
 stat
-design -save gold
-design -reset
-read_verilog -sv {pyc_reg}
-read_verilog -sv {hooks_v}
-read_verilog -sv {td_path / "wrap_gate.v"}
-hierarchy -check -top gate
-proc; flatten; opt -full
-stat
+dffunmap
+opt -full -nosdff -nodffe
+techmap
+simplemap
+opt_clean
+write_blif {blif}
 """
-        stat = subprocess.run(
-            ["yosys", "-p", stat_script],
+
+        yosys_cmd = _prep("gold", product_v, td_path / "wrap_gold.v", gold_blif)
+        yosys_cmd += "design -reset\n"
+        yosys_cmd += _prep("gate", hooks_v, td_path / "wrap_gate.v", gate_blif)
+        yosys = subprocess.run(
+            ["yosys", "-p", yosys_cmd],
             check=False,
             capture_output=True,
             text=True,
         )
-        text = (stat.stdout or "") + (stat.stderr or "")
-        if stat.returncode != 0:
-            _fail("product-equiv-hooks", text[-800:])
+        ytext = (yosys.stdout or "") + (yosys.stderr or "")
+        if yosys.returncode != 0:
+            _fail("product-equiv-hooks", f"yosys prep failed\n{ytext[-800:]}")
 
         def _cells(mod: str) -> dict[str, int]:
             hit = False
             out: dict[str, int] = {}
-            for line in text.splitlines():
+            for line in ytext.splitlines():
                 if line.strip() == f"=== {mod} ===":
                     hit = True
                     continue
@@ -404,24 +396,23 @@ stat
                 "product-equiv-hooks",
                 f"flatten+opt cell mismatch gold={gold_c} gate={gate_c}",
             )
-        proc = subprocess.run(
-            ["yosys", "-q", "-p", script],
+        if not gold_blif.is_file() or not gate_blif.is_file():
+            _fail("product-equiv-hooks", "BLIF write failed")
+
+        dsec = subprocess.run(
+            [abc, "-c", f"dsec {gold_blif} {gate_blif}"],
             check=False,
             capture_output=True,
             text=True,
         )
-        induct = (proc.stdout or "") + (proc.stderr or "")
-        if proc.returncode == 0:
-            _ok("product-equiv-hooks", f"Yosys equiv_induct; flatten+opt {gold_c}")
-            return
-        if "unproven $equiv" in induct:
-            _ok(
-                "product-equiv-hooks",
-                f"HOOKS extras tied; flatten+opt {gold_c}; "
-                "equiv_induct leftover (pycc names)",
-            )
-            return
-        _fail("product-equiv-hooks", induct[-1200:])
+        dtext = (dsec.stdout or "") + (dsec.stderr or "")
+        if dsec.returncode != 0 or "Networks are equivalent" not in dtext:
+            _fail("product-equiv-hooks", f"ABC dsec did not prove\n{dtext[-1200:]}")
+        _ok(
+            "product-equiv-hooks",
+            f"ABC dsec equivalent; flatten+opt {gold_c}; "
+            "tb_* idle, product outputs only",
+        )
 
 
 def _directed_sv() -> str:
@@ -535,7 +526,7 @@ module lmsm_directed;
 
   wire [3:0] pma_data_rate_sel, pma_tx_width, pma_rx_width;
   wire pma_lane_reverse_tx, pma_lane_reverse_rx, pma_polarity_inv, pma_probe_pulse_en;
-  wire link_up, link_ready, lmsm_retrain_ack, lmsm2pcs_ltb_valid;
+  wire link_up, link_ready, lmsm_retrain_ack, lmsm2pcs_ltb_valid, lmsm2pcs_nb_phase;
   wire [1:0] lmsm2pcs_pattern, lmsm2pcs_lane_id_mode;
   wire [7:0] lmsm2pcs_lane_id_base, lmsm2pcs_lane_id_map, lmsm2pcs_ltb_type, lmsm2pcs_link_id;
   wire [5:0] lmsm2pcs_tlw, lmsm2pcs_rlw;
@@ -650,6 +641,7 @@ module lmsm_directed;
     .link_up(link_up),
     .link_ready(link_ready),
     .lmsm_retrain_ack(lmsm_retrain_ack),
+    .lmsm2pcs_nb_phase(lmsm2pcs_nb_phase),
     .lmsm2pcs_pattern(lmsm2pcs_pattern),
     .lmsm2pcs_ltb_valid(lmsm2pcs_ltb_valid),
     .lmsm2pcs_lane_id_mode(lmsm2pcs_lane_id_mode),
@@ -747,6 +739,8 @@ module lmsm_directed;
       if (lmsm_st !== ST_NULL) begin
         $fatal(1, "walk_to_null: st=%0d", lmsm_st);
       end
+      if (lmsm2pcs_nb_phase !== 1'b1)
+        $fatal(1, "nb_phase must already be 1 on entry cycle s");
     end
   endtask
 
@@ -785,6 +779,8 @@ module lmsm_directed;
     clr_pulses();
     if (lmsm_st !== ST_ACTIVE)
       $fatal(1, "8th RX should go Active next edge st=%0d", lmsm_st);
+    if (lmsm2pcs_nb_phase !== 1'b1)
+      $fatal(1, "nb_phase must stay 1 through Link_Active");
     $display("PASS  sim-7-vs-8-rx");
 
     // ---- 15 vs 16 TX + same-cycle fill ----
@@ -838,6 +834,8 @@ module lmsm_directed;
     cfg_null_need_rediscovery = 0;
     if (lmsm_st === ST_NULL)
       $fatal(1, "rediscovery should leave Null");
+    if (lmsm2pcs_nb_phase !== 1'b0)
+      $fatal(1, "nb_phase must drop the cycle st leaves Null|Active");
     if (dut.rx_cnt !== 0 || dut.tx_cnt !== 0 || dut.first_rx !== 0)
       $fatal(1, "leave Null must clear counts");
     // re-walk Config: already in Discovery after rediscovery
@@ -901,6 +899,41 @@ module lmsm_directed;
     tb_test_mode = 0;
     csr_tmr_scale = 0;
     $display("PASS  sim-timeout-wins-fill");
+
+    // ---- nb_phase: 1 on entry cycle s, hold through Active, drop on leave ----
+    do_reset();
+    if (lmsm2pcs_nb_phase !== 1'b0)
+      $fatal(1, "nb_phase reset 0 got %0d", lmsm2pcs_nb_phase);
+    walk_to_null();
+    if (lmsm_st !== ST_NULL || lmsm2pcs_nb_phase !== 1'b1)
+      $fatal(1, "nb_phase rises on entry cycle s st=%0d ph=%0d",
+             lmsm_st, lmsm2pcs_nb_phase);
+    tick();
+    if (lmsm2pcs_nb_phase !== 1'b1)
+      $fatal(1, "nb_phase must hold 1 while still Null");
+    for (i = 0; i < 8; i = i + 1) begin
+      pcs2lmsm_null_blk = 1;
+      pcs2lmsm_tx_null_blk = 1;
+      tick();
+    end
+    clr_pulses();
+    for (i = 0; i < 8; i = i + 1) begin
+      pcs2lmsm_tx_null_blk = 1;
+      tick();
+    end
+    clr_pulses();
+    if (lmsm_st !== ST_ACTIVE)
+      $fatal(1, "nb_phase walk: expected Active st=%0d", lmsm_st);
+    if (lmsm2pcs_nb_phase !== 1'b1)
+      $fatal(1, "nb_phase must stay 1 through Link_Active");
+    dll_retrain_req = 1;
+    tick();
+    dll_retrain_req = 0;
+    if (lmsm_st !== ST_RTR)
+      $fatal(1, "nb_phase leave: expected Retrain st=%0d", lmsm_st);
+    if (lmsm2pcs_nb_phase !== 1'b0)
+      $fatal(1, "nb_phase must drop the cycle st leaves Null|Active");
+    $display("PASS  sim-nb-phase");
 
     // ---- PROBE_WAIT_CYC 323 / 1 / 0->323 and mid-wait rewrite ----
     do_reset();

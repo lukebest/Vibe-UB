@@ -37,6 +37,22 @@ ports:
 params:
   - {name: EID_W, default: 20}
 ill_cause_width: 4
+assertions:
+  - AP_DENT_CLK
+  - AP_DENT_EID_W
+  - AP_DENT_HS_IN
+  - AP_DENT_HS_OUT
+  - AP_DENT_ILL_2MB
+  - AP_DENT_ILL_AD
+  - AP_DENT_ILL_EQ
+  - AP_DENT_ILL_PRI
+  - AP_DENT_ILL_ZERO
+  - AP_DENT_IN_RDY_RST
+  - AP_DENT_LAT1
+  - AP_DENT_OUT_HOLD
+  - AP_DENT_RDY
+  - AP_DENT_RST
+  - AP_DENT_SEL
 status: draft
 ```
 

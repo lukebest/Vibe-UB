@@ -53,6 +53,13 @@ foreach n $outs {
     set_output_delay 0 -clock $clk_name [get_ports $n]
 }
 
+# Optional extra SDC (private-leaf combo max_delay, caller-written).
+if {[info exists ::env(QS_SDC_EXTRA)] && $::env(QS_SDC_EXTRA) ne ""} {
+    if {[file exists $::env(QS_SDC_EXTRA)]} {
+        source $::env(QS_SDC_EXTRA)
+    }
+}
+
 # Sequential reset *inputs* are not data. Do not include rst_n_sync —
 # that name is the sync's output / the adapter's data input.
 foreach rst {rst_n rst_pyc port_rst} {

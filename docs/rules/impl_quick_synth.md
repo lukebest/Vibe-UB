@@ -4,7 +4,7 @@
 | --- | --- |
 | 分册 | `docs/rules/impl_quick_synth.md` |
 | 所有者 | 后端实现 |
-| 版本 | v0.5 (2026-10-10) |
+| 版本 | v0.6 (2026-10-12) |
 | 类别 | 合入前快速综合的面积 / 时序反馈（proxy，非签核） |
 | 配套 | [backend.md](backend.md)、[TEAM.md](../TEAM.md)、[PROCESS.md](../PROCESS.md)、[SPEC.md](../SPEC.md) |
 | 脚本 | `scripts/impl/quick_synth.sh` |
@@ -42,7 +42,7 @@
    - **不**再默认 `chparam`。`--chparam KEY=VAL` / `TOP:KEY=VAL` 只作可选覆盖（模块里若已无该 parameter 则跳过并注明）。
 2. **Yosys**
    - `read_verilog`（`.sv` 加 `-sv`）。默认 **`-I rtl/pyc_lib`**（pycc runtime 原语，如 `pyc_reg.v`，从 TOOLCHAIN.lock 钉住的 pyCircuit 原样拷入）。`--incdir` / 环境变量 `QS_INCDIRS` 可再加目录。
-   - `rtl/pyc_lib/` 尚未落地时（#21 / #5 之前）**回退 `-I rtl/common`**，报告里打一行 `WARN`；临时，定库目录后去掉回退。
+   - `rtl/pyc_lib/` **必须存在**（PR #21 落地的 pycc 运行库）。缺失则硬失败、非 0 退出，不再回退 `rtl/common`。
    - 不把 `` `include `` 目标再列进 `QS_FILES`（否则 `pyc_reg` 会重定义）。
    - 大 SRAM 用 `read_verilog -lib` 作黑盒。
    - `synth -top <m> -flatten`。
@@ -61,13 +61,29 @@
      - **slack / area / cells** 仍来自**缓冲后**网表。QoR >10% 的 depth 用 `logic depth`（不含 buf）。
    - 纯组合叶子：虚时钟约束 I/O，arrival 为组合延迟。
    - 黑盒 `ub_cmn_mem_1r1w`：STA stub 把 **rdata 建成 1 拍 registered read**（每 bit 一只 `sky130_fd_sc_hd__dfxtp_1`，D 接 0），下游 compare / select 从该 launch 计时。存储本身不建模。
-4. **相对 baseline 的趋势**
+   - **私有叶子契约**：扫 `docs/arch/<layer>/contracts/<leaf>.md` 开头 YAML（`leaf` / `parent` / `clock{name,period_ns,reset}` / `latency` / 仅 0 拍时的 `comb_budget_ns` / `ports` / `params` / `assertions`）。该叶子的 STA 周期用 `clock.period_ns`。没有契约时仍用默认 `core_clk` 12.412 ns（SPEC `F_CORE`）。
+4. **PRIVATE_SKIP（公开 CI）**
+   - 有契约、或存在 `rtl/<layer>/stub/<leaf>.v` 的模块作黑盒，单独列入报告 **PRIVATE_SKIP** 节，不进面积 / cell 合计。
+   - 父级 STA：契约 `latency >= 1` 时把黑盒输出建成寄存器 launch；`latency == 0` 时用 `comb_budget_ns` 做 input→output `set_max_delay`。父级穿过黑盒的路径照常报 slack / depth。报告里不出现私有叶子内部名字。
+   - 桩内部（占位逻辑，头写 `contract_sha256: HANDWRITTEN` 的同样）面积记 0。
+   - 多实例：attest YAML 报单实例面积。公开汇总在存在 `reports/private/<layer>/<leaf>.yml` 时，按父级网表例化数相乘，标「私有 CI 出数」。
+5. **attest 模式**（私有仓 CI 调用 `public/scripts/impl/quick_synth.sh`）
+   ```
+   scripts/impl/quick_synth.sh --attest <leaf> --contract <path> --netlist <path> --out <file> [--scratch DIR]
+   ```
+   - 写出 YAML，字段恰好为：`leaf`、`contract_sha256`、`netlist_sha256`、`toolchain_sha256`、`clock{name,period_ns}`、`cells`、`area_um2`、`regs`、`logic_depth`、`depth_incl_buf`、`wns_ns`、`crit_path`、`status`（PASS/FAIL）。
+   - `contract_sha256` 调用 `scripts/gate/contract_hash.py` 的 `contract_sha256(path)`（PR #47）。缺该模块则失败并提示需要 PR #47。
+   - `clock` 从契约原样拷 `name` / `period_ns`。`toolchain_sha256` 是 `TOOLCHAIN.lock` 的 sha256。
+   - `crit_path`：最差路径碰到叶子端口则为字面量 `public`，否则为 `私有叶子内部`。attest 文件与 stdout 不写路径报告、网名、中间文件。中间文件只落在调用方给的 `--scratch`。
+   - `status=PASS` 当且仅当综合成功且 `wns_ns >= 0`。
+   - 公开树副本：`reports/private/<layer>/<leaf>.yml`。私有仓 CI 产出：`attest/<layer>/<leaf>.yml`，拷入公开树时放 `reports/private/`。
+6. **相对 baseline 的趋势**
    - `--baseline-report`（旧 markdown 表）或 `--baseline-json`。
    - 同名叶子对同名 + 同 variant（HOOKS 优先对 HOOKS，否则 PRODUCT）。
    - 迁移后的 tag 可用 `--baseline-map NEW=OLD[:VARIANT]`。无显式 map 时启发式：`_x4` → 旧模块 `PRODUCT`（历史上 `NUM_LANES=4`），`_x8` → `PRODUCT_NUM_LANES=8`，BCRC 等无 tag 的同名对 PRODUCT。例：`ub_pcs_lane_dist_x4` vs 报告 `2026-10-10_PR5_6875f611` 的 `ub_pcs_lane_dist` PRODUCT。
    - 新模块：delta = `new`。
    - **QoR >10%**：cells / area / **`logic depth`（不含 buf）** / slack 任一相对 baseline 的 `|Δ| / |baseline| > 10%` 则标旗（0 vs 0 不标；baseline 为 0 且新值非 0 则标）。只标旗，不门禁。日后 pycc `--logic-depth` 对照同一列。
-5. **SRAM 估算列（estimate，不是宏）**
+7. **SRAM 估算列（estimate，不是宏）**
    - 共享存储原语：`ub_cmn_mem_1r1w`（pycc `pycircuit/cmn/`，网表 `rtl/cmn/`，变体按 §2.2 命名）。若存在 `scripts/gate/blackbox.yml`，其中列出的模块同样参加判断。
    - `depth × width >` **`--sram-bit-threshold`（默认 4096，环境变量 `QS_SRAM_BIT_THRESHOLD`）**：综合作黑盒，面积走 **SRAM est** 列，不进 stdcell 面积。
    - 不超过阈值：当普通 flop 综合进 mapped 面积。
@@ -79,7 +95,7 @@
      - `1.35`：译码 / sense-amp / I/O 周边（教材常见 25–50%）。
      - 工艺未定（PR #9 §13）前用此 proxy；**定节点后重看阈值与公式**。
    - PRODUCT 面积合计只加非 `_placeholder`、非待删除的 PRODUCT 行的 liberty stdcell；SRAM est 另报一列、另合计。HOOKS 不进 PRODUCT 合计。
-6. **工具与 liberty 出处**
+8. **工具与 liberty 出处**
    - 报告写死 Yosys / OpenSTA 版本，以及 liberty 的来源 URL / commit。PDK **不进仓库**；脚本下载或读 `SKY130_HD_LIB`。
 
 不报、不算签核的：
@@ -119,9 +135,12 @@ OPEN §13 参数已按 §2.2 做成 `_placeholder` 固定网表时：综合进 p
 | IMP-QS-006 | `_placeholder` 变体单独列表，不计入 PRODUCT 面积合计 | SPEC §2.2 | 2026-10-10 |
 | IMP-QS-007 | 可用 `--baseline-map` 把迁移后的 `<leaf>_<tag>` 对到旧模块+参数；cells / area / depth / slack 相对 baseline 超 10% 标旗 | 本分册 | 2026-10-10 |
 | IMP-QS-008 | `ub_cmn_mem_1r1w`（及 `scripts/gate/blackbox.yml` 中的模块）depth×width 超过可配阈值（默认 4096 bit）作黑盒，SRAM est 列用标明的 bit 面积公式；小实例按 flop 综合；STA 按 1 拍 registered read。阈值与公式在工艺确定后重看 | 本分册；PR #9 §13 | 2026-10-10 |
-| IMP-QS-009 | Yosys 默认 `-I rtl/pyc_lib`（TOOLCHAIN.lock 钉住的 pyCircuit 原语）。目录未到时回退 `rtl/common` 并 WARN。`--incdir` / `QS_INCDIRS` 为额外路径。`pyc_*` 不作报告 top | 本分册；#21 / #5 | 2026-10-10 |
+| IMP-QS-009 | Yosys 默认 `-I rtl/pyc_lib`（TOOLCHAIN.lock 钉住的 pyCircuit 原语，来自 PR #21）。目录缺失则硬失败。`--incdir` / `QS_INCDIRS` 为额外路径。`pyc_*` 不作报告 top | 本分册；#21 | 2026-10-12 |
 | IMP-QS-010 | `ub_dll_crc32` / `ub_dll_crc_check` / `ub_controller_tx` / `ub_controller_rx` 只报「待删除 / to be deleted」，不进合计、不对 baseline | 本分册 | 2026-10-10 |
 | IMP-QS-011 | abc 映射后默认对高扇出数据网插确定性 `buf_4`/`buf_8` 树（max fanout 16）。`--no-buffer` 可关。每叶子报告缓冲后 max fanout。时钟 / 复位网不插。`logic depth` 不计这些 buf，须与 `--no-buffer` 深度一致；slack/area 仍用缓冲后网表。这是 proxy，用来避免无 wire-load 时单 cell 灌数千 load 的悲观 WNS | 本分册 | 2026-10-10 |
+| IMP-QS-012 | 私有叶子契约来自 `docs/arch/*/contracts/<leaf>.md`。STA 周期用契约 `clock.period_ns`；无契约时默认 `core_clk` 12.412 ns | 本分册；contracts README | 2026-10-12 |
+| IMP-QS-013 | 有契约或 `rtl/<layer>/stub/<leaf>.v` 的模块进 PRIVATE_SKIP，不进面积 / cell 合计。父级 STA：`latency>=1` 输出按寄存器，`latency==0` 用 `comb_budget_ns` 约束。桩内部面积记 0。存在 `reports/private/` 时按例化数报「私有 CI 出数」 | 本分册；D20 S-01(b) | 2026-10-12 |
+| IMP-QS-014 | `--attest` 写固定字段 YAML。`contract_sha256` 只来自 `scripts/gate/contract_hash.py`（PR #47）。公开副本 `reports/private/<layer>/<leaf>.yml`，私有仓 `attest/<layer>/<leaf>.yml`。`crit_path` 只有 `public` / `私有叶子内部`。`status=PASS` 当综合成功且 `wns_ns>=0` | 本分册 | 2026-10-12 |
 
 ---
 
@@ -148,6 +167,14 @@ scripts/impl/quick_synth.sh --work-tree . --incdir /tmp/extra --out /tmp/qs
 scripts/impl/quick_synth.sh --work-tree . --tops ub_foo --no-buffer --out /tmp/qs-nobuf
 
 scripts/impl/quick_synth.sh --self-check
+
+# 私有叶子 attest（私有仓 CI；中间文件进 --scratch）
+scripts/impl/quick_synth.sh --attest ub_mem_ptw_desc_dec \
+  --contract docs/arch/mem/contracts/ub_mem_ptw_desc_dec.md \
+  --netlist path/to/private.v \
+  --out attest/mem/ub_mem_ptw_desc_dec.yml \
+  --scratch /tmp/qs-attest-scratch
+# 公开树把同一份 YAML 放在 reports/private/mem/ub_mem_ptw_desc_dec.yml
 ```
 
 环境变量 `SKY130_HD_LIB` 指向已下载的 `sky130_fd_sc_hd__tt_025C_1v80.lib`。未设置时脚本从 OpenROAD-flow-scripts 的对应路径拉取（commit 写进报告），缓存到 `~/.cache/vibe-ub/sky130/`。

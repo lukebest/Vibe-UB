@@ -11,6 +11,7 @@ are lint/TB only. Large ub_cmn_mem_1r1w instances are blackboxed.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import re
@@ -18,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from contextlib import redirect_stderr
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +29,35 @@ from buffer_fanout import (
     buffer_design,
     buffer_module,
     choose_buf,
+)
+from priv_leaf import (
+    ATTEST_FIELDS,
+    CONTRACT_HASH_MISSING,
+    CRIT_PATH_PRIVATE,
+    CRIT_PATH_PUBLIC,
+    PUBLIC_ATTEST_DIR,
+    PRIVATE_REPO_ATTEST_DIR,
+    attest_clock,
+    attest_field_names,
+    build_private_catalog,
+    classify_crit_path,
+    clock_name,
+    clock_period_ns,
+    count_instances as count_priv_instances,
+    file_sha256,
+    find_instantiated_private,
+    is_private_leaf,
+    load_contract_sha256,
+    load_public_attest,
+    parse_contract_header,
+    parse_sta_endpoints,
+    private_entry,
+    private_skip_row,
+    redact_private_names,
+    write_attest_yaml,
+    write_combo_max_delay_sdc,
+    write_ports_blackbox,
+    write_private_sta_stub,
 )
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -246,42 +277,29 @@ def parse_incdirs_env(raw: str | None) -> list[Path]:
     return [Path(p) for p in parts if p]
 
 
-PYC_LIB_FALLBACK_WARN = (
-    "WARN: rtl/pyc_lib/ missing; falling back to rtl/common for Yosys -I "
-    "(temporary until #21/#5 land)"
+PYC_LIB_MISSING = (
+    "rtl/pyc_lib/ is missing; it comes from PR #21 and must be present"
 )
 
 
-def default_pyc_incdir(tree: Path) -> tuple[Path | None, str | None]:
-    """Primary include dir is rtl/pyc_lib (TOOLCHAIN.lock-pinned pyCircuit).
-
-    Until #21/#5 copy primitives there, fall back to rtl/common with a WARN.
-    """
+def default_pyc_incdir(tree: Path) -> Path:
+    """Require rtl/pyc_lib (TOOLCHAIN.lock-pinned pyCircuit from PR #21)."""
     pyc_lib = tree / "rtl" / "pyc_lib"
     if pyc_lib.is_dir():
-        return pyc_lib.resolve(), None
-    common = tree / "rtl" / "common"
-    if common.is_dir():
-        return common.resolve(), PYC_LIB_FALLBACK_WARN
-    return None, (
-        "WARN: neither rtl/pyc_lib nor rtl/common exists; `include may fail"
-    )
+        return pyc_lib.resolve()
+    die(PYC_LIB_MISSING)
+    raise SystemExit(2)
 
 
-def yosys_incdirs(
-    tree: Path, extra: list[Path] | None = None
-) -> tuple[list[Path], str | None]:
-    """Default -I rtl/pyc_lib (or rtl/common fallback); then --incdir / QS_INCDIRS."""
-    dirs: list[Path] = []
-    primary, warn = default_pyc_incdir(tree)
-    if primary is not None:
-        dirs.append(primary)
+def yosys_incdirs(tree: Path, extra: list[Path] | None = None) -> list[Path]:
+    """Default -I rtl/pyc_lib; then --incdir / QS_INCDIRS."""
+    dirs: list[Path] = [default_pyc_incdir(tree)]
     for e in extra or []:
         p = e if e.is_absolute() else (tree / e)
         p = p.resolve()
         if p.is_dir() and p not in dirs:
             dirs.append(p)
-    return dirs, warn
+    return dirs
 
 
 def is_library_cell(stem: str) -> bool:
@@ -314,7 +332,7 @@ def list_rtl_leaves(tree: Path) -> dict[str, dict[str, Path]]:
     if not rtl.is_dir():
         return found
     for block in sorted(p for p in rtl.iterdir() if p.is_dir()):
-        if block.name == "pyc_lib":
+        if block.name in {"pyc_lib", "stub"}:
             continue
         for path in sorted(block.iterdir()):
             if path.suffix not in {".v", ".sv"} or path.name.endswith(".vh"):
@@ -375,7 +393,7 @@ def default_tops(repo: Path, tree: Path, base: str, head: str | None) -> list[st
             continue
         if not str(p).startswith("rtl/"):
             continue
-        if "pyc_lib" in p.parts or is_library_cell(p.stem):
+        if "pyc_lib" in p.parts or "stub" in p.parts or is_library_cell(p.stem):
             continue
         if is_to_be_deleted(p.stem):
             tops.append(p.stem)
@@ -504,6 +522,7 @@ def _parse_sta_block(block: str) -> dict[str, Any] | None:
             combo.append(key)
             if not is_fanout_buf_cell(cell, key):
                 combo_logic.append(key)
+    ends = parse_sta_endpoints(block)
     return {
         "group": group,
         "arrival_ns": arrival,
@@ -512,6 +531,7 @@ def _parse_sta_block(block: str) -> dict[str, Any] | None:
         "logic_depth_incl_buf": len(combo),
         "path_cells": combo,
         "path_cells_logic": combo_logic,
+        **ends,
     }
 
 
@@ -539,6 +559,10 @@ def parse_sta(text: str) -> dict[str, Any]:
             "logic_depth_incl_buf": None,
             "path_cells": [],
             "path_cells_logic": [],
+            "start_name": None,
+            "start_desc": None,
+            "end_name": None,
+            "end_desc": None,
             "raw": text,
         }
     return {**chosen, "raw": text}
@@ -1154,6 +1178,9 @@ def synthesize_one(
     extra_incdirs: list[Path] | None = None,
     buffer: bool = True,
     max_fanout_limit: int = DEFAULT_MAX_FANOUT,
+    private_catalog: dict[str, dict[str, Any]] | None = None,
+    clk_sdc_name: str = "core_clk",
+    quiet: bool = False,
 ) -> dict[str, Any]:
     outdir.mkdir(parents=True, exist_ok=True)
     files = [src]
@@ -1170,6 +1197,9 @@ def synthesize_one(
     lib_files: list[Path] = []
     stubs: list[Path] = []
     notes: list[str] = []
+    priv_use = find_instantiated_private(text, private_catalog or {})
+    combo_priv: list[dict[str, Any]] = []
+    private_names = {p["name"] for p in priv_use}
     for rec in mem_use["flopped"]:
         p = rec.get("path")
         if p:
@@ -1204,6 +1234,45 @@ def synthesize_one(
         else:
             notes.append(f"blackbox {rec['name']}: netlist not found in tree")
 
+    for rec in priv_use:
+        stub_p = rec.get("stub_path")
+        ports = list(rec.get("ports") or [])
+        if stub_p and Path(stub_p).is_file() and not ports:
+            ports = list_port_info(
+                Path(stub_p).read_text(encoding="utf-8", errors="replace")
+            )
+            rec["ports"] = ports
+        # Ports-only blackbox: stub placeholder body never enters Yosys.
+        bb = outdir / f"priv_bb_{rec['name']}.v"
+        write_ports_blackbox(rec["name"], ports, bb)
+        lib_files.append(bb)
+        clk_p = rec.get("clock_name") or "core_clk"
+        if ports:
+            names = {p["name"] for p in ports}
+            if clk_p not in names:
+                clk_p = next(
+                    (n for n in ("core_clk", "clk") if n in names),
+                    clk_p,
+                )
+        lat = int(rec.get("latency_cycles") if rec.get("latency_cycles") is not None else 1)
+        sta_stub = outdir / f"sta_stub_{rec['name']}.v"
+        info = write_private_sta_stub(
+            rec["name"], ports, sta_stub, clk=clk_p, latency=lat
+        )
+        stubs.append(sta_stub)
+        rec["sta_registered"] = info.get("registered")
+        if lat == 0:
+            combo_priv.append(rec)
+            notes.append(
+                f"PRIVATE_SKIP {rec['name']} {rec['n_inst']}× blackbox; "
+                f"STA combo budget {rec.get('comb_budget_ns')} ns"
+            )
+        else:
+            notes.append(
+                f"PRIVATE_SKIP {rec['name']} {rec['n_inst']}× blackbox; "
+                f"STA outputs registered (latency={lat})"
+            )
+
     merged: dict[str, str] = {}
     if chparam_override:
         for k, v in chparam_override.items():
@@ -1222,9 +1291,7 @@ def synthesize_one(
         ch_cmd = "chparam " + " ".join(parts) + f" {top}"
 
     env = os.environ.copy()
-    incdirs, inc_warn = yosys_incdirs(tree, extra_incdirs)
-    if inc_warn:
-        notes.append(inc_warn)
+    incdirs = yosys_incdirs(tree, extra_incdirs)
     env["QS_TOP"] = top
     env["QS_FILES"] = " ".join(str(p) for p in files)
     env["QS_LIB_FILES"] = " ".join(str(p) for p in lib_files)
@@ -1260,6 +1327,16 @@ def synthesize_one(
         ],
         "sram_flopped": [
             {k: v for k, v in b.items() if k != "path"} for b in mem_use["flopped"]
+        ],
+        "private_insts": [
+            {
+                "name": p["name"],
+                "layer": p.get("layer"),
+                "n_inst": p.get("n_inst"),
+                "instances": p.get("instances"),
+                "latency_cycles": p.get("latency_cycles"),
+            }
+            for p in priv_use
         ],
     }
     if y.returncode != 0:
@@ -1362,9 +1439,10 @@ def synthesize_one(
     if mapped["cells"] == 0 and mapped["area_um2"] is None:
         mapped["area_um2"] = 0.0
     n_bb = sum(b["n_inst"] for b in mem_use["blackbox"])
+    n_priv = sum(int(p.get("n_inst") or 0) for p in priv_use)
     cells = mapped["cells"]
-    if cells is not None and n_bb:
-        cells = max(0, cells - n_bb)
+    if cells is not None and (n_bb or n_priv):
+        cells = max(0, cells - n_bb - n_priv)
     ltp = parse_ltp((outdir / "ltp.txt").read_text(errors="replace"))
     loops = parse_scc((outdir / "scc_synth.txt").read_text(errors="replace"))
     loops += parse_scc((outdir / "scc_proc.txt").read_text(errors="replace"))
@@ -1391,10 +1469,12 @@ def synthesize_one(
     env["QS_NETLIST"] = str(mapped_v)
     env["QS_PERIOD_NS"] = f"{period_ns:.9f}"
     env["QS_CLK_PORT"] = clk or ""
-    env["QS_CLK_NAME"] = "core_clk"
+    env["QS_CLK_NAME"] = clk_sdc_name or "core_clk"
     env["QS_INPUTS"] = " ".join(in_ports)
     env["QS_OUTPUTS"] = " ".join(out_ports)
     env["QS_STUB_FILES"] = " ".join(str(p) for p in stubs)
+    sdc_extra = write_combo_max_delay_sdc(outdir / "private_combo.sdc", combo_priv)
+    env["QS_SDC_EXTRA"] = str(sdc_extra) if sdc_extra is not None else ""
     sta_log = outdir / "sta.log"
     s = run(
         ["sta", "-no_init", "-exit", str(SCRIPT_DIR / "sta.tcl")],
@@ -1427,6 +1507,24 @@ def synthesize_one(
     result["slack_ns"] = sta_parsed.get("slack_ns")
     result["logic_depth"] = sta_parsed.get("logic_depth")
     result["logic_depth_incl_buf"] = sta_parsed.get("logic_depth_incl_buf")
+    result["sta_start_name"] = sta_parsed.get("start_name")
+    result["sta_start_desc"] = sta_parsed.get("start_desc")
+    result["sta_end_name"] = sta_parsed.get("end_name")
+    result["sta_end_desc"] = sta_parsed.get("end_desc")
+    result["crit_path"] = classify_crit_path(
+        sta_parsed.get("start_desc"),
+        sta_parsed.get("end_desc"),
+        start_name=sta_parsed.get("start_name"),
+        end_name=sta_parsed.get("end_name"),
+    )
+    if private_names:
+        for key in ("sta_start_name", "sta_end_name", "sta_start_desc", "sta_end_desc"):
+            val = result.get(key)
+            if isinstance(val, str):
+                result[key] = redact_private_names(val, private_names)
+        result["notes"] = [
+            redact_private_names(n, private_names) for n in notes
+        ]
     if (
         result.get("logic_depth_incl_buf") is None
         and result.get("logic_depth") is not None
@@ -1545,6 +1643,8 @@ def product_area_totals(rows: list[dict[str, Any]]) -> dict[str, float]:
         and not is_placeholder_name(r.get("top") or "")
         and not r.get("to_be_deleted")
         and not is_to_be_deleted(r.get("top") or "")
+        and not r.get("private_skip")
+        and r.get("variant") != "PRIVATE_SKIP"
         and r.get("ok")
     ]
     return {
@@ -1554,24 +1654,55 @@ def product_area_totals(rows: list[dict[str, Any]]) -> dict[str, float]:
     }
 
 
-def write_full_markdown(
-    rows: list[dict[str, Any]], inc_warn: str | None = None
-) -> str:
+def write_private_skip_table(rows: list[dict[str, Any]]) -> str:
+    hdr = (
+        "| leaf | layer | n_inst | 私有 CI 出数 um^2 | latency | notes |"
+    )
+    sep = "| --- | --- | ---: | ---: | ---: | --- |"
+    lines = [hdr, sep]
+    for r in rows:
+        area = r.get("private_ci_area_um2")
+        area_s = fmt_num(area, 1) if area is not None else "—"
+        notes = "; ".join(r.get("notes") or []) or "—"
+        lines.append(
+            "| {leaf} | {layer} | {n} | {area} | {lat} | {notes} |".format(
+                leaf=r.get("top", ""),
+                layer=r.get("layer") or "—",
+                n=fmt_num(r.get("n_inst"), 0),
+                area=area_s,
+                lat=fmt_num(r.get("latency_cycles"), 0),
+                notes=notes.replace("|", "/"),
+            )
+        )
+    return "\n".join(lines)
+
+
+def write_full_markdown(rows: list[dict[str, Any]]) -> str:
     deleted = [
         r
         for r in rows
         if r.get("to_be_deleted") or is_to_be_deleted(r.get("top") or "")
     ]
+    skip_rows = [
+        r
+        for r in rows
+        if (r.get("private_skip") or r.get("variant") == "PRIVATE_SKIP")
+        and r not in deleted
+    ]
     ph_rows = [
         r
         for r in rows
-        if is_placeholder_name(r.get("top") or "") and r not in deleted
+        if is_placeholder_name(r.get("top") or "")
+        and r not in deleted
+        and r not in skip_rows
     ]
-    main_rows = [r for r in rows if r not in deleted and r not in ph_rows]
+    main_rows = [
+        r
+        for r in rows
+        if r not in deleted and r not in ph_rows and r not in skip_rows
+    ]
     totals = product_area_totals(rows)
     parts: list[str] = []
-    if inc_warn:
-        parts.extend([inc_warn, ""])
     parts.extend(
         [
             "## PRODUCT / HOOKS",
@@ -1587,6 +1718,25 @@ def write_full_markdown(
             ),
         ]
     )
+    if skip_rows:
+        parts.extend(
+            [
+                "",
+                "## PRIVATE_SKIP",
+                "",
+                (
+                    "有契约或 `rtl/<layer>/stub/<leaf>.v` 的叶子作黑盒，"
+                    "不进面积 / cell 合计。桩内部（含 "
+                    "`contract_sha256: HANDWRITTEN`）面积记 0。"
+                    f"存在 `{PUBLIC_ATTEST_DIR}/<layer>/<leaf>.yml` 时，"
+                    "面积按单实例 attest × 父级网表例化数，标「私有 CI 出数」。"
+                    f"私有仓 CI 写 `{PRIVATE_REPO_ATTEST_DIR}/<layer>/<leaf>.yml`，"
+                    "拷入公开树时放 `reports/private/`。"
+                ),
+                "",
+                write_private_skip_table(skip_rows),
+            ]
+        )
     if deleted:
         parts.extend(
             [
@@ -1628,6 +1778,154 @@ def write_full_markdown(
                 + f" — {r.get('delta_vs_baseline', '')}"
             )
     return "\n".join(parts)
+
+
+def count_private_in_tree(
+    tree: Path, catalog: dict[str, dict[str, Any]]
+) -> dict[str, int]:
+    counts = {name: 0 for name in catalog}
+    rtl = tree / "rtl"
+    if not rtl.is_dir():
+        return counts
+    for path in rtl.rglob("*"):
+        if path.suffix not in {".v", ".sv"}:
+            continue
+        if any(part in {"stub", "hooks", "pyc_lib"} for part in path.parts):
+            continue
+        if path.stem in catalog:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for name in catalog:
+            counts[name] += count_priv_instances(text, name)
+    return counts
+
+
+def collect_private_skip_rows(
+    tree: Path,
+    catalog: dict[str, dict[str, Any]],
+    extra_counts: dict[str, int] | None = None,
+) -> list[dict[str, Any]]:
+    counts = count_private_in_tree(tree, catalog)
+    for name, n in (extra_counts or {}).items():
+        counts[name] = max(counts.get(name, 0), n)
+    rows: list[dict[str, Any]] = []
+    for name in sorted(catalog):
+        rec = catalog[name]
+        attest = load_public_attest(tree, rec.get("layer") or "unknown", name)
+        rows.append(
+            private_skip_row(
+                rec,
+                n_inst=counts.get(name, 0),
+                attest=attest,
+            )
+        )
+    return rows
+
+
+def run_attest(
+    *,
+    leaf: str,
+    contract: Path,
+    netlist: Path,
+    out: Path,
+    repo: Path,
+    scratch: Path,
+    liberty: Path,
+    extra_incdirs: list[Path] | None,
+    buffer: bool,
+    max_fanout_limit: int,
+    work_tree: Path | None,
+    sram_bit_threshold: int,
+) -> int:
+    """Synthesize one private leaf and write the attest YAML. No path dump."""
+    try:
+        sha_fn = load_contract_sha256(repo)
+    except FileNotFoundError as exc:
+        die(str(exc))
+    try:
+        contract_digest = sha_fn(contract)
+    except Exception as exc:  # noqa: BLE001 — surface gate helper errors
+        die(f"contract_sha256({contract}) failed: {exc}")
+
+    try:
+        cdata = parse_contract_for_attest(contract)
+    except ValueError as exc:
+        die(str(exc))
+
+    toolchain = repo / "TOOLCHAIN.lock"
+    if work_tree is not None and (work_tree / "TOOLCHAIN.lock").is_file():
+        toolchain = work_tree / "TOOLCHAIN.lock"
+    if not toolchain.is_file():
+        die(f"TOOLCHAIN.lock not found at {toolchain}")
+
+    period = cdata.get("period_ns")
+    if period is None:
+        period = SPEC_PERIOD_NS
+    clk_name = cdata.get("clock_name") or "core_clk"
+    tree = work_tree.resolve() if work_tree is not None else repo
+    scratch.mkdir(parents=True, exist_ok=True)
+    outdir = scratch / f"{leaf}__attest"
+    mem_catalog: dict[str, dict[str, Any]] = {}
+    r = synthesize_one(
+        top=leaf,
+        src=netlist,
+        tree=tree,
+        outdir=outdir,
+        liberty=liberty,
+        chparam_override=None,
+        period_ns=float(period),
+        variant="ATTEST",
+        mem_catalog=mem_catalog,
+        sram_bit_threshold=sram_bit_threshold,
+        extra_incdirs=extra_incdirs,
+        buffer=buffer,
+        max_fanout_limit=max_fanout_limit,
+        private_catalog={},
+        clk_sdc_name=clk_name,
+        quiet=True,
+    )
+    slack = r.get("slack_ns")
+    ok = bool(r.get("ok"))
+    status = "PASS" if ok and slack is not None and float(slack) >= 0 else "FAIL"
+    crit = r.get("crit_path") or classify_crit_path(
+        r.get("sta_start_desc"),
+        r.get("sta_end_desc"),
+        start_name=r.get("sta_start_name"),
+        end_name=r.get("sta_end_name"),
+    )
+    if crit not in {CRIT_PATH_PUBLIC, CRIT_PATH_PRIVATE}:
+        crit = CRIT_PATH_PRIVATE
+    payload = {
+        "leaf": leaf,
+        "contract_sha256": contract_digest,
+        "netlist_sha256": file_sha256(netlist),
+        "toolchain_sha256": file_sha256(toolchain),
+        "clock": attest_clock(cdata.get("contract") or cdata),
+        "cells": int(r.get("cells_mapped") or 0),
+        "area_um2": float(r.get("area_um2") or 0.0),
+        "regs": int(r.get("flops") or 0),
+        "logic_depth": int(r.get("logic_depth") or 0),
+        "depth_incl_buf": int(
+            r.get("logic_depth_incl_buf")
+            if r.get("logic_depth_incl_buf") is not None
+            else (r.get("logic_depth") or 0)
+        ),
+        "wns_ns": float(slack) if slack is not None else None,
+        "crit_path": crit,
+        "status": status,
+    }
+    write_attest_yaml(out, payload)
+    return 0
+
+
+def parse_contract_for_attest(path: Path) -> dict[str, Any]:
+    data = parse_contract_header(path)
+    return {
+        "contract": data,
+        "period_ns": clock_period_ns(data),
+        "clock_name": clock_name(data),
+        "leaf": data.get("leaf"),
+    }
 
 
 def self_check() -> int:
@@ -1762,8 +2060,7 @@ def self_check() -> int:
             "endmodule\n",
             encoding="utf-8",
         )
-        dirs, warn = yosys_incdirs(tree)
-        expect(warn is None, f"no fallback warn when pyc_lib exists: {warn}")
+        dirs = yosys_incdirs(tree)
         expect(any(p.name == "pyc_lib" for p in dirs), f"incdirs {dirs}")
         if not shutil.which("yosys"):
             failures.append("yosys missing; include-read self-test not run")
@@ -1906,12 +2203,66 @@ Path Type: max
     with tempfile.TemporaryDirectory() as td:
         tree = Path(td)
         (tree / "rtl" / "common").mkdir(parents=True)
-        dirs, warn = yosys_incdirs(tree)
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            try:
+                yosys_incdirs(tree)
+                expect(False, "missing rtl/pyc_lib must hard-error")
+            except SystemExit as exc:
+                expect(exc.code != 0, f"pyc_lib missing exit {exc.code}")
+        err = buf.getvalue()
         expect(
-            warn is not None and "rtl/common" in (warn or ""),
-            f"fallback warn {warn}",
+            "PR #21" in err and "rtl/pyc_lib" in err and "must be present" in err,
+            f"pyc_lib hard-error message: {err}",
         )
-        expect(any(p.name == "common" for p in dirs), f"fallback dirs {dirs}")
+        expect("falling back to rtl/common" not in err, f"no common fallback: {err}")
+
+    expect(
+        classify_crit_path("input port clocked by core_clk", "output port")
+        == CRIT_PATH_PUBLIC,
+        "I/O path is public",
+    )
+    expect(
+        classify_crit_path(
+            "rising edge-triggered flip-flop clocked by core_clk",
+            "rising edge-triggered flip-flop clocked by core_clk",
+        )
+        == CRIT_PATH_PRIVATE,
+        "flop-to-flop is private",
+    )
+    red = redact_private_names(
+        "u0/ub_priv/internal_n $42 ub_priv/foo/bar",
+        {"ub_priv"},
+    )
+    expect(
+        "internal_n" not in red and "foo/bar" not in red and "ub_priv" in red,
+        f"redact internals {red}",
+    )
+    with tempfile.TemporaryDirectory() as td:
+        yp = Path(td) / "a.yml"
+        payload = {k: 0 for k in ATTEST_FIELDS}
+        payload.update(
+            {
+                "leaf": "ub_toy",
+                "contract_sha256": "a" * 64,
+                "netlist_sha256": "b" * 64,
+                "toolchain_sha256": "c" * 64,
+                "clock": {"name": "core_clk", "period_ns": 12.412},
+                "cells": 1,
+                "area_um2": 2.5,
+                "regs": 3,
+                "logic_depth": 4,
+                "depth_incl_buf": 5,
+                "wns_ns": 0.1,
+                "crit_path": CRIT_PATH_PRIVATE,
+                "status": "PASS",
+            }
+        )
+        write_attest_yaml(yp, payload)
+        body = yp.read_text(encoding="utf-8")
+        expect(attest_field_names(body) == list(ATTEST_FIELDS), f"fields {body}")
+        expect("internal" not in body and "sky130" not in body, "attest has no nets")
+        expect(CONTRACT_HASH_MISSING.startswith("scripts/gate/contract_hash.py"), "msg")
 
     if failures:
         print("self-check FAILED:", file=sys.stderr)
@@ -1990,6 +2341,17 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="run parser/mapping unit checks and exit (no synth)",
     )
+    ap.add_argument(
+        "--attest",
+        help="private-leaf attest mode: leaf name; write YAML to --out",
+    )
+    ap.add_argument("--contract", type=Path, help="contract markdown (attest mode)")
+    ap.add_argument("--netlist", type=Path, help="private leaf netlist (attest mode)")
+    ap.add_argument(
+        "--scratch",
+        type=Path,
+        help="scratch dir for attest intermediates (caller-controlled)",
+    )
     args = ap.parse_args(argv)
 
     if args.self_check:
@@ -1998,9 +2360,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.out is None:
         die("--out is required (unless --self-check)")
 
+    if args.attest:
+        if not args.contract:
+            die("--attest needs --contract")
+        if not args.netlist:
+            die("--attest needs --netlist")
+
     repo = args.repo.resolve()
     out = args.out.resolve()
-    out.mkdir(parents=True, exist_ok=True)
+    if not args.attest:
+        out.mkdir(parents=True, exist_ok=True)
 
     liberty = args.liberty or Path(os.environ.get("SKY130_HD_LIB", ""))
     if not liberty or not Path(liberty).is_file():
@@ -2028,12 +2397,21 @@ def main(argv: list[str] | None = None) -> int:
 
     cleanup: Path | None = None
     head_sha = None
-    if args.work_tree:
+
+    def maybe_head() -> str | None:
+        cp = run(["git", "rev-parse", "HEAD"], cwd=repo)
+        if cp.returncode != 0:
+            return None
+        return (cp.stdout or "").strip() or None
+
+    if args.attest:
+        tree = (args.work_tree or repo).resolve()
+    elif args.work_tree:
         tree = args.work_tree.resolve()
         if args.ref:
             head_sha = resolve_ref(repo, args.ref)
         else:
-            head_sha = git(repo, "rev-parse", "HEAD").strip()
+            head_sha = maybe_head()
     elif args.ref:
         head_sha = resolve_ref(repo, args.ref)
         cleanup = Path(tempfile.mkdtemp(prefix="quick_synth_"))
@@ -2041,20 +2419,50 @@ def main(argv: list[str] | None = None) -> int:
         tree = cleanup
     else:
         tree = repo
-        head_sha = git(repo, "rev-parse", "HEAD").strip()
+        head_sha = maybe_head()
+        if head_sha is None:
+            die("git rev-parse HEAD failed (pass --work-tree for a non-git tree)")
 
     try:
+        extra_incdirs = list(parse_incdirs_env(os.environ.get("QS_INCDIRS")))
+        extra_incdirs.extend(Path(p) for p in args.incdir)
+
+        if args.attest:
+            scratch = args.scratch
+            own_scratch = False
+            if scratch is None:
+                scratch = Path(tempfile.mkdtemp(prefix="qs_attest_"))
+                own_scratch = True
+            else:
+                scratch = scratch.resolve()
+                scratch.mkdir(parents=True, exist_ok=True)
+            try:
+                return run_attest(
+                    leaf=args.attest,
+                    contract=args.contract.resolve(),
+                    netlist=args.netlist.resolve(),
+                    out=out,
+                    repo=repo,
+                    scratch=scratch,
+                    liberty=liberty,
+                    extra_incdirs=extra_incdirs,
+                    buffer=not args.no_buffer,
+                    max_fanout_limit=args.max_fanout,
+                    work_tree=args.work_tree.resolve() if args.work_tree else tree,
+                    sram_bit_threshold=args.sram_bit_threshold,
+                )
+            finally:
+                if own_scratch:
+                    shutil.rmtree(scratch, ignore_errors=True)
+
         spec_path = tree / "docs" / "SPEC.md"
         spec_text = spec_path.read_text(encoding="utf-8") if spec_path.is_file() else None
         period_ns, period_src, period_ph = detect_period(spec_text)
 
-        extra_incdirs = list(parse_incdirs_env(os.environ.get("QS_INCDIRS")))
-        extra_incdirs.extend(Path(p) for p in args.incdir)
-        incdirs, inc_warn = yosys_incdirs(tree, extra_incdirs)
-        if inc_warn:
-            print(inc_warn, flush=True)
+        incdirs = yosys_incdirs(tree, extra_incdirs)
 
         leaves = list_rtl_leaves(tree)
+        private_catalog = build_private_catalog(tree)
         if args.tops:
             tops = [t.strip() for t in args.tops.split(",") if t.strip()]
         else:
@@ -2064,6 +2472,10 @@ def main(argv: list[str] | None = None) -> int:
         for top in tops:
             if is_library_cell(top):
                 print(f"==> {top} library cell (not a reported top)", flush=True)
+                continue
+            if is_private_leaf(top, private_catalog):
+                rec = private_entry(top, private_catalog) or {"name": top}
+                print(f"==> {top} PRIVATE_SKIP (contract/stub blackbox)", flush=True)
                 continue
             if is_to_be_deleted(top):
                 rec = leaves.get(top) or {}
@@ -2094,7 +2506,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             else:
                 live_tops.append(top)
-        if not live_tops and not deleted_rows:
+        if not live_tops and not deleted_rows and not private_catalog:
             die("no tops to synthesize (pass --tops or touch rtl/<block>/ leaves)")
 
         bb_yml = tree / "scripts" / "gate" / "blackbox.yml"
@@ -2104,11 +2516,11 @@ def main(argv: list[str] | None = None) -> int:
         mem_catalog = build_mem_catalog(tree, args.sram_bit_threshold, bb_entries)
 
         versions = tool_versions(liberty, liberty_meta)
-        jobs: list[tuple[str, str, Path, dict[str, str] | None]] = []
+        jobs: list[tuple[str, str, Path | None, dict[str, str] | None]] = []
         for top in live_tops:
             rec = leaves.get(top)
             if not rec or ("product" not in rec and "hooks" not in rec):
-                jobs.append((top, "PRODUCT", Path(), None))
+                jobs.append((top, "PRODUCT", None, None))
                 continue
             override = dict(ch_global)
             override.update(ch_per.get(top, {}))
@@ -2120,7 +2532,7 @@ def main(argv: list[str] | None = None) -> int:
 
         results: list[dict[str, Any]] = list(deleted_rows)
         for top, variant, src, extra in jobs:
-            if not src:
+            if src is None or not src.is_file():
                 results.append(
                     {
                         "top": top,
@@ -2150,8 +2562,20 @@ def main(argv: list[str] | None = None) -> int:
                 extra_incdirs=extra_incdirs,
                 buffer=not args.no_buffer,
                 max_fanout_limit=args.max_fanout,
+                private_catalog=private_catalog,
             )
             results.append(r)
+
+        extra_counts: dict[str, int] = {}
+        for r in results:
+            for rec in r.get("private_insts") or []:
+                name = rec.get("name")
+                if name:
+                    extra_counts[name] = extra_counts.get(name, 0) + int(
+                        rec.get("n_inst") or 0
+                    )
+        skip_rows = collect_private_skip_rows(tree, private_catalog, extra_counts)
+        results.extend(skip_rows)
 
         baseline_rows: list[dict[str, Any]] = []
         if args.baseline_json or args.baseline_report:
@@ -2159,6 +2583,10 @@ def main(argv: list[str] | None = None) -> int:
         for r in results:
             if r.get("to_be_deleted") or is_to_be_deleted(r.get("top") or ""):
                 r["delta_vs_baseline"] = "excluded (to be deleted)"
+                r["qor_over_10pct"] = []
+                continue
+            if r.get("private_skip") or r.get("variant") == "PRIVATE_SKIP":
+                r["delta_vs_baseline"] = "excluded (PRIVATE_SKIP)"
                 r["qor_over_10pct"] = []
                 continue
             if not baseline_rows:
@@ -2194,18 +2622,19 @@ def main(argv: list[str] | None = None) -> int:
             "sram_periph_factor": SRAM_PERIPH_FACTOR,
             "tools": versions,
             "incdirs": [str(p) for p in incdirs],
-            "incdir_warn": inc_warn,
+            "incdir_warn": None,
             "buffer": not args.no_buffer,
             "max_fanout_limit": args.max_fanout,
             "buffer_method": (
                 "yosys_buf_tree" if not args.no_buffer else "none"
             ),
             "product_totals": product_area_totals(results),
+            "private_leaves": sorted(private_catalog),
             "results": results,
         }
         jpath = args.json or (out / "results.json")
         jpath.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-        print(write_full_markdown(results, inc_warn=inc_warn))
+        print(write_full_markdown(results))
         print(f"\nSRAM formula: {SRAM_FORMULA_LABEL}")
         print(f"JSON: {jpath}")
         return 0 if all(r.get("ok") for r in results) else 1

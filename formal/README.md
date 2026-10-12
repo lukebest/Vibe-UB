@@ -20,6 +20,9 @@ that file is only read by the named `assume_diag` sby (see
 `docs/rules/verif_gate.md` GATE-PRIVATE-PARENT-FREE and GATE-FORMAL-DEPTH
 §5 rule 3).
 
+DLL `RETRY_WAIT` and LMSM `PROBE_WAIT` 322/323 covers live in
+`formal/dll/` (`dll.sby`). They are not TP covers.
+
 ## `formal/cmn/` — `ub_cmn_mem_1r1w`
 
 CODING_STYLE §10 / PR #20 (Xia timing proposal). Yosys-compatible clocked

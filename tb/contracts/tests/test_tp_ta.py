@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-from tb.contracts.model import INI_TASSN_W, done_fail_ok
+from tb.contracts.model import INI_TASSN_W, TPMSN_W, done_fail_ok
 from tb.contracts.scoreboard import ContractScoreboard
 from tb.contracts.tp_ta import (
     ALL_SIGNALS,
     TpTaDriver,
     TpTaHook,
     TpTaMonitor,
+    cmp_expected,
     mock_bundle,
+    msn_expected,
     payload_expected,
     submit_expected,
 )
@@ -25,6 +27,8 @@ def _env():
     drv.set_data_ready(0)
     drv.set_deliver_op_ready(0)
     drv.set_deliver_data_ready(0)
+    drv.set_msn_ready(0)
+    drv.set_cmp_ready(0)
     drv.set_link_up(1)
     drv.set_flush(0)
     return sigs, drv, mon
@@ -35,9 +39,15 @@ def test_signal_names_match_contract():
     assert set(sigs) == set(ALL_SIGNALS)
     assert "ta2tp_op_valid" in sigs
     assert "ta2tp_tassn" in sigs
+    assert "ta2tp_dcna" in sigs
     assert sigs["ta2tp_tassn"].width == INI_TASSN_W
+    assert sigs["tp2ta_tpmsn"].width == TPMSN_W == 24
     assert "tp2ta_done" in sigs
     assert "tp2ta_fail" in sigs
+    assert "tp2ta_msn_valid" in sigs
+    assert "ta2tp_cmp_tassn" in sigs
+    assert "ta2tp_cmp_fail" in sigs
+    assert "ta2tp_cmp_opcode" in sigs
 
 
 def test_submit_and_complete_each_compare_to_model():
@@ -49,8 +59,11 @@ def test_submit_and_complete_each_compare_to_model():
     hook = TpTaHook(sb, mon)
 
     drv.set_op_ready(1)
-    drv.present_op(opcode=0x10, tassn=0x0001, mode=0, bypass=1)
-    hook.check_submit(submit_expected(opcode=0x10, tassn=0x0001, mode=0, bypass=1), "op0")
+    drv.present_op(opcode=0x10, tassn=0x0001, mode=0, bypass=1, dcna=0x0001)
+    hook.check_submit(
+        submit_expected(opcode=0x10, tassn=0x0001, mode=0, bypass=1, dcna=0x0001),
+        "op0",
+    )
     drv.set_data_ready(1)
     drv.present_payload(data=0x55, sop=1, eop=1)
     hook.check_submit_data(payload_expected(data=0x55, sop=1, eop=1), "d0")
@@ -67,6 +80,24 @@ def test_submit_and_complete_each_compare_to_model():
         "del0",
     )
     sb.check()
+    assert sb.n_compare > 0
+    assert sb.n_compare == 4
+
+
+def test_msn_and_rol_cmp_compare_to_model():
+    _sigs, drv, mon = _env()
+    sb = ContractScoreboard("msn_cmp", {"submit": 0, "complete": 3, "total": 3})
+    hook = TpTaHook(sb, mon)
+    drv.set_msn_ready(1)
+    drv.present_msn(tpmsn=0x0000AA)
+    hook.check_msn(msn_expected(tpmsn=0x0000AA), "msn0")
+    drv.set_cmp_ready(1)
+    drv.present_cmp(tassn=0x0003, fail=0, opcode=0x10)
+    hook.check_cmp(cmp_expected(tassn=0x0003, fail=0, opcode=0x10), "cmp0")
+    drv.present_cmp(tassn=0x0004, fail=1, opcode=0x11)
+    hook.check_cmp(cmp_expected(tassn=0x0004, fail=1, opcode=0x11), "cmp1")
+    sb.check()
+    assert sb.n_compare == 3
 
 
 def test_done_fail_mutex_on_complete_side():
@@ -87,8 +118,8 @@ def test_tassn_16bit_on_submit_side():
     sb = ContractScoreboard("tassn", {"submit": 1, "complete": 0, "total": 1})
     hook = TpTaHook(sb, mon)
     drv.set_op_ready(1)
-    drv.present_op(opcode=1, tassn=0xABCD, bypass=1)
-    hook.check_submit(submit_expected(opcode=1, tassn=0xABCD, mode=0, bypass=1))
+    drv.present_op(opcode=1, tassn=0xABCD, bypass=1, dcna=0x10)
+    hook.check_submit(submit_expected(opcode=1, tassn=0xABCD, mode=0, bypass=1, dcna=0x10))
     sb.check()
 
 

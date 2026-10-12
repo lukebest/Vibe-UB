@@ -1,0 +1,28 @@
+# DLL RETRY_WAIT + LMSM PROBE_WAIT 322/323 covers.
+# Not a TP formal (LAYER_CONTRACTS §3). No assume.
+# Deepest cover is probe_323 (step 6) → BMC 12 ≥ 6+6.
+[tasks]
+cover
+bmc
+prove
+
+[options]
+multiclock off
+cover: mode cover
+bmc: mode bmc
+prove: mode prove
+cover: depth 12
+bmc: depth 12
+prove: depth 12
+
+[engines]
+smtbmc z3
+
+[script]
+read -formal dll_timeout_harness.sv
+read -formal dll_timeout_assert.sv
+prep -top dll_timeout_harness
+
+[files]
+dll_timeout_harness.sv
+dll_timeout_assert.sv

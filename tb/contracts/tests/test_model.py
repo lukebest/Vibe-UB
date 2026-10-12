@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-import math
-
 import pytest
 
 from tb.contracts.model import (
     CFG9,
     CFG9_FORBIDDEN,
-    F_CORE_HZ,
+    CFG_BYP,
+    CFG_CTP,
+    CFG_RTP,
+    CFG_W,
+    CLOSED_FROM_59,
+    DCNA_W,
     FLIT_W,
     HDR_COMPACT,
     HDR_FULL,
@@ -20,45 +23,30 @@ from tb.contracts.model import (
     PENDING_XIA,
     PSN_MASK,
     PSN_W,
+    RT_W,
     RTPH_BYTES,
-    TIMEOUT_DEFAULT_CYC,
-    TIMEOUT_US,
+    TP_TIMERS,
+    TPMSN_W,
+    UNKNOWN_XIA,
     VL_REQ,
     VL_RESP,
     bypass_cfg_ok,
     cfg9_forbidden_headers,
+    cfg_encoding_ok,
     compact_header,
     done_fail_ok,
     extract_rt,
     header_bytes,
+    icrc_forbidden,
+    icrc_on_cfg,
     mtu_ok,
     predict_flit,
     predict_op,
     psn_next,
     psn_wraps,
-    timed_out,
-    timeout_cycles,
+    tp_timer_ok,
     vl_for_dir,
 )
-
-
-def test_f_core_and_timeout_default():
-    assert TIMEOUT_DEFAULT_CYC == 323
-    assert math.ceil(TIMEOUT_US * 1e-6 * F_CORE_HZ) == 323
-    assert timeout_cycles(None) == 323
-    assert timeout_cycles(0) == 323
-    assert timeout_cycles(323) == 323
-
-
-def test_timeout_cycle_322_not_fired():
-    assert timed_out(322, 323) is False
-    assert timed_out(322) is False
-
-
-def test_timeout_cycle_323_fired():
-    assert timed_out(323, 323) is True
-    assert timed_out(323) is True
-    assert timed_out(324) is True
 
 
 def test_psn_24bit_wrap():
@@ -145,14 +133,52 @@ def test_done_fail_mutex():
     assert done_fail_ok(1, 1) is False
 
 
-def test_extract_rt_uses_caller_slice():
-    # Bit index is 待 Xia; the helper only shifts a 2-bit RT.
+def test_extract_rt_is_two_bits():
+    # Width locked at 2 b (LAYER_CONTRACTS §2). Slice index stays unknown.
+    assert RT_W == 2
     word = 0x3 << 4
     assert extract_rt(word, 4) == 0x3
     assert extract_rt(word, 0) == 0
 
 
-def test_pending_xia_is_nonempty():
-    assert PENDING_XIA
-    assert any("NLP" in item for item in PENDING_XIA)
-    assert any("Go-Back-N" in item for item in PENDING_XIA)
+def test_closed_from_59_and_ten_unknowns():
+    assert len(CLOSED_FROM_59) == 4
+    assert any("DCNA 16" in item for item in CLOSED_FROM_59)
+    assert any("ICRC on CFG7" in item for item in CLOSED_FROM_59)
+    assert any("CTP=6" in item for item in CLOSED_FROM_59)
+    assert any("LPH.RT 2 b" in item for item in CLOSED_FROM_59)
+    assert len(UNKNOWN_XIA) == 10
+    assert PENDING_XIA == UNKNOWN_XIA
+    assert any("NLP" in item for item in UNKNOWN_XIA)
+    assert any("Go-Back-N" in item for item in UNKNOWN_XIA)
+    assert not any("CFG6" in item for item in UNKNOWN_XIA)
+
+
+def test_dcna_16_and_cfg_encoding():
+    assert DCNA_W == 16
+    assert CFG_W == 4
+    assert CFG_CTP == 6 and CFG_RTP == 7 and CFG_BYP == 9
+    assert cfg_encoding_ok(6) and cfg_encoding_ok(7) and cfg_encoding_ok(9)
+    assert cfg_encoding_ok(0) is False
+    beat = predict_flit(data=1, sop=1, eop=1, dcna=0x1_0000)
+    assert beat["dcna"] == 0
+
+
+def test_icrc_on_cfg7_not_cfg9():
+    assert icrc_on_cfg(CFG_RTP) is True
+    assert icrc_on_cfg(CFG_BYP) is False
+    assert icrc_forbidden(CFG_BYP) is True
+    assert icrc_forbidden(CFG_RTP) is False
+    assert icrc_on_cfg(CFG_CTP) is False
+
+
+def test_tp_owns_rto_and_ack_coal_only():
+    assert TP_TIMERS == frozenset({"rto", "ack_coal"})
+    assert tp_timer_ok("rto")
+    assert tp_timer_ok("ack_coal")
+    assert tp_timer_ok("retry_wait") is False
+    assert tp_timer_ok("probe_wait") is False
+
+
+def test_tpmsn_24bit():
+    assert TPMSN_W == 24

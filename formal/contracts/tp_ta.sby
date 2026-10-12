@@ -1,6 +1,7 @@
 # TP↔TA contract asserts. Default tasks have no assume
 # (GATE-PRIVATE-PARENT-FREE). BMC depth ≥ deepest cover + 6
-# (GATE-FORMAL-DEPTH §5 rule 3). Measured deepest cover 14 → BMC 22.
+# (GATE-FORMAL-DEPTH §5 rule 3). Measured deepest cover 16
+# (c_cmp_fail) → BMC 22.
 [tasks]
 cover
 bmc

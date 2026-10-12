@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tb.contracts.model import CFG9, FLIT_W, bypass_cfg_ok
+from tb.contracts.model import CFG_BYP, DCNA_W, FLIT_W, LBF_W, RT_W, CCI_W, bypass_cfg_ok
 from tb.contracts.nw_tp import (
     ALL_SIGNALS,
     NwTpDriver,
@@ -33,9 +33,19 @@ def test_signal_names_match_contract():
     sigs = mock_bundle()
     assert set(sigs) == set(ALL_SIGNALS)
     assert "tp2nw_bypass" in sigs
+    assert "tp2nw_dcna" in sigs
+    assert "tp2nw_lbf" in sigs
+    assert "tp2nw_rt" in sigs
+    assert "tp2nw_cci" in sigs
     assert "nw2tp_err" in sigs
+    assert "nw2tp_icrc_err" in sigs
+    assert "nw2tp_drop" in sigs
     assert "nw_link_up" in sigs
     assert sigs["tp2nw_data"].width == FLIT_W
+    assert sigs["tp2nw_dcna"].width == DCNA_W == 16
+    assert sigs["tp2nw_lbf"].width == LBF_W == 8
+    assert sigs["tp2nw_rt"].width == RT_W == 2
+    assert sigs["tp2nw_cci"].width == CCI_W == 16
 
 
 def test_tx_and_rx_each_compare_to_model():
@@ -44,18 +54,30 @@ def test_tx_and_rx_each_compare_to_model():
     hook = NwTpHook(sb, mon)
 
     drv.set_tx_ready(1)
-    drv.present_tx(data=0x11, sop=1, eop=1, sl=0, nlp=0, bypass=1)
-    hook.check_tx(tx_expected(data=0x11, sop=1, eop=1, sl=0, nlp=0, bypass=1), "tx0")
-    drv.present_tx(data=0x22, sop=1, eop=0, sl=1, nlp=1, bypass=0)
-    hook.check_tx(tx_expected(data=0x22, sop=1, eop=0, sl=1, nlp=1, bypass=0), "tx1")
+    drv.present_tx(data=0x11, sop=1, eop=1, sl=0, nlp=0, bypass=1, dcna=1)
+    hook.check_tx(
+        tx_expected(data=0x11, sop=1, eop=1, sl=0, nlp=0, bypass=1, dcna=1),
+        "tx0",
+    )
+    drv.present_tx(
+        data=0x22, sop=1, eop=0, sl=1, nlp=1, bypass=0, dcna=0xC0, lbf=0x5A, rt=1, cci=0xA5
+    )
+    hook.check_tx(
+        tx_expected(
+            data=0x22, sop=1, eop=0, sl=1, nlp=1, bypass=0, dcna=0xC0, lbf=0x5A, rt=1, cci=0xA5
+        ),
+        "tx1",
+    )
 
     drv.set_rx_ready(1)
     drv.present_rx(data=0xAA, sop=1, eop=1, err=0)
     hook.check_rx(rx_expected(data=0xAA, sop=1, eop=1, err=0), "rx0")
-    drv.present_rx(data=0xBB, sop=0, eop=1, err=1)
-    hook.check_rx(rx_expected(data=0xBB, sop=0, eop=1, err=1), "rx1")
+    drv.present_rx(data=0xBB, sop=0, eop=1, err=1, icrc_err=1)
+    hook.check_rx(rx_expected(data=0xBB, sop=0, eop=1, err=1, icrc_err=1), "rx1")
 
     sb.check()
+    assert sb.n_compare > 0
+    assert sb.n_compare == 4
 
 
 def test_no_fire_when_ready_low():
@@ -68,7 +90,7 @@ def test_no_fire_when_ready_low():
 
 
 def test_bypass_cfg9_model_on_tx_side():
-    assert bypass_cfg_ok(1, CFG9)
+    assert bypass_cfg_ok(1, CFG_BYP)
     _sigs, drv, mon = _env()
     sb = ContractScoreboard("bypass", {"tx": 1, "rx": 0, "total": 1})
     hook = NwTpHook(sb, mon)
@@ -79,12 +101,14 @@ def test_bypass_cfg9_model_on_tx_side():
     assert mon.sample_tx()["bypass"] == 1
 
 
-def test_link_down_observed():
+def test_link_down_and_drop_observed():
     _sigs, drv, mon = _env()
     drv.set_link_up(0)
     drv.set_flush(1)
+    drv.pulse_drop()
     assert mon.link_up() == 0
     assert mon.flush() == 1
+    assert mon.drop() == 1
 
 
 def test_sop_eop_single_flit():
@@ -98,3 +122,4 @@ def test_sop_eop_single_flit():
     drv.present_rx(data=7, sop=1, eop=1)
     hook.check_rx(rx_expected(data=7, sop=1, eop=1, err=0), "rx")
     sb.check()
+    assert sb.n_compare == 2

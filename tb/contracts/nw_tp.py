@@ -8,7 +8,16 @@ from __future__ import annotations
 
 from typing import Any, Callable, Mapping
 
-from tb.contracts.model import FLIT_W, NLP_W, SL_W, predict_flit
+from tb.contracts.model import (
+    CCI_W,
+    DCNA_W,
+    FLIT_W,
+    LBF_W,
+    NLP_W,
+    RT_W,
+    SL_W,
+    predict_flit,
+)
 from tb.contracts.scoreboard import ContractScoreboard
 
 TX_DATA = (
@@ -18,16 +27,21 @@ TX_DATA = (
     "tp2nw_sl",
     "tp2nw_nlp",
     "tp2nw_bypass",
+    "tp2nw_dcna",
+    "tp2nw_lbf",
+    "tp2nw_rt",
+    "tp2nw_cci",
 )
 RX_DATA = (
     "nw2tp_data",
     "nw2tp_sop",
     "nw2tp_eop",
     "nw2tp_err",
+    "nw2tp_icrc_err",
 )
 TX_HS = ("tp2nw_valid", "tp2nw_ready")
 RX_HS = ("nw2tp_valid", "nw2tp_ready")
-CTRL = ("nw2tp_flush", "nw2tp_drop", "nw_link_up", "nw2tp_icrc_err")
+CTRL = ("nw2tp_flush", "nw2tp_drop", "nw_link_up")
 
 ALL_SIGNALS = TX_DATA + RX_DATA + TX_HS + RX_HS + CTRL
 
@@ -54,6 +68,10 @@ def mock_bundle() -> dict[str, MockBit]:
         "nw2tp_data": FLIT_W,
         "tp2nw_sl": SL_W,
         "tp2nw_nlp": NLP_W,
+        "tp2nw_dcna": DCNA_W,
+        "tp2nw_lbf": LBF_W,
+        "tp2nw_rt": RT_W,
+        "tp2nw_cci": CCI_W,
     }
     return {name: MockBit(0, widths.get(name, 1)) for name in ALL_SIGNALS}
 
@@ -72,6 +90,10 @@ class NwTpDriver:
         self.sigs["tp2nw_sl"].value = 0
         self.sigs["tp2nw_nlp"].value = 0
         self.sigs["tp2nw_bypass"].value = 0
+        self.sigs["tp2nw_dcna"].value = 0
+        self.sigs["tp2nw_lbf"].value = 0
+        self.sigs["tp2nw_rt"].value = 0
+        self.sigs["tp2nw_cci"].value = 0
 
     def idle_rx(self) -> None:
         self.sigs["nw2tp_valid"].value = 0
@@ -79,6 +101,7 @@ class NwTpDriver:
         self.sigs["nw2tp_sop"].value = 0
         self.sigs["nw2tp_eop"].value = 0
         self.sigs["nw2tp_err"].value = 0
+        self.sigs["nw2tp_icrc_err"].value = 0
 
     def present_tx(
         self,
@@ -89,6 +112,10 @@ class NwTpDriver:
         sl: int = 0,
         nlp: int = 0,
         bypass: int = 0,
+        dcna: int = 0,
+        lbf: int = 0,
+        rt: int = 0,
+        cci: int = 0,
     ) -> None:
         self.sigs["tp2nw_data"].value = data
         self.sigs["tp2nw_sop"].value = sop
@@ -96,6 +123,10 @@ class NwTpDriver:
         self.sigs["tp2nw_sl"].value = sl
         self.sigs["tp2nw_nlp"].value = nlp
         self.sigs["tp2nw_bypass"].value = bypass
+        self.sigs["tp2nw_dcna"].value = dcna
+        self.sigs["tp2nw_lbf"].value = lbf
+        self.sigs["tp2nw_rt"].value = rt
+        self.sigs["tp2nw_cci"].value = cci
         self.sigs["tp2nw_valid"].value = 1
 
     def present_rx(
@@ -105,11 +136,13 @@ class NwTpDriver:
         sop: int,
         eop: int,
         err: int = 0,
+        icrc_err: int = 0,
     ) -> None:
         self.sigs["nw2tp_data"].value = data
         self.sigs["nw2tp_sop"].value = sop
         self.sigs["nw2tp_eop"].value = eop
         self.sigs["nw2tp_err"].value = err
+        self.sigs["nw2tp_icrc_err"].value = icrc_err
         self.sigs["nw2tp_valid"].value = 1
 
     def set_tx_ready(self, ready: int) -> None:
@@ -148,6 +181,10 @@ class NwTpMonitor:
             "sl": int(self.sigs["tp2nw_sl"].value),
             "nlp": int(self.sigs["tp2nw_nlp"].value),
             "bypass": int(self.sigs["tp2nw_bypass"].value),
+            "dcna": int(self.sigs["tp2nw_dcna"].value),
+            "lbf": int(self.sigs["tp2nw_lbf"].value),
+            "rt": int(self.sigs["tp2nw_rt"].value),
+            "cci": int(self.sigs["tp2nw_cci"].value),
         }
 
     def sample_rx(self) -> dict[str, int] | None:
@@ -158,6 +195,7 @@ class NwTpMonitor:
             "sop": int(self.sigs["nw2tp_sop"].value),
             "eop": int(self.sigs["nw2tp_eop"].value),
             "err": int(self.sigs["nw2tp_err"].value),
+            "icrc_err": int(self.sigs["nw2tp_icrc_err"].value),
         }
 
     def link_up(self) -> int:
@@ -165,6 +203,9 @@ class NwTpMonitor:
 
     def flush(self) -> int:
         return int(self.sigs["nw2tp_flush"].value)
+
+    def drop(self) -> int:
+        return int(self.sigs["nw2tp_drop"].value)
 
 
 class NwTpHook:
@@ -185,12 +226,15 @@ class NwTpHook:
 
 def tx_expected(**kwargs: int) -> dict[str, int]:
     beat = predict_flit(**kwargs)
-    return {k: beat[k] for k in ("data", "sop", "eop", "sl", "nlp", "bypass")}
+    return {
+        k: beat[k]
+        for k in ("data", "sop", "eop", "sl", "nlp", "bypass", "dcna", "lbf", "rt", "cci")
+    }
 
 
 def rx_expected(**kwargs: int) -> dict[str, int]:
     beat = predict_flit(sl=0, nlp=0, bypass=0, **kwargs)
-    return {k: beat[k] for k in ("data", "sop", "eop", "err")}
+    return {k: beat[k] for k in ("data", "sop", "eop", "err", "icrc_err")}
 
 
 async def drive_tx_beat(

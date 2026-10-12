@@ -9,11 +9,15 @@ from __future__ import annotations
 from typing import Any, Callable, Mapping
 
 from tb.contracts.model import (
+    DCNA_W,
     FLIT_W,
     INI_TASSN_W,
     MODE_W,
     OPCODE_W,
+    TPMSN_W,
+    predict_cmp,
     predict_flit,
+    predict_msn,
     predict_op,
 )
 from tb.contracts.scoreboard import ContractScoreboard
@@ -25,6 +29,7 @@ OP_FIELDS = (
     "ta2tp_tassn",
     "ta2tp_mode",
     "ta2tp_bypass",
+    "ta2tp_dcna",
 )
 DATA_TX = (
     "ta2tp_data",
@@ -34,6 +39,14 @@ DATA_TX = (
     "ta2tp_eop",
 )
 DONE = ("tp2ta_done", "tp2ta_fail", "tp2ta_tassn", "tp2ta_err")
+MSN = ("tp2ta_msn_valid", "tp2ta_msn_ready", "tp2ta_tpmsn")
+CMP = (
+    "ta2tp_cmp_valid",
+    "ta2tp_cmp_ready",
+    "ta2tp_cmp_tassn",
+    "ta2tp_cmp_fail",
+    "ta2tp_cmp_opcode",
+)
 OP_RX = (
     "tp2ta_op_valid",
     "tp2ta_op_ready",
@@ -51,7 +64,7 @@ DATA_RX = (
 )
 CTRL = ("nw2tp_flush", "nw_link_up")
 
-ALL_SIGNALS = OP_FIELDS + DATA_TX + DONE + OP_RX + DATA_RX + CTRL
+ALL_SIGNALS = OP_FIELDS + DATA_TX + DONE + MSN + CMP + OP_RX + DATA_RX + CTRL
 
 
 class MockBit:
@@ -74,11 +87,15 @@ def mock_bundle() -> dict[str, MockBit]:
         "tp2ta_data": FLIT_W,
         "ta2tp_opcode": OPCODE_W,
         "tp2ta_opcode": OPCODE_W,
+        "ta2tp_cmp_opcode": OPCODE_W,
         "ta2tp_tassn": INI_TASSN_W,
         "tp2ta_tassn": INI_TASSN_W,
         "tp2ta_op_tassn": INI_TASSN_W,
+        "ta2tp_cmp_tassn": INI_TASSN_W,
         "ta2tp_mode": MODE_W,
         "tp2ta_op_mode": MODE_W,
+        "ta2tp_dcna": DCNA_W,
+        "tp2ta_tpmsn": TPMSN_W,
     }
     return {name: MockBit(0, widths.get(name, 1)) for name in ALL_SIGNALS}
 
@@ -94,6 +111,7 @@ class TpTaDriver:
         self.sigs["ta2tp_tassn"].value = 0
         self.sigs["ta2tp_mode"].value = 0
         self.sigs["ta2tp_bypass"].value = 0
+        self.sigs["ta2tp_dcna"].value = 0
         self.sigs["ta2tp_data"].value = 0
         self.sigs["ta2tp_sop"].value = 0
         self.sigs["ta2tp_eop"].value = 0
@@ -105,6 +123,12 @@ class TpTaDriver:
         self.sigs["tp2ta_err"].value = 0
         self.sigs["tp2ta_op_valid"].value = 0
         self.sigs["tp2ta_data_valid"].value = 0
+        self.sigs["tp2ta_msn_valid"].value = 0
+        self.sigs["tp2ta_tpmsn"].value = 0
+        self.sigs["ta2tp_cmp_valid"].value = 0
+        self.sigs["ta2tp_cmp_tassn"].value = 0
+        self.sigs["ta2tp_cmp_fail"].value = 0
+        self.sigs["ta2tp_cmp_opcode"].value = 0
 
     def present_op(
         self,
@@ -113,11 +137,13 @@ class TpTaDriver:
         tassn: int,
         mode: int = 0,
         bypass: int = 1,
+        dcna: int = 0,
     ) -> None:
         self.sigs["ta2tp_opcode"].value = opcode
         self.sigs["ta2tp_tassn"].value = tassn
         self.sigs["ta2tp_mode"].value = mode
         self.sigs["ta2tp_bypass"].value = bypass
+        self.sigs["ta2tp_dcna"].value = dcna
         self.sigs["ta2tp_op_valid"].value = 1
 
     def present_payload(self, *, data: int, sop: int, eop: int) -> None:
@@ -137,6 +163,22 @@ class TpTaDriver:
         self.sigs["tp2ta_done"].value = 0 if fail else 1
         self.sigs["tp2ta_fail"].value = 1 if fail else 0
         self.sigs["tp2ta_err"].value = err
+
+    def present_msn(self, *, tpmsn: int) -> None:
+        self.sigs["tp2ta_tpmsn"].value = tpmsn
+        self.sigs["tp2ta_msn_valid"].value = 1
+
+    def set_msn_ready(self, ready: int) -> None:
+        self.sigs["tp2ta_msn_ready"].value = ready
+
+    def present_cmp(self, *, tassn: int, fail: int = 0, opcode: int = 0) -> None:
+        self.sigs["ta2tp_cmp_tassn"].value = tassn
+        self.sigs["ta2tp_cmp_fail"].value = fail
+        self.sigs["ta2tp_cmp_opcode"].value = opcode
+        self.sigs["ta2tp_cmp_valid"].value = 1
+
+    def set_cmp_ready(self, ready: int) -> None:
+        self.sigs["ta2tp_cmp_ready"].value = ready
 
     def present_deliver_op(
         self,
@@ -185,6 +227,7 @@ class TpTaMonitor:
             "tassn": int(self.sigs["ta2tp_tassn"].value),
             "mode": int(self.sigs["ta2tp_mode"].value),
             "bypass": int(self.sigs["ta2tp_bypass"].value),
+            "dcna": int(self.sigs["ta2tp_dcna"].value),
         }
 
     def sample_submit_data(self) -> dict[str, int] | None:
@@ -208,6 +251,24 @@ class TpTaMonitor:
             "fail": fail,
             "tassn": int(self.sigs["tp2ta_tassn"].value),
             "err": int(self.sigs["tp2ta_err"].value),
+        }
+
+    def sample_msn(self) -> dict[str, int] | None:
+        if int(self.sigs["tp2ta_msn_valid"].value) != 1:
+            return None
+        if int(self.sigs["tp2ta_msn_ready"].value) != 1:
+            return None
+        return {"tpmsn": int(self.sigs["tp2ta_tpmsn"].value)}
+
+    def sample_cmp(self) -> dict[str, int] | None:
+        if int(self.sigs["ta2tp_cmp_valid"].value) != 1:
+            return None
+        if int(self.sigs["ta2tp_cmp_ready"].value) != 1:
+            return None
+        return {
+            "tassn": int(self.sigs["ta2tp_cmp_tassn"].value),
+            "fail": int(self.sigs["ta2tp_cmp_fail"].value),
+            "opcode": int(self.sigs["ta2tp_cmp_opcode"].value),
         }
 
     def sample_deliver_op(self) -> dict[str, int] | None:
@@ -255,15 +316,31 @@ class TpTaHook:
         got = self.mon.sample_deliver_op()
         self.sb.compare("complete", dict(exp), got, ctx)
 
+    def check_msn(self, exp: Mapping[str, int], ctx: str = "") -> None:
+        got = self.mon.sample_msn()
+        self.sb.compare("complete", dict(exp), got, ctx)
+
+    def check_cmp(self, exp: Mapping[str, int], ctx: str = "") -> None:
+        got = self.mon.sample_cmp()
+        self.sb.compare("complete", dict(exp), got, ctx)
+
 
 def submit_expected(**kwargs: int) -> dict[str, int]:
     op = predict_op(**kwargs)
-    return {k: op[k] for k in ("opcode", "tassn", "mode", "bypass")}
+    return {k: op[k] for k in ("opcode", "tassn", "mode", "bypass", "dcna")}
 
 
 def payload_expected(**kwargs: int) -> dict[str, int]:
     beat = predict_flit(sl=0, nlp=0, bypass=0, err=0, **kwargs)
     return {k: beat[k] for k in ("data", "sop", "eop")}
+
+
+def msn_expected(**kwargs: int) -> dict[str, int]:
+    return {"tpmsn": predict_msn(**kwargs)["tpmsn"]}
+
+
+def cmp_expected(**kwargs: int) -> dict[str, int]:
+    return predict_cmp(**kwargs)
 
 
 async def drive_op_beat(

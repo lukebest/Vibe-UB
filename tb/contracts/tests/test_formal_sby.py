@@ -75,6 +75,9 @@ def test_default_sby_have_no_assume_file():
         files = _files(text)
         assert all("assume" not in f for f in files), (name, files)
         assert "assume" not in text.lower().split("[script]", 1)[-1].split("[files]", 1)[0]
+    dll = (FORMAL.parent / "dll" / "dll.sby").read_text(encoding="utf-8")
+    assert _task_names(dll) == DEFAULT_TASKS
+    assert all("assume" not in f for f in _files(dll))
 
 
 def test_assume_only_in_named_diag_sby():
@@ -108,3 +111,15 @@ def test_bmc_depth_meets_planned_cover_margin():
     for name in ("nw_tp.sby", "tp_ta.sby"):
         depth = _bmc_depth((FORMAL / name).read_text(encoding="utf-8"))
         assert depth is not None and depth >= need, (name, depth, need)
+    dll_depth = _bmc_depth((FORMAL.parent / "dll" / "dll.sby").read_text(encoding="utf-8"))
+    assert dll_depth is not None and dll_depth >= 6 + COVER_MARGIN, dll_depth
+
+def test_nw_tp_has_no_timeout_322_323_cover():
+    text = (FORMAL / "nw_tp_assert.sv").read_text(encoding="utf-8")
+    assert "c_timeout_322" not in text
+    assert "c_timeout_323" not in text
+    assert "c_rto" in text
+    assert "c_ack_coal" in text
+    dll = (FORMAL.parent / "dll" / "dll_timeout_assert.sv").read_text(encoding="utf-8")
+    assert "c_timeout_322" in dll
+    assert "c_timeout_323" in dll

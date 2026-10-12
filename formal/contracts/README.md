@@ -14,16 +14,19 @@ shared file of those tasks.
 
 `GATE-FORMAL-DEPTH` §5 rule 3: BMC depth ≥ deepest reachable cover step + 6.
 
+322/323 RETRY/PROBE covers live in `formal/dll/` (DLL / LMSM owned).
+TP `nw_tp` keeps only `c_rto` and `c_ack_coal`.
+
 Measured (`sby` + Yosys 0.33 / z3; harness-driven, no assume):
 
 | sby | 任务 | 最深 cover 步 | BMC depth | 余量 |
 | --- | --- | ---: | ---: | ---: |
-| `nw_tp.sby` | cover | 14 (`c_timeout_323`, `c_psn_wrap`) | — | — |
+| `nw_tp.sby` | cover | 14 (`c_ack_coal`, `c_psn_wrap`) | — | — |
 | `nw_tp.sby` | bmc / prove | — | 22 | 22 ≥ 14+6 |
 | `nw_tp_assume_diag.sby` | assume_diag | （无 cover 任务） | 22 | — |
-| `tp_ta.sby` | cover | 14 (`c_full_cfg`) | — | — |
-| `tp_ta.sby` | bmc / prove | — | 22 | 22 ≥ 14+6 |
+| `tp_ta.sby` | cover | 16 (`c_cmp_fail`) | — | — |
+| `tp_ta.sby` | bmc / prove | — | 22 | 22 ≥ 16+6 |
 | `tp_ta_assume_diag.sby` | assume_diag | （无 cover 任务） | 22 | — |
 
-`nw_tp` cover 步：sop_eop 3、hold 5、two_beat 7、rx 9、link_down 11、full_hdr 12、timeout_322 13、timeout_323/psn_wrap 14。
-`tp_ta` cover 步：submit_byp 3、payload 4、done 5、op_hold 6、fail 8、deliver 9、deliver_data 10、flush_empty 12、full_cfg 14。
+`nw_tp` cover 步：sop_eop 3、hold 5、two_beat 7、rx 9、drop 10、link_down 11、icrc_cfg7 12、rto 13、ack_coal/psn_wrap 14。
+`tp_ta` cover 步：submit_byp 3、payload 4、done/msn 5、op_hold 6、fail 8、deliver 9、deliver_data 10、flush_empty 12、cmp_ok/full_cfg 14、cmp_fail 16。

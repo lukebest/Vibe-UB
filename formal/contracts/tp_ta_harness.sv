@@ -6,7 +6,8 @@ module tp_ta_harness (
 );
   localparam integer FLIT_W = 160;
   localparam integer TASSN_W = 16;
-  localparam integer CFG9 = 9;
+  localparam integer CFG_BYP = 9;
+  localparam integer CFG_CTP = 6;
 
   reg [4:0] cyc;
   initial cyc = 5'd0;
@@ -27,6 +28,9 @@ module tp_ta_harness (
                                    (cyc == 5'd13) ? 16'hABCD : 16'd0;
   wire [1:0]  ta2tp_mode     = 2'd0;
   wire        ta2tp_bypass   = (cyc == 5'd13) ? 1'b0 : 1'b1;
+  wire [15:0] ta2tp_dcna     = (cyc == 5'd2) ? 16'h0001 :
+                               ((cyc == 5'd5) || (cyc == 5'd6)) ? 16'h0002 :
+                               (cyc == 5'd13) ? 16'h00AB : 16'd0;
 
   wire        ta2tp_valid    = (cyc == 5'd3);
   wire        ta2tp_ready    = 1'b1;
@@ -40,6 +44,19 @@ module tp_ta_harness (
                                    (cyc == 5'd7) ? 16'h0002 :
                                    (cyc == 5'd14) ? 16'hABCD : 16'd0;
   wire        tp2ta_err      = 1'b0;
+
+  wire        tp2ta_msn_valid = (cyc == 5'd4) || (cyc == 5'd10);
+  wire        tp2ta_msn_ready = 1'b1;
+  wire [23:0] tp2ta_tpmsn     = (cyc == 5'd4) ? 24'h000001 :
+                                (cyc == 5'd10) ? 24'h0000AA : 24'd0;
+
+  wire        ta2tp_cmp_valid  = (cyc == 5'd12) || (cyc == 5'd13) || (cyc == 5'd15);
+  wire        ta2tp_cmp_ready  = (cyc != 5'd12);
+  wire [15:0] ta2tp_cmp_tassn  = ((cyc == 5'd12) || (cyc == 5'd13)) ? 16'h0003 :
+                                 (cyc == 5'd15) ? 16'h0004 : 16'd0;
+  wire        ta2tp_cmp_fail   = (cyc == 5'd15);
+  wire [7:0]  ta2tp_cmp_opcode = ((cyc == 5'd12) || (cyc == 5'd13)) ? 8'h10 :
+                                 (cyc == 5'd15) ? 8'h11 : 8'd0;
 
   wire        tp2ta_op_valid = (cyc == 5'd8);
   wire        tp2ta_op_ready = 1'b1;
@@ -56,8 +73,8 @@ module tp_ta_harness (
 
   wire        nw2tp_flush    = (cyc == 5'd11);
   wire        nw_link_up     = (cyc != 5'd11);
-  wire [3:0]  lph_cfg        = (cyc >= 5'd12) ? 4'd6 : CFG9[3:0];
-  wire        compact        = (lph_cfg == CFG9[3:0]);
+  wire [3:0]  lph_cfg        = (cyc >= 5'd13) ? CFG_CTP[3:0] : CFG_BYP[3:0];
+  wire        compact        = (lph_cfg == CFG_BYP[3:0]);
   wire        pending        = (cyc == 5'd2) || (cyc == 5'd3) || (cyc == 5'd5)
                               || (cyc == 5'd6) || (cyc == 5'd13);
   wire        done_fail_mutex = !(tp2ta_done && tp2ta_fail);
@@ -71,6 +88,7 @@ module tp_ta_harness (
     .ta2tp_tassn       (ta2tp_tassn),
     .ta2tp_mode        (ta2tp_mode),
     .ta2tp_bypass      (ta2tp_bypass),
+    .ta2tp_dcna        (ta2tp_dcna),
     .ta2tp_data        (ta2tp_data),
     .ta2tp_valid       (ta2tp_valid),
     .ta2tp_ready       (ta2tp_ready),
@@ -80,6 +98,14 @@ module tp_ta_harness (
     .tp2ta_fail        (tp2ta_fail),
     .tp2ta_tassn       (tp2ta_tassn),
     .tp2ta_err         (tp2ta_err),
+    .tp2ta_msn_valid   (tp2ta_msn_valid),
+    .tp2ta_msn_ready   (tp2ta_msn_ready),
+    .tp2ta_tpmsn       (tp2ta_tpmsn),
+    .ta2tp_cmp_valid   (ta2tp_cmp_valid),
+    .ta2tp_cmp_ready   (ta2tp_cmp_ready),
+    .ta2tp_cmp_tassn   (ta2tp_cmp_tassn),
+    .ta2tp_cmp_fail    (ta2tp_cmp_fail),
+    .ta2tp_cmp_opcode  (ta2tp_cmp_opcode),
     .tp2ta_op_valid    (tp2ta_op_valid),
     .tp2ta_op_ready    (tp2ta_op_ready),
     .tp2ta_data_valid  (tp2ta_data_valid),
@@ -95,23 +121,32 @@ module tp_ta_harness (
   );
 `ifdef CONTRACT_ASSUME
   tp_ta_assume u_tp_ta_assume (
-    .core_clk       (core_clk),
-    .rst_n          (rst_n),
-    .ta2tp_op_valid (ta2tp_op_valid),
-    .ta2tp_op_ready (ta2tp_op_ready),
-    .ta2tp_opcode   (ta2tp_opcode),
-    .ta2tp_tassn    (ta2tp_tassn),
-    .ta2tp_bypass   (ta2tp_bypass),
-    .ta2tp_data     (ta2tp_data),
-    .ta2tp_valid    (ta2tp_valid),
-    .ta2tp_ready    (ta2tp_ready),
-    .ta2tp_sop      (ta2tp_sop),
-    .ta2tp_eop      (ta2tp_eop),
-    .tp2ta_done     (tp2ta_done),
-    .tp2ta_fail     (tp2ta_fail),
-    .nw2tp_flush    (nw2tp_flush),
-    .pending        (pending),
-    .compact        (compact)
+    .core_clk         (core_clk),
+    .rst_n            (rst_n),
+    .ta2tp_op_valid   (ta2tp_op_valid),
+    .ta2tp_op_ready   (ta2tp_op_ready),
+    .ta2tp_opcode     (ta2tp_opcode),
+    .ta2tp_tassn      (ta2tp_tassn),
+    .ta2tp_bypass     (ta2tp_bypass),
+    .ta2tp_dcna       (ta2tp_dcna),
+    .ta2tp_data       (ta2tp_data),
+    .ta2tp_valid      (ta2tp_valid),
+    .ta2tp_ready      (ta2tp_ready),
+    .ta2tp_sop        (ta2tp_sop),
+    .ta2tp_eop        (ta2tp_eop),
+    .tp2ta_done       (tp2ta_done),
+    .tp2ta_fail       (tp2ta_fail),
+    .tp2ta_msn_valid  (tp2ta_msn_valid),
+    .tp2ta_msn_ready  (tp2ta_msn_ready),
+    .tp2ta_tpmsn      (tp2ta_tpmsn),
+    .ta2tp_cmp_valid  (ta2tp_cmp_valid),
+    .ta2tp_cmp_ready  (ta2tp_cmp_ready),
+    .ta2tp_cmp_tassn  (ta2tp_cmp_tassn),
+    .ta2tp_cmp_fail   (ta2tp_cmp_fail),
+    .ta2tp_cmp_opcode (ta2tp_cmp_opcode),
+    .nw2tp_flush      (nw2tp_flush),
+    .pending          (pending),
+    .compact          (compact)
   );
 `endif
 endmodule

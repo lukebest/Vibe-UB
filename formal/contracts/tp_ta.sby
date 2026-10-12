@@ -1,6 +1,6 @@
 # TP↔TA contract asserts. Default tasks have no assume
 # (GATE-PRIVATE-PARENT-FREE). BMC depth ≥ deepest cover + 6
-# (GATE-FORMAL-DEPTH §5 rule 3). Planned cover ≤ 16 → BMC 22.
+# (GATE-FORMAL-DEPTH §5 rule 3). Measured deepest cover 14 → BMC 22.
 [tasks]
 cover
 bmc
@@ -19,8 +19,8 @@ prove: depth 22
 smtbmc z3
 
 [script]
-read -sv tp_ta_harness.sv
-read -sv tp_ta_assert.sv
+read -formal tp_ta_harness.sv
+read -formal tp_ta_assert.sv
 prep -top tp_ta_harness
 
 [files]

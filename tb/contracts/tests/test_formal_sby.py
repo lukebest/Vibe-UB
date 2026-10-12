@@ -91,13 +91,16 @@ def test_assert_sv_has_no_assume_property():
     for name in ("nw_tp_assert.sv", "tp_ta_assert.sv", "nw_tp_harness.sv", "tp_ta_harness.sv"):
         text = (FORMAL / name).read_text(encoding="utf-8")
         assert "assume property" not in text
-        assert "assume(" not in text.replace(" ", "")
+        assert not any(
+            line.split("//", 1)[0].replace(" ", "").startswith("assume(")
+            for line in text.splitlines()
+        )
 
 
 def test_assume_sv_exists_and_uses_assume_property():
     for name in ("nw_tp_assume.sv", "tp_ta_assume.sv"):
         text = (FORMAL / name).read_text(encoding="utf-8")
-        assert "assume property" in text
+        assert "assume (" in text or "assume(" in text.replace(" ", "")
 
 
 def test_bmc_depth_meets_planned_cover_margin():

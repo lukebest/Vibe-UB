@@ -13,4 +13,17 @@ Harness-driven SVA. No product RTL (GATE-FOR-001). Signal names follow
 shared file of those tasks.
 
 `GATE-FORMAL-DEPTH` §5 rule 3: BMC depth ≥ deepest reachable cover step + 6.
-Planned deepest cover ≤ 16, so BMC is 22 until a run measures otherwise.
+
+Measured (`sby` + Yosys 0.33 / z3; harness-driven, no assume):
+
+| sby | 任务 | 最深 cover 步 | BMC depth | 余量 |
+| --- | --- | ---: | ---: | ---: |
+| `nw_tp.sby` | cover | 14 (`c_timeout_323`, `c_psn_wrap`) | — | — |
+| `nw_tp.sby` | bmc / prove | — | 22 | 22 ≥ 14+6 |
+| `nw_tp_assume_diag.sby` | assume_diag | （无 cover 任务） | 22 | — |
+| `tp_ta.sby` | cover | 14 (`c_full_cfg`) | — | — |
+| `tp_ta.sby` | bmc / prove | — | 22 | 22 ≥ 14+6 |
+| `tp_ta_assume_diag.sby` | assume_diag | （无 cover 任务） | 22 | — |
+
+`nw_tp` cover 步：sop_eop 3、hold 5、two_beat 7、rx 9、link_down 11、full_hdr 12、timeout_322 13、timeout_323/psn_wrap 14。
+`tp_ta` cover 步：submit_byp 3、payload 4、done 5、op_hold 6、fail 8、deliver 9、deliver_data 10、flush_empty 12、full_cfg 14。

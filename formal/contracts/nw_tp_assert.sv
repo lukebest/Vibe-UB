@@ -1,4 +1,5 @@
 // NW↔TP SVA bind (LAYER_CONTRACTS §2). Assert + cover only.
+// Immediate asserts: Yosys 0.33 has no concurrent `assert property (@...)`.
 // No assume (GATE-PRIVATE-PARENT-FREE / verif_gate.md §11).
 `default_nettype none
 
@@ -36,7 +37,6 @@ module nw_tp_assert (
   localparam integer LPH_NTH_BYTES = 12;
   localparam integer TIMEOUT_DEF = 323;
 
-  // Widths / header lens (combinational; LAYER_CONTRACTS §2, UB-TP §6.2, UB-TA §7.2)
   always @* begin
     a_flit_w: assert (FLIT_W == 160);
     a_rtph: assert (RTPH_BYTES == 16);
@@ -46,71 +46,84 @@ module nw_tp_assert (
     a_btah_len: assert (compact ? (btah_bytes == 5'd4) : (btah_bytes == 5'd8));
     a_maetah_len: assert (compact ? (maetah_bytes == 5'd12) : (maetah_bytes == 5'd16));
     a_timeout_rel: assert (timed_out == (elapsed >= TIMEOUT_DEF[15:0]));
+    a_psn_inc: assert (psn_n == (psn + 24'd1));
   end
 
-  // Handshake hold (SPEC §3.1 / LAYER_CONTRACTS §2)
-  a_tx_hold: assert property (@(posedge core_clk) disable iff (!rst_n)
-    (tp2nw_valid && !tp2nw_ready) |=> (tp2nw_valid
-      && tp2nw_data == $past(tp2nw_data)
-      && tp2nw_sop == $past(tp2nw_sop)
-      && tp2nw_eop == $past(tp2nw_eop)
-      && tp2nw_bypass == $past(tp2nw_bypass)));
+  reg        past_rst_n;
+  reg        past_tx_v, past_tx_r, past_tx_sop, past_tx_eop, past_tx_byp;
+  reg [159:0] past_tx_data;
+  reg        past_rx_v, past_rx_r, past_rx_sop, past_rx_eop;
+  reg [159:0] past_rx_data;
 
-  a_rx_hold: assert property (@(posedge core_clk) disable iff (!rst_n)
-    (nw2tp_valid && !nw2tp_ready) |=> (nw2tp_valid
-      && nw2tp_data == $past(nw2tp_data)
-      && nw2tp_sop == $past(nw2tp_sop)
-      && nw2tp_eop == $past(nw2tp_eop)));
+  initial begin
+    past_rst_n   = 1'b0;
+    past_tx_v    = 1'b0;
+    past_tx_r    = 1'b0;
+    past_tx_data = 160'd0;
+    past_tx_sop  = 1'b0;
+    past_tx_eop  = 1'b0;
+    past_tx_byp  = 1'b0;
+    past_rx_v    = 1'b0;
+    past_rx_r    = 1'b0;
+    past_rx_data = 160'd0;
+    past_rx_sop  = 1'b0;
+    past_rx_eop  = 1'b0;
+  end
 
-  // link down: no TX fire
-  a_linkdown_no_tx: assert property (@(posedge core_clk) disable iff (!rst_n)
-    !nw_link_up |-> !(tp2nw_valid && tp2nw_ready));
+  always @(posedge core_clk) begin
+    past_rst_n   <= rst_n;
+    past_tx_v    <= tp2nw_valid;
+    past_tx_r    <= tp2nw_ready;
+    past_tx_data <= tp2nw_data;
+    past_tx_sop  <= tp2nw_sop;
+    past_tx_eop  <= tp2nw_eop;
+    past_tx_byp  <= tp2nw_bypass;
+    past_rx_v    <= nw2tp_valid;
+    past_rx_r    <= nw2tp_ready;
+    past_rx_data <= nw2tp_data;
+    past_rx_sop  <= nw2tp_sop;
+    past_rx_eop  <= nw2tp_eop;
+  end
 
-  // nw2tp_err only meaningful on valid&&eop — harness keeps err 0 unless eop
-  a_err_eop: assert property (@(posedge core_clk) disable iff (!rst_n)
-    nw2tp_err |-> (nw2tp_valid && nw2tp_eop));
+  always @(posedge core_clk) begin
+    if (rst_n) begin
+      if (!nw_link_up)
+        a_linkdown_no_tx: assert (!(tp2nw_valid && tp2nw_ready));
+      if (nw2tp_err)
+        a_err_eop: assert (nw2tp_valid && nw2tp_eop);
+      if (tp2nw_valid && tp2nw_bypass)
+        a_byp_cfg9: assert (lph_cfg == CFG9[3:0]);
+      if (nw2tp_flush)
+        a_flush_no_new: assert (!tp2nw_valid);
+    end
+    if (past_rst_n && past_tx_v && !past_tx_r) begin
+      a_tx_hold_v: assert (tp2nw_valid);
+      a_tx_hold_d: assert (tp2nw_data == past_tx_data);
+      a_tx_hold_s: assert (tp2nw_sop == past_tx_sop);
+      a_tx_hold_e: assert (tp2nw_eop == past_tx_eop);
+      a_tx_hold_b: assert (tp2nw_bypass == past_tx_byp);
+    end
+    if (past_rst_n && past_rx_v && !past_rx_r) begin
+      a_rx_hold_v: assert (nw2tp_valid);
+      a_rx_hold_d: assert (nw2tp_data == past_rx_data);
+      a_rx_hold_s: assert (nw2tp_sop == past_rx_sop);
+      a_rx_hold_e: assert (nw2tp_eop == past_rx_eop);
+    end
+  end
 
-  // bypass only with CFG9
-  a_byp_cfg9: assert property (@(posedge core_clk) disable iff (!rst_n)
-    (tp2nw_valid && tp2nw_bypass) |-> (lph_cfg == CFG9[3:0]));
+  always @(posedge core_clk) begin
+    c_tx_sop_eop: cover (rst_n && tp2nw_valid && tp2nw_ready && tp2nw_sop && tp2nw_eop && tp2nw_bypass);
+    c_tx_hold: cover (rst_n && tp2nw_valid && !tp2nw_ready);
+    c_tx_two_beat: cover (rst_n && tp2nw_valid && tp2nw_ready && tp2nw_eop && !tp2nw_sop);
+    c_rx_fire: cover (rst_n && nw2tp_valid && nw2tp_ready && nw2tp_sop && nw2tp_eop);
+    c_link_down: cover (rst_n && !nw_link_up && nw2tp_flush);
+    c_timeout_322: cover (rst_n && elapsed == 16'd322 && !timed_out);
+    c_timeout_323: cover (rst_n && elapsed == 16'd323 && timed_out);
+    c_psn_wrap: cover (rst_n && psn == 24'hFFFFFF && psn_n == 24'h000000);
+    c_full_hdr: cover (rst_n && !compact && btah_bytes == 5'd8 && maetah_bytes == 5'd16);
+  end
 
-  // PSN 24-bit wrap
-  a_psn_inc: assert property (@(posedge core_clk) disable iff (!rst_n)
-    psn_n == (psn + 24'd1));
-
-  a_flush_no_new: assert property (@(posedge core_clk) disable iff (!rst_n)
-    nw2tp_flush |-> !tp2nw_valid);
-
-  // Covers — deepest intended ~cyc 14 (GATE-FORMAL-DEPTH rule 3)
-  c_tx_sop_eop: cover property (@(posedge core_clk)
-    rst_n && tp2nw_valid && tp2nw_ready && tp2nw_sop && tp2nw_eop && tp2nw_bypass);
-
-  c_tx_hold: cover property (@(posedge core_clk)
-    rst_n && tp2nw_valid && !tp2nw_ready);
-
-  c_tx_two_beat: cover property (@(posedge core_clk)
-    rst_n && tp2nw_valid && tp2nw_ready && tp2nw_eop && !tp2nw_sop);
-
-  c_rx_fire: cover property (@(posedge core_clk)
-    rst_n && nw2tp_valid && nw2tp_ready && nw2tp_sop && nw2tp_eop);
-
-  c_link_down: cover property (@(posedge core_clk)
-    rst_n && !nw_link_up && nw2tp_flush);
-
-  c_timeout_322: cover property (@(posedge core_clk)
-    rst_n && elapsed == 16'd322 && !timed_out);
-
-  c_timeout_323: cover property (@(posedge core_clk)
-    rst_n && elapsed == 16'd323 && timed_out);
-
-  c_psn_wrap: cover property (@(posedge core_clk)
-    rst_n && psn == 24'hFFFFFF && psn_n == 24'h000000);
-
-  c_full_hdr: cover property (@(posedge core_clk)
-    rst_n && !compact && btah_bytes == 5'd8 && maetah_bytes == 5'd16);
-
-  // silence unused
-  wire unused = |{tp2nw_sl, tp2nw_nlp, nw2tp_data};
+  wire unused = |{tp2nw_sl, tp2nw_nlp};
 endmodule
 
 bind nw_tp_harness nw_tp_assert u_nw_tp_assert (

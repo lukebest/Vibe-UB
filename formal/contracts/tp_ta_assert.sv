@@ -1,4 +1,5 @@
 // TP↔TA SVA bind (LAYER_CONTRACTS §3). Assert + cover only. No assume.
+// Immediate asserts for Yosys 0.33.
 `default_nettype none
 
 module tp_ta_assert (
@@ -43,61 +44,81 @@ module tp_ta_assert (
     a_compact: assert (compact == (lph_cfg == CFG9[3:0]));
   end
 
-  a_done_fail_mutex: assert property (@(posedge core_clk) disable iff (!rst_n)
-    !(tp2ta_done && tp2ta_fail));
+  reg        past_rst_n;
+  reg        past_op_v, past_op_r;
+  reg [7:0]  past_opcode;
+  reg [15:0] past_tassn;
+  reg        past_byp;
+  reg        past_dv, past_dr, past_sop, past_eop;
+  reg [159:0] past_data;
 
-  a_term_pulse: assert property (@(posedge core_clk) disable iff (!rst_n)
-    (tp2ta_done || tp2ta_fail) |-> done_fail_mutex);
+  initial begin
+    past_rst_n  = 1'b0;
+    past_op_v   = 1'b0;
+    past_op_r   = 1'b0;
+    past_opcode = 8'd0;
+    past_tassn  = 16'd0;
+    past_byp    = 1'b0;
+    past_dv     = 1'b0;
+    past_dr     = 1'b0;
+    past_data   = 160'd0;
+    past_sop    = 1'b0;
+    past_eop    = 1'b0;
+  end
 
-  a_op_hold: assert property (@(posedge core_clk) disable iff (!rst_n)
-    (ta2tp_op_valid && !ta2tp_op_ready) |=> (ta2tp_op_valid
-      && ta2tp_opcode == $past(ta2tp_opcode)
-      && ta2tp_tassn == $past(ta2tp_tassn)
-      && ta2tp_bypass == $past(ta2tp_bypass)));
+  always @(posedge core_clk) begin
+    past_rst_n  <= rst_n;
+    past_op_v   <= ta2tp_op_valid;
+    past_op_r   <= ta2tp_op_ready;
+    past_opcode <= ta2tp_opcode;
+    past_tassn  <= ta2tp_tassn;
+    past_byp    <= ta2tp_bypass;
+    past_dv     <= ta2tp_valid;
+    past_dr     <= ta2tp_ready;
+    past_data   <= ta2tp_data;
+    past_sop    <= ta2tp_sop;
+    past_eop    <= ta2tp_eop;
+  end
 
-  a_data_hold: assert property (@(posedge core_clk) disable iff (!rst_n)
-    (ta2tp_valid && !ta2tp_ready) |=> (ta2tp_valid
-      && ta2tp_data == $past(ta2tp_data)
-      && ta2tp_sop == $past(ta2tp_sop)
-      && ta2tp_eop == $past(ta2tp_eop)));
+  always @(posedge core_clk) begin
+    if (rst_n) begin
+      a_done_fail_mutex: assert (!(tp2ta_done && tp2ta_fail));
+      if (tp2ta_done || tp2ta_fail)
+        a_term_pulse: assert (done_fail_mutex);
+      if (nw2tp_flush)
+        a_flush_clear: assert (!pending);
+      if (tp2ta_err)
+        a_err_with_term: assert (tp2ta_done || tp2ta_fail);
+      if (ta2tp_op_valid && ta2tp_bypass)
+        a_bypass_cfg9: assert (compact);
+    end
+    if (past_rst_n && past_op_v && !past_op_r) begin
+      a_op_hold_v: assert (ta2tp_op_valid);
+      a_op_hold_o: assert (ta2tp_opcode == past_opcode);
+      a_op_hold_t: assert (ta2tp_tassn == past_tassn);
+      a_op_hold_b: assert (ta2tp_bypass == past_byp);
+    end
+    if (past_rst_n && past_dv && !past_dr) begin
+      a_data_hold_v: assert (ta2tp_valid);
+      a_data_hold_d: assert (ta2tp_data == past_data);
+      a_data_hold_s: assert (ta2tp_sop == past_sop);
+      a_data_hold_e: assert (ta2tp_eop == past_eop);
+    end
+  end
 
-  a_flush_clear: assert property (@(posedge core_clk) disable iff (!rst_n)
-    nw2tp_flush |-> !pending);
+  always @(posedge core_clk) begin
+    c_submit_byp: cover (rst_n && ta2tp_op_valid && ta2tp_op_ready && ta2tp_bypass && compact);
+    c_op_hold: cover (rst_n && ta2tp_op_valid && !ta2tp_op_ready);
+    c_payload: cover (rst_n && ta2tp_valid && ta2tp_ready && ta2tp_sop && ta2tp_eop);
+    c_done: cover (rst_n && tp2ta_done && !tp2ta_fail);
+    c_fail: cover (rst_n && tp2ta_fail && !tp2ta_done);
+    c_deliver: cover (rst_n && tp2ta_op_valid && tp2ta_op_ready);
+    c_deliver_data: cover (rst_n && tp2ta_data_valid && tp2ta_data_ready && tp2ta_data_sop && tp2ta_data_eop);
+    c_flush_empty: cover (rst_n && nw2tp_flush && !pending && !nw_link_up);
+    c_full_cfg: cover (rst_n && !compact && ta2tp_op_valid && !ta2tp_bypass);
+  end
 
-  a_err_with_term: assert property (@(posedge core_clk) disable iff (!rst_n)
-    tp2ta_err |-> (tp2ta_done || tp2ta_fail));
-
-  a_bypass_cfg9: assert property (@(posedge core_clk) disable iff (!rst_n)
-    (ta2tp_op_valid && ta2tp_bypass) |-> compact);
-
-  c_submit_byp: cover property (@(posedge core_clk)
-    rst_n && ta2tp_op_valid && ta2tp_op_ready && ta2tp_bypass && compact);
-
-  c_op_hold: cover property (@(posedge core_clk)
-    rst_n && ta2tp_op_valid && !ta2tp_op_ready);
-
-  c_payload: cover property (@(posedge core_clk)
-    rst_n && ta2tp_valid && ta2tp_ready && ta2tp_sop && ta2tp_eop);
-
-  c_done: cover property (@(posedge core_clk)
-    rst_n && tp2ta_done && !tp2ta_fail);
-
-  c_fail: cover property (@(posedge core_clk)
-    rst_n && tp2ta_fail && !tp2ta_done);
-
-  c_deliver: cover property (@(posedge core_clk)
-    rst_n && tp2ta_op_valid && tp2ta_op_ready);
-
-  c_deliver_data: cover property (@(posedge core_clk)
-    rst_n && tp2ta_data_valid && tp2ta_data_ready && tp2ta_data_sop && tp2ta_data_eop);
-
-  c_flush_empty: cover property (@(posedge core_clk)
-    rst_n && nw2tp_flush && !pending && !nw_link_up);
-
-  c_full_cfg: cover property (@(posedge core_clk)
-    rst_n && !compact && ta2tp_op_valid && !ta2tp_bypass);
-
-  wire unused = |{ta2tp_mode, lph_cfg};
+  wire unused = |{ta2tp_mode, lph_cfg, tp2ta_tassn};
 endmodule
 
 bind tp_ta_harness tp_ta_assert u_tp_ta_assert (

@@ -20,26 +20,63 @@ module tp_ta_assume (
   input wire        pending,
   input wire        compact
 );
-  am_done_fail: assume property (@(posedge core_clk) disable iff (!rst_n)
-    !(tp2ta_done && tp2ta_fail));
+  reg        past_rst_n;
+  reg        past_op_v, past_op_r;
+  reg [7:0]  past_opcode;
+  reg [15:0] past_tassn;
+  reg        past_byp;
+  reg        past_dv, past_dr, past_sop, past_eop;
+  reg [159:0] past_data;
 
-  am_op_hold: assume property (@(posedge core_clk) disable iff (!rst_n)
-    (ta2tp_op_valid && !ta2tp_op_ready) |=> (ta2tp_op_valid
-      && ta2tp_opcode == $past(ta2tp_opcode)
-      && ta2tp_tassn == $past(ta2tp_tassn)
-      && ta2tp_bypass == $past(ta2tp_bypass)));
+  initial begin
+    past_rst_n  = 1'b0;
+    past_op_v   = 1'b0;
+    past_op_r   = 1'b0;
+    past_opcode = 8'd0;
+    past_tassn  = 16'd0;
+    past_byp    = 1'b0;
+    past_dv     = 1'b0;
+    past_dr     = 1'b0;
+    past_data   = 160'd0;
+    past_sop    = 1'b0;
+    past_eop    = 1'b0;
+  end
 
-  am_data_hold: assume property (@(posedge core_clk) disable iff (!rst_n)
-    (ta2tp_valid && !ta2tp_ready) |=> (ta2tp_valid
-      && ta2tp_data == $past(ta2tp_data)
-      && ta2tp_sop == $past(ta2tp_sop)
-      && ta2tp_eop == $past(ta2tp_eop)));
+  always @(posedge core_clk) begin
+    past_rst_n  <= rst_n;
+    past_op_v   <= ta2tp_op_valid;
+    past_op_r   <= ta2tp_op_ready;
+    past_opcode <= ta2tp_opcode;
+    past_tassn  <= ta2tp_tassn;
+    past_byp    <= ta2tp_bypass;
+    past_dv     <= ta2tp_valid;
+    past_dr     <= ta2tp_ready;
+    past_data   <= ta2tp_data;
+    past_sop    <= ta2tp_sop;
+    past_eop    <= ta2tp_eop;
+  end
 
-  am_flush_clear: assume property (@(posedge core_clk) disable iff (!rst_n)
-    nw2tp_flush |-> !pending);
-
-  am_byp_cfg9: assume property (@(posedge core_clk) disable iff (!rst_n)
-    (ta2tp_op_valid && ta2tp_bypass) |-> compact);
+  always @(posedge core_clk) begin
+    if (rst_n) begin
+      am_done_fail: assume (!(tp2ta_done && tp2ta_fail));
+      if (nw2tp_flush)
+        am_flush_clear: assume (!pending);
+      if (ta2tp_op_valid && ta2tp_bypass)
+        am_byp_cfg9: assume (compact);
+    end
+    if (past_rst_n && past_op_v && !past_op_r) begin
+      am_op_hold_v: assume (ta2tp_op_valid);
+      am_op_hold_o: assume (ta2tp_opcode == past_opcode);
+      am_op_hold_t: assume (ta2tp_tassn == past_tassn);
+      am_op_hold_b: assume (ta2tp_bypass == past_byp);
+    end
+    if (past_rst_n && past_dv && !past_dr) begin
+      am_data_hold_v: assume (ta2tp_valid);
+      am_data_hold_d: assume (ta2tp_data == past_data);
+      am_data_hold_s: assume (ta2tp_sop == past_sop);
+      am_data_hold_e: assume (ta2tp_eop == past_eop);
+    end
+  end
 endmodule
 
 bind tp_ta_harness tp_ta_assume u_tp_ta_assume (

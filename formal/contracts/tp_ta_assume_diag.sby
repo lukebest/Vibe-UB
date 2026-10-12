@@ -12,9 +12,9 @@ assume_diag: depth 22
 smtbmc z3
 
 [script]
-read -sv tp_ta_harness.sv
-read -sv tp_ta_assert.sv
-read -sv tp_ta_assume.sv
+read -formal -DCONTRACT_ASSUME tp_ta_harness.sv
+read -formal tp_ta_assert.sv
+read -formal tp_ta_assume.sv
 prep -top tp_ta_harness
 
 [files]

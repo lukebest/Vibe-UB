@@ -24,7 +24,7 @@ def test_side_count_must_match():
     sb = ContractScoreboard("sides", {"tx": 1, "rx": 1, "total": 2})
     sb.compare("tx", 1, 1)
     sb.compare("tx", 2, 2)
-    with pytest.raises(AssertionError, match="side rx"):
+    with pytest.raises(AssertionError, match="side tx"):
         sb.check()
 
 

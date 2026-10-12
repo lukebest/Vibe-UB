@@ -10,7 +10,7 @@ Lists live in this directory (`legacy.txt`, `handwritten.yml`, `blackbox.yml`,
 | --- | --- |
 | `selftest.sh` | Deliberate-fail fixtures for the new checks |
 | `spec_leak.sh` | Private-spec leak scan (allowlist `leak_allow.yml`) |
-| `contract_check.sh` | S-01(b) contracts + stub hash + `reports/private/<layer>/<leaf>.yml` + role dirs |
+| `contract_check.sh` | S-01(b) contracts + stub hash + `reports/private/<layer>/<leaf>.yml` + role dirs + GATE-OWNED-PATHS |
 | `rtl_emit_consistency.sh` | Line A: `scripts/emit_rtl.py` only (temp dir, byte-compare `rtl/<layer>/` + hooks); skip if missing / pycc uninstallable; large-mem manifest; `rtl/pyc_lib/` compare-or-skip |
 | `equiv.sh` | PRODUCT≡HOOKS per variant (Yosys `equiv_*` primary; eqy if present; large cmn mem = bytes except name + ports) |
 | `pycircuit_provenance.sh` | AST provenance (no homemade pycc argv; regen is emit_rtl.py); import-root + `lib/` splice-scan |

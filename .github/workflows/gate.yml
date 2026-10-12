@@ -59,7 +59,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Fetch origin/main for role-dir scan
+      - name: Fetch origin/main for role-dir + owned-paths scan
         run: git fetch origin main
       - uses: actions/setup-python@v5
         with:
@@ -69,6 +69,8 @@ jobs:
       - name: contract-check
         env:
           GATE_PR_TITLE: ${{ github.event.pull_request.title }}
+          GATE_PR_BRANCH: ${{ github.head_ref || github.ref_name }}
+          GATE_PR_LABELS: ${{ github.event.pull_request && join(github.event.pull_request.labels.*.name, ',') || '' }}
         run: scripts/gate/contract_check.sh
 
   rtl-emit-consistency:

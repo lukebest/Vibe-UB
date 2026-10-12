@@ -11,12 +11,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from contract_hash import contract_sha256
 from gatelib import Finding
 from private_leaves import (
+    OWNED_PATH_MSG,
     check_attests,
     check_hash_single,
+    check_owned_paths,
     check_role_dirs,
     check_stubs,
     collect_contract_findings,
     discover_contract_files,
+    is_gatekeeper_pr,
     is_private_leaf,
     parse_contract_file,
     private_skip_finding,
@@ -570,6 +573,87 @@ def test_attest_status_and_wns() -> None:
         _expect("attest-field-missing", check_attests(root, [data]), "ATTEST_FIELD")
 
 
+OWNED_TOUCH = [
+    "scripts/gate/private_leaves.py",
+    ".github/workflows/gate.yml",
+    "waivers/formal.yml",
+    "docs/rules/verif_gate.md",
+]
+
+
+def test_owned_paths_gatekeeper_ok() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _set_flag(root, "owned_paths_required", True)
+        by_branch = check_owned_paths(
+            root,
+            OWNED_TOUCH,
+            labels=[],
+            branch="cursor/gate-private-leaves",
+        )
+        _expect_none("owned-paths-branch", by_branch, "GATE_FILE_TOUCHED")
+        by_label = check_owned_paths(
+            root,
+            OWNED_TOUCH,
+            labels=["docs", "gate"],
+            branch="feature/leaf-fix",
+        )
+        _expect_none("owned-paths-label", by_label, "GATE_FILE_TOUCHED")
+        if not is_gatekeeper_pr(labels=[], branch="cursor/gate-foo"):
+            _fail("owned-paths-prefix", "cursor/gate- must be gatekeeper")
+        if is_gatekeeper_pr(labels=["gatekeeper"], branch="cursor/gateway"):
+            _fail("owned-paths-prefix", "near-miss label/branch must not match")
+
+
+def test_owned_paths_non_gatekeeper() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        _set_flag(root, "owned_paths_required", True)
+        hits = check_owned_paths(
+            root,
+            OWNED_TOUCH,
+            labels=[],
+            branch="feature/leaf-fix",
+        )
+        hit = _expect("owned-paths-neg", hits, "GATE_FILE_TOUCHED")
+        if hit.message != OWNED_PATH_MSG:
+            _fail("owned-paths-neg", f"message must be exact, got {hit.message!r}")
+        files = set(hit.file.split(","))
+        expect = {
+            "scripts/gate/private_leaves.py",
+            ".github/workflows/gate.yml",
+            "waivers/formal.yml",
+        }
+        if files != expect:
+            _fail("owned-paths-neg", f"file list {sorted(files)} != {sorted(expect)}")
+        if hit.bucket != "new":
+            _fail("owned-paths-neg", "must be blocking when owned_paths_required")
+        clean = check_owned_paths(
+            root,
+            ["docs/rules/verif_gate.md", "rtl/mem/ub_mem_ptw.v"],
+            labels=[],
+            branch="feature/leaf-fix",
+        )
+        _expect_none("owned-paths-unrelated", clean, "GATE_FILE_TOUCHED")
+
+
+def test_owned_paths_report_until_main() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        hit = _expect(
+            "owned-paths-report",
+            check_owned_paths(
+                root,
+                ["scripts/gate/contract_check.py"],
+                labels=[],
+                branch="user/pr",
+            ),
+            "GATE_FILE_TOUCHED",
+        )
+        if hit.bucket != "report":
+            _fail("owned-paths-report", "must be report-only until #47 is on main")
+
+
 def test_role_cross_and_ok() -> None:
     _expect(
         "role-cross",
@@ -686,6 +770,9 @@ def run_all() -> None:
         test_attest_hash_mismatch,
         test_attest_clock_mismatch,
         test_attest_status_and_wns,
+        test_owned_paths_gatekeeper_ok,
+        test_owned_paths_non_gatekeeper,
+        test_owned_paths_report_until_main,
         test_role_cross_and_ok,
         test_private_skip_helper,
         test_scan_includes_pcs_layer,

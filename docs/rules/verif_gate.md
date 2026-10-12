@@ -372,7 +372,7 @@ PR 审查清单见 §12。本条不写自动 finding，避免误杀尚未补齐�
 1. 在 `waivers/pending/` 写 YAML 草稿：`approver: TODO`，`status: pending`，理由标明「待守门人批准」。
 2. 守门人（验证，`waivers/approvers.yml` 中的 login）书面批准后，把条目移入 `waivers/<check>.yml`，填写 `approver`、`approved_date`、`review_when`。
 3. 脚本**只认带批准人且批准人是守门人**的条目；`TODO` / 空 / 非守门人 / `draft` 一律忽略。
-4. `.github/CODEOWNERS` 把 `waivers/`、`scripts/gate/*.yml`、`scripts/gate/*.txt`、`.github/workflows/gate.yml` 的审批指给仓库 owner `lukebest`。
+4. `.github/CODEOWNERS` 把 `waivers/`、`scripts/gate/`、`.github/workflows/` 的审批指给仓库 owner `lukebest`。
 
 `scripts/gate/handwritten.yml`、`scripts/gate/blackbox.yml`、`scripts/gate/hooks_ports.yml`、`scripts/gate/leak_allow.yml` 的条目字段与豁免相同：路径或模块、原因、批准人、日期、复查条件。`waivers/pending/` 草稿只展示。
 
@@ -428,6 +428,7 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 | GATE-PRIV-006 | attest 字段：`leaf`、`contract_sha256`、`netlist_sha256`、`toolchain_sha256`、`clock{name,period_ns}`、`cells`、`area_um2`、`regs`、`logic_depth`、`depth_incl_buf`、`wns_ns`、`crit_path`（`public` / `私有叶子内部`）、`status`（PASS/FAIL）。`contract_sha256` 必须等于当前契约；`clock` 与契约 YAML 一致；`status==PASS`；`wns_ns>=0`。任一不符 FAIL | 实现 / PM | 2026-10-12 |
 | GATE-PRIV-007 | 私有仓库角色目录（report 先行）：PR 改动只落在一个 `design/` `model/` `verif/` `impl/`（`public/` 视为共享）。跨角色 → `ROLE_CROSS` FAIL。标题须带 `[角色]` | PM | 2026-10-12 |
 | GATE-PRIVATE-PARENT-FREE | formal 里每个私有叶子实例的输出当自由输入（桩切掉）。父级状态合法性断言必须在叶子输出自由下成立。契约派生的、约束私有叶子**输出口**的 `assume` 只允许出现在单独命名的诊断 sby 任务（不是默认 `bmc`/`cover`/`prove`，也不是无前缀共享文件）。默认任务命中 → `FORMAL_PRIVATE_ASSUME`。#47 进 main 前 report-only（看 `origin/main` 的本条，或 `parent_free_required`） | 验证 | 2026-10-12 |
+| GATE-OWNED-PATHS | 非守门人 PR 改 `scripts/gate/`、`.github/workflows/`、`waivers/` 任一文件 → `GATE_FILE_TOUCHED`（列出文件，文案「门禁文件由守门人维护」）。守门人 PR：标签 `gate` 或分支前缀 `cursor/gate-`。#47 进 main 前 report-only（看 `origin/main` 的本条，或 `owned_paths_required`）。CODEOWNERS 覆盖这三棵路径 | PM | 2026-10-12 |
 
 CLI：`python3 -P scripts/gate/contract_hash.py <contract.md>` 打印 hex。
 

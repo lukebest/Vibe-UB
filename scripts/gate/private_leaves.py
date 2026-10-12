@@ -50,6 +50,10 @@ ROLE_DIRS = ("design", "model", "verif", "impl")
 ATTEST_DIR = "reports/private"
 CRIT_PATH_OK = {"public", "私有叶子内部"}
 STATUS_OK = {"PASS", "FAIL"}
+OWNED_PATH_PREFIXES = ("scripts/gate/", ".github/workflows/", "waivers/")
+GATEKEEPER_LABEL = "gate"
+GATEKEEPER_BRANCH_PREFIX = "cursor/gate-"
+OWNED_PATH_MSG = "门禁文件由守门人维护"
 
 REQUIRED_TOP = (
     "leaf",
@@ -150,6 +154,86 @@ def hash_single_required(root: Path) -> bool:
     if proc.returncode != 0:
         return False
     return "GATE-CONTRACT-HASH-SINGLE" in (proc.stdout or "")
+
+
+def owned_paths_required(root: Path) -> bool:
+    """Blocking once #47 is on main, or yml override.
+
+    Same switch: `owned_paths_required` in private_leaves.yml wins;
+    otherwise origin/main's verif_gate.md carrying GATE-OWNED-PATHS
+    means the rule has landed.
+    """
+    flag = load_private_config(root).get("owned_paths_required")
+    if flag is True or flag is False:
+        return bool(flag)
+    proc = run_cmd(
+        ["git", "show", "origin/main:docs/rules/verif_gate.md"],
+        cwd=root,
+    )
+    if proc.returncode != 0:
+        return False
+    return "GATE-OWNED-PATHS" in (proc.stdout or "")
+
+
+def parse_pr_labels(raw: str | None = None) -> list[str]:
+    text = raw if raw is not None else os.environ.get("GATE_PR_LABELS") or ""
+    return [part.strip() for part in re.split(r"[\s,]+", text) if part.strip()]
+
+
+def pr_branch(explicit: str | None = None, root: Path | None = None) -> str:
+    if explicit is not None:
+        return explicit.strip().removeprefix("refs/heads/")
+    for key in ("GATE_PR_BRANCH", "GITHUB_HEAD_REF", "GITHUB_REF_NAME"):
+        val = (os.environ.get(key) or "").strip()
+        if val:
+            return val.removeprefix("refs/heads/")
+    if root is not None:
+        proc = run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root)
+        if proc.returncode == 0:
+            return (proc.stdout or "").strip().removeprefix("refs/heads/")
+    return ""
+
+
+def is_gatekeeper_pr(
+    *,
+    labels: list[str] | None = None,
+    branch: str | None = None,
+    root: Path | None = None,
+) -> bool:
+    """Gatekeeper = label `gate` or branch prefix `cursor/gate-`."""
+    labs = parse_pr_labels() if labels is None else [
+        str(item).strip() for item in labels if str(item).strip()
+    ]
+    if GATEKEEPER_LABEL in labs:
+        return True
+    return pr_branch(branch, root).startswith(GATEKEEPER_BRANCH_PREFIX)
+
+
+def _norm_rel(rel: str) -> str:
+    norm = rel.replace("\\", "/")
+    while norm.startswith("./"):
+        norm = norm[2:]
+    return norm.lstrip("/")
+
+
+def is_owned_path(rel: str) -> bool:
+    norm = _norm_rel(rel)
+    for prefix in OWNED_PATH_PREFIXES:
+        if norm == prefix.rstrip("/") or norm.startswith(prefix):
+            return True
+    return False
+
+
+def touched_owned_paths(paths: list[str]) -> list[str]:
+    hits: list[str] = []
+    seen: set[str] = set()
+    for raw in paths:
+        norm = _norm_rel(raw)
+        if not is_owned_path(norm) or norm in seen:
+            continue
+        seen.add(norm)
+        hits.append(norm)
+    return hits
 
 
 def contract_prose(text: str) -> str:
@@ -1090,11 +1174,42 @@ def check_hash_single(root: Path) -> list[Finding]:
     return findings
 
 
+def check_owned_paths(
+    root: Path,
+    paths: list[str] | None = None,
+    *,
+    labels: list[str] | None = None,
+    branch: str | None = None,
+) -> list[Finding]:
+    """GATE-OWNED-PATHS: non-gatekeeper PRs must not touch gate files."""
+    if paths is None:
+        paths = changed_paths_vs_main(root)
+    touched = touched_owned_paths(paths)
+    if not touched:
+        return []
+    if is_gatekeeper_pr(labels=labels, branch=branch, root=root):
+        return []
+    bucket = "new" if owned_paths_required(root) else "report"
+    return [
+        Finding(
+            check="contract",
+            module="*",
+            file=",".join(touched),
+            rule="GATE_FILE_TOUCHED",
+            message=OWNED_PATH_MSG,
+            bucket=bucket,
+            severity="error" if bucket == "new" else "warning",
+        )
+    ]
+
+
 def collect_contract_findings(
     root: Path | None = None,
     *,
     paths: list[str] | None = None,
     title: str | None = None,
+    labels: list[str] | None = None,
+    branch: str | None = None,
 ) -> list[Finding]:
     root = root or REPO_ROOT
     findings, contracts = check_all_contracts(root)
@@ -1104,6 +1219,9 @@ def collect_contract_findings(
     if paths is None:
         paths = changed_paths_vs_main(root)
     findings.extend(check_role_dirs(paths, title=title))
+    findings.extend(
+        check_owned_paths(root, paths, labels=labels, branch=branch)
+    )
     return findings
 
 

@@ -1210,6 +1210,8 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 
 **Q-C07。** UMMU 与译码器各有一个 valid/ready 表读口 `ub_mem_tbl_rd`：地址 48 bit；`len` 为 8 bit 字节数，合法值只有 8 / 32 / 64，其余值是接口断言失败；`tag` 宽 4 bit（第一波遍历器驱 0，1 个未决）；响应 512 bit 加错误。只支持小端；`ENDI=1` 记配置非法。第一波遍历器 1 个未决、读 8 B（`len` 恒驱 8，`tag` 为 0），按地址低位从 512 bit 响应取出对应 8 B；口宽保持满宽。**Xia 裁定 2026-10-12 11:05。**
 
+`ub_mem_tbl_rd` 请求侧（`mem2host_rd_valid` / `addr` / `len` / `tag`）由寄存器驱动；不要求同拍发出第一次读。`mem2host_rd_valid && !mem2host_rd_ready` 期间，下一拍 `valid` 保持 1，且 `addr` / `len` / `tag` 不变（断言 `AP_TBLRD_REQ_HOLD`）。
+
 **Q-C08。** SRAM 桩：读 1 拍寄存、1R1W、同拍同址读返回旧值；阵列不复位；valid 在叶子触发器；写后读旁路在叶子。
 
 **Q-C09 / UB-MEM §11.4.4。** valid 全在触发器。全部失效 1 拍清。条件失效按组扫描（64 拍），扫描期间查找暂停。SYNC 完成前全部生效。CSR 改 TECT 须软件发失效。
@@ -1270,7 +1272,7 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 | Q-C04 | UB-MEM §9.4.4 | PLB | **已定** | `PLB_DEPTH=4`（0 关闭），触发器 + 范围比较；TokenValue 不符则作废并重走 MAPT |
 | Q-C05 | UB-MEM §9.4.4 | MAPT 遍历缓存 | **已定** | 第一波不做 |
 | Q-C06 | UB-MEM §9.5 | 译码 L0 缓存 | **已定** | 由 C-D1 取代 |
-| Q-C07 | 实现口 | 表读口 | **已定** | `ub_mem_tbl_rd` valid/ready；地址 48 bit；`len` 8 bit 字节数，合法仅 8/32/64（其余接口断言失败）；`tag` 4 bit（第一波驱 0，1 未决）；响应 512 bit + 错；只小端，`ENDI=1` → 配置非法；第一波恒读 8 B，按地址低位取 8 B，口宽满宽。Xia 2026-10-12 11:05 |
+| Q-C07 | 实现口 | 表读口 | **已定** | `ub_mem_tbl_rd` valid/ready；地址 48 bit；`len` 8 bit 字节数，合法仅 8/32/64（其余接口断言失败）；`tag` 4 bit（第一波驱 0，1 未决）；响应 512 bit + 错；只小端，`ENDI=1` → 配置非法；第一波恒读 8 B，按地址低位取 8 B，口宽满宽。请求侧由寄存器驱动，不要求同拍首读；`valid && !ready` 时下一拍保持 `valid` 与 `addr`/`len`/`tag`（`AP_TBLRD_REQ_HOLD`）。Xia 2026-10-12 11:05 |
 | Q-C08 | 实现 | SRAM 桩 | **已定** | 读 1 拍寄存、1R1W、同拍同址读旧值；阵列不复位；valid 在叶子触发器；写后读旁路在叶子 |
 | Q-C09 | UB-MEM §11.4.4 | 失效 | **已定** | valid 全在触发器；全部失效 1 拍；条件失效按组扫 64 拍，期间暂停查找；SYNC 完成前全部生效；改 TECT 须软件失效 |
 | Q-C10 | 本规格 §10 | 存储后门 | **已定** | 只覆盖 §10 点名阵列；第一批 `mem_tlb_w0`…`w3`、`mem_dec_tlb`；`mem_dec_b0`…`b7` 已随 C-D1 撤；`tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`；仅 HOOKS，`tb_test_mode` 门控，eqy 接低 |

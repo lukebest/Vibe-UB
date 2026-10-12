@@ -414,7 +414,7 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 | ID | 规则 | 来源 | 日期 |
 | --- | --- | --- | --- |
 | GATE-CONTRACT-001 | `scripts/gate/contract_hash.py`：`yaml.safe_load` 后 `json.dumps(obj, sort_keys=True, separators=(',',':'), ensure_ascii=False)` 的 UTF-8 再 sha256。全部字段参与（含 `assertions`）。列表顺序保留。缩进 / 注释 / 正文不改变 digest | 本分册 | 2026-10-12 |
-| GATE-CONTRACT-002 | 字段缺失或类型不符 → FAIL。`parent` 必须等于该层 `UARCH.md` **§3 叶子表「叶子」列**某一行（去反引号 / 空白后全等）。描述列、其它列、正文、以及同一格 `+` 后面的名字都不算。缺行 → `PARENT_UNKNOWN`（拦）。`MODULE_INVENTORY` 仍可补 | README §8 / PM | 2026-10-12 |
+| GATE-CONTRACT-002 | 字段缺失或类型不符 → FAIL。扫描 `docs/arch/*/contracts/`（含 pcs）。`parent` 必须等于**该层自己的** `docs/arch/<layer>/UARCH.md` §3 叶子表「叶子」列某一行（去反引号 / 空白后全等）。pcs 用 `docs/arch/pcs/UARCH.md`，不看 `docs/arch/mem/UARCH.md`。描述列、其它列、正文、以及同一格 `+` 后面的名字都不算。缺行 → `PARENT_UNKNOWN`（拦）。`MODULE_INVENTORY` yml 仍可补 | README §8 / PM | 2026-10-12 |
 | GATE-CONTRACT-003 | `comb_budget_ns`：组合 / 0 拍叶子缺 → FAIL；寄存叶子带了 → FAIL | Xia | 2026-10-12 |
 | GATE-CONTRACT-004 | `assertions:` 必填且非空。缺 / 空列表 → `CONTRACT_FIELD_MISSING`。正文 `` `AP_*` `` 未列入 → `CONTRACT_ASSERT_UNLISTED`；YAML 有、正文无 → `CONTRACT_ASSERT_UNUSED`。切换：`docs/arch/*/contracts/README.md` §8 行写 `` `assertions` `` 且含「必填」（#49 标记）后改为拦截；之前 report-only。`private_leaves.yml` `assertions_required: true\|false` 可覆盖 | Xia / PM | 2026-10-12 |
 | GATE-CONTRACT-HASH-SINGLE | `scripts/gate/` 以外不得自带契约 hash 实现：文件名 `contract_hash.py`，或 `def contract_sha256` / `def contract_hash`。应 `import` `scripts/gate/contract_hash.py`。命中 → `CONTRACT_HASH_DUP`。#47 进 main 前 report-only（看 `origin/main` 的本条，或 `hash_single_required`）。已知副本待删除：`tb/mem/stub_models/contract_hash.py`（#44）、`scripts/impl/tests/fixtures/contract_hash.py`（#52） | PM | 2026-10-12 |

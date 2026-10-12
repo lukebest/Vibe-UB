@@ -16,6 +16,7 @@ from private_leaves import (
     check_role_dirs,
     check_stubs,
     collect_contract_findings,
+    discover_contract_files,
     is_private_leaf,
     parse_contract_file,
     private_skip_finding,
@@ -599,22 +600,70 @@ def test_private_skip_helper() -> None:
         print("SELFTEST PASS private-skip: helper + variant prefix")
 
 
+PCS_SECTION3_EXACT = """\
+## 3. 叶子划分
+
+| 模块 | 本草案叶子 | 类型 | 职责（一句话） |
+| --- | --- | --- | --- |
+| `ub_pcs_amctl_rx` | `ub_pcs_amctl_rx` | 结构 | AMCTL RX parent |
+"""
+
+PCS_SECTION3_DESC_ONLY = """\
+## 3. 叶子划分
+
+| 模块 | 本草案叶子 | 类型 | 职责（一句话） |
+| --- | --- | --- | --- |
+| `ub_pcs_deskew` | `ub_pcs_deskew` | 结构 | 父级 `ub_pcs_amctl_rx` 只写在描述列 |
+"""
+
+
 def test_scan_includes_pcs_layer() -> None:
+    """#45-shaped fixture: pcs contract + pcs UARCH.md §3, not mem."""
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
-        pcs = VALID_YAML.replace("ub_mem_toy_dec", "ub_pcs_toy_dec").replace(
-            "parent: ub_mem_ptw", "parent: ub_pcs_lane_dist"
+        _write_uarch(root, SECTION3_EXACT, layer="mem")
+        pcs = VALID_YAML.replace("ub_mem_toy_dec", "ub_pcs_amctl_cw_dec").replace(
+            "parent: ub_mem_ptw", "parent: ub_pcs_amctl_rx"
         )
-        _write_contract(root, pcs, layer="pcs", name="ub_pcs_toy_dec")
-        _write_uarch(
-            root,
-            SECTION3_EXACT.replace("ub_mem_ptw", "ub_pcs_lane_dist"),
-            layer="pcs",
+        path = _write_contract(
+            root, pcs, layer="pcs", name="ub_pcs_amctl_cw_dec"
         )
-        findings = collect_contract_findings(root, paths=[], title="")
-        if any(f.rule == "CONTRACT_YAML" for f in findings):
-            _fail("scan-pcs", findings[0].message)
-        print("SELFTEST PASS scan-pcs: docs/arch/pcs/contracts/*.md is scanned")
+        found = [p.name for p in discover_contract_files(root)]
+        if "ub_pcs_amctl_cw_dec.md" not in found:
+            _fail("scan-pcs", f"pcs contract not scanned: {found}")
+
+        _write_uarch(root, PCS_SECTION3_EXACT, layer="pcs")
+        data, errs = parse_contract_file(path, root)
+        if errs or data is None:
+            _fail("scan-pcs-parent-ok", f"parse failed: {errs}")
+        if data.get("_layer") != "pcs":
+            _fail("scan-pcs-parent-ok", f"layer={data.get('_layer')}")
+        hits = validate_contract(data, root)
+        _expect_none("scan-pcs-parent-ok", hits, "PARENT_UNKNOWN")
+
+        _write_uarch(root, PCS_SECTION3_DESC_ONLY, layer="pcs")
+        data, _ = parse_contract_file(path, root)
+        assert data is not None
+        _expect(
+            "scan-pcs-parent-desc-only",
+            validate_contract(data, root),
+            "PARENT_UNKNOWN",
+        )
+
+        (root / "docs" / "arch" / "pcs" / "UARCH.md").unlink()
+        data, _ = parse_contract_file(path, root)
+        assert data is not None
+        hit = _expect(
+            "scan-pcs-ignores-mem-uarch",
+            validate_contract(data, root),
+            "PARENT_UNKNOWN",
+        )
+        if "docs/arch/pcs/UARCH.md" not in hit.message:
+            _fail(
+                "scan-pcs-ignores-mem-uarch",
+                f"must name pcs UARCH, got {hit.message}",
+            )
+        print("SELFTEST PASS scan-pcs: docs/arch/pcs/UARCH.md §3 is the pcs parent table")
 
 
 def run_all() -> None:

@@ -9,7 +9,8 @@ source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
 python3 -P "$GATE_DIR/formal_bind.py"
 
-mapfile -t SBY_FILES < <(find "$REPO_ROOT/formal" -type f -name '*.sby' 2>/dev/null | sort || true)
+# Only formal/<iface>/*.sby (GATE-FOR-002). Do not recurse into sby workdirs.
+mapfile -t SBY_FILES < <(find "$REPO_ROOT/formal" -mindepth 2 -maxdepth 2 -type f -name '*.sby' 2>/dev/null | sort || true)
 
 if [[ ${#SBY_FILES[@]} -eq 0 ]]; then
   echo "no assertions yet"

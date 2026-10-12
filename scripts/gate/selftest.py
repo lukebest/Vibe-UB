@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cdc_rdc import analyze_module
-from formal_bind import check_formal_binds, sby_run_cwd
+from formal_bind import check_formal_binds, discover_sby_files, sby_run_cwd
 from gatelib import (
     Finding,
     collect_lock_completeness_findings,
@@ -441,6 +441,16 @@ def test_sby_relative_and_missing() -> None:
         )
         hits = check_formal_binds(repo)
         _expect_rule("sby-file-missing", hits, "SBY_FILE_MISSING")
+        work = repo / "formal" / "cmn" / "cmn_bmc"
+        work.mkdir()
+        (work / "config.sby").write_text("[files]\nmissing.sv\n", encoding="utf-8")
+        found = {p.resolve() for p in discover_sby_files(repo)}
+        if (work / "config.sby").resolve() in found:
+            _fail("sby-skip-workdir", "sby workdir config.sby must not be discovered")
+        hits = check_formal_binds(repo)
+        if any("cmn_bmc/config.sby" in (f.file or "") for f in hits):
+            _fail("sby-skip-workdir", "workdir config.sby must not produce findings")
+        print("SELFTEST PASS sby-skip-workdir: only formal/<iface>/*.sby")
 
 
 def test_tb_requires_verilator() -> None:

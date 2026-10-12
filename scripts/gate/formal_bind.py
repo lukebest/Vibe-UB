@@ -193,12 +193,24 @@ def find_netlist_for_module(
     return hooks[0] if hooks else found[0]
 
 
+def discover_sby_files(repo_root: Path) -> list[Path]:
+    """Only ``formal/<iface>/*.sby``. Skip sby workdirs (``*_bmc/config.sby``)."""
+    formal = repo_root / "formal"
+    if not formal.is_dir():
+        return []
+    out: list[Path] = []
+    for iface in sorted(p for p in formal.iterdir() if p.is_dir()):
+        for sby in sorted(iface.glob("*.sby")):
+            out.append(sby)
+    return out
+
+
 def check_formal_binds(repo_root: Path, check: str = "formal") -> list[Finding]:
     findings: list[Finding] = []
     formal = repo_root / "formal"
     if not formal.is_dir():
         return findings
-    sby_files = sorted(formal.rglob("*.sby"))
+    sby_files = discover_sby_files(repo_root)
     for sby in sby_files:
         for token in sby_missing_files(sby, repo_root):
             findings.append(
@@ -264,9 +276,7 @@ def check_formal_binds(repo_root: Path, check: str = "formal") -> list[Finding]:
 def main() -> int:
     print_tool_versions(["python", "sby", "yosys"])
     findings = check_formal_binds(REPO_ROOT)
-    n_sby = len(list((REPO_ROOT / "formal").rglob("*.sby"))) if (
-        REPO_ROOT / "formal"
-    ).is_dir() else 0
+    n_sby = len(discover_sby_files(REPO_ROOT))
     print(f"formal bind-existence: {n_sby} .sby file(s), {len(findings)} finding(s)")
     return emit_report("formal", findings)
 

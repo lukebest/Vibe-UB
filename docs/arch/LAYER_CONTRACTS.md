@@ -100,7 +100,7 @@ PHY↔DLL、LMSM 侧带已在 [SPEC.md](../SPEC.md) §3.3 写死（M1）。此�
 
 ## 2. Network ↔ Transport（线 A∩B；优先通路）
 
-**节号：** §5.1（NW 为 TP 与 TA 服务）、§5.2 NLP、§6.1–§6.2、§6.3（含 bypass）、§5.3.4–5、§5.3.7–8。
+**节号：** §5.1（NW 为 TP 与 TA 服务）、§5.2 NLP、§6.1–§6.2、§6.3（含 bypass）、§5.3.4–5、§5.3.7–8、§6.5.1.2（LBF / RT）、§6.6（CCI）。
 
 **方向 / 单位：** TP Packet / 传输层响应（TPACK 等）/ CNP。bypass（优先通路）无 TPH，单位是「已带 NTH 规划的 TA 包」。
 
@@ -108,7 +108,7 @@ PHY↔DLL、LMSM 侧带已在 [SPEC.md](../SPEC.md) §3.3 写死（M1）。此�
 
 | 方向 | 单位 | 建议口 |
 | --- | --- | --- |
-| TP→NW TX | 包 flit | `tp2nw_data/valid/ready/sop/eop`；`tp2nw_sl[3:0]`；`tp2nw_nlp[2:0]`；`tp2nw_bypass`（电平，1=无 TPH） |
+| TP→NW TX | 包 flit | `tp2nw_data/valid/ready/sop/eop`；`tp2nw_sl[3:0]`；`tp2nw_nlp[2:0]`；`tp2nw_bypass`（电平，1=无 TPH）；`tp2nw_dcna[15:0]`（目的 CNA，优先通路 16-b，§5.2.1）；`tp2nw_lbf[7:0]`（§5.2、§6.5.1.2）；`tp2nw_rt[1:0]`（§5.2、§6.5.1.2）；`tp2nw_cci[15:0]`（§5.2、§5.3.5、§6.6） |
 | NW→TP RX | 包 flit | `nw2tp_data/valid/ready/sop/eop`；`nw2tp_err`（与 eop 对齐） |
 | NW→TP 控制 | 电平 / 脉冲 | `nw2tp_flush`（电平：`dll_status_down` 期间保持 1 直到 TX/RX 空）；`nw2tp_drop`（1 拍，该包丢弃） |
 | NW→TP 状态 | 电平 | `nw_link_up`（= `dll_status_up` 转发，§4.2） |
@@ -120,38 +120,47 @@ PHY↔DLL、LMSM 侧带已在 [SPEC.md](../SPEC.md) §3.3 写死（M1）。此�
 | 拍宽 | 与 DLL 对齐 **160 b、1 flit/拍**（规范无并行口；不另做齿轮） |
 | 每拍最大 flit | **1**；多 flit/拍本期不采用 |
 | 包长 | ≥ 头+尾+最大净荷（§5.3.8）；具体字节上限 **未知** |
-| TP MTU | **未知**（§6.8 只称按 MTU 分段）。优先通路走 bypass，不在本口切 RTP 段 |
-| `valid==0` | sop/eop/sl/nlp/data/err **忽略** |
+| TP MTU | 附录 D.1.13 有器件级取值；本仓库未锁，标 **未知**。优先通路走 bypass，不在本口切 RTP 段 |
+| `valid==0` | sop/eop/sl/nlp/dcna/lbf/rt/cci/data/err **忽略** |
 
 **字段（规范有宽）**
 
 | 字段 | 宽 | 节号 | 备注 |
 | --- | --- | --- | --- |
-| NTH.RT | 2 | §5.2 | 与 TA 模式协调见 §7.3.4 |
-| NTH.SCNA/DCNA | 16 或 24 | §5.2.1–2 | IP 格式无 CNA |
-| NTH.CCI | 16 | §5.2、§5.3.5 | TP CC 可读写 |
-| NTH.LBF | 8 | §5.2 | 发送端生成，规范不约束取值 |
+| LPH.CFG | 4 | §4.3.2.2.2 | 0=DLLCB，禁止出现在本口。CTP 取值 **6**（§6.3.2）；RTP 取值 **7**（§5.2.2）；bypass 取值 **9**（B.2.6） |
+| LPH.RT | 2 | §4.3.2.2.2、§5.2 | 与 `tp2nw_rt` / NTH.RT 同源。LPH word 内位切片见该节，本文件不抄，标 **未知** |
+| NTH.RT | 2 | §5.2、§6.5.1.2 | 与 TA 模式协调见 §7.3.4；四码取值见该节，本文件不抄 |
+| NTH.SCNA/DCNA | 16 与 24 两档 | §5.2.1–2 | 规范同时给出两档。优先通路口 `tp2nw_dcna[15:0]`（16-b CNA，TRADEOFFS D19）。24-b 格式口宽 **未知** |
+| NTH.CCI | 16 | §5.2、§5.3.5、§6.6 | TP CC 可读写；TX 边带 `tp2nw_cci[15:0]` |
+| NTH.LBF | 8 | §5.2、§6.5.1.2 | 发送端生成，规范不约束取值；TX 边带 `tp2nw_lbf[7:0]` |
 | NTH.SL | 4 | §5.2、§5.3.4 | NW 映 VL |
-| NTH.NLP | 3 | §5.2 | CTPH/RTPH/UPIH/TAH… |
+| NTH.NLP | 3 | §5.2 | 取值表见该节，本文件不抄。bypass 时 NLP 指向 TAH；TAH 码点 **未知**（PR #61） |
 | NTH.Mgmt | 1 | §5.2.1、§10.4.1.1 | 仅部分 CFG |
-| RTPH 主字段 | TPOpcode 8、SrcTPN 24、DstTPN、PSN、TPMSN 等 | §6.2.1 | 位宽未在概述列全者 **未知** |
-| CTPH | TPOpcode 2 + NLP | §6.2.1 | |
-| UTPH | TPOpcode 8 | §6.2.1 | |
-| ICRC | 算法在 §5.3.7 | 是否每包都带：**未知** 是否全部模式 |
+| RTPH 整头 | 16 B | §6.2.1 | |
+| RTPH.TPOpcode | 8 | §6.2.1 | `[7]` = last |
+| RTPH.SrcTPN | 24 | §6.2.1 | |
+| RTPH.DstTPN | 24 | §6.2.1 | 与 SrcTPN 同表 |
+| RTPH.PSN | 24 | §6.2.1、§6.4.1 | 模 2^24；半空间比较见该节。工程窗深 **未知** |
+| RTPH.TPMSN | 24 | §6.2.1、§6.7.1.2.1 | 整操作完成键 |
+| RTPH.NLP / RSPST / RSPINFO | **未知** | §6.2.1 | 16 B 头内其余字段宽本仓库未锁 |
+| CTPH | 1 B；TPOpcode 2 + NLP | §6.2.1 | |
+| UTPH | 16 B；TPOpcode 8 | §6.2.1 | |
+| ICRC | 算法在 §5.3.7 | bypass（CFG9）无 ICRC（B.2.6）。RTP（CFG7）带 ICRC（§5.3.7） |
 
 **握手（项目建议，规范未知）**
 
 - **TX / RX 均为 valid/ready。** 同一拍 `valid&&ready` 成交。`valid` 期间边带保持。`ready` 不得组合看本拍 `valid`。
 - TX：TP 源，可撤 `valid`（未成交前保持边带）。NW 宿，可停：无路由、隔离失败、下行 `nw_tx_ready=0`、`nw_link_up=0`。
 - RX：NW 源；TP 宿可停（重装配 / RTP 窗满）。**禁止** valid-only。
-- `tp2nw_bypass==1`（优先通路）：同一握手，净荷从 TA 头开始、无 TPH 字节；NW 仍填 NTH（CNA/SL/NLP=TAH）。
+- `tp2nw_bypass==1`（优先通路）：同一握手，净荷从 TA 头开始、无 TPH 字节；NW 仍填 NTH。目的地址 / LBF / RT / CCI / SL / NLP 取本口边带。
+- `tp2nw_dcna` / `tp2nw_lbf` / `tp2nw_rt` / `tp2nw_cci` 为请求边带，`valid` 期间保持到成交；NW 写入 NTH（§5.2、§6.5.1.2、§6.6）。
 - `sop&&eop` 单 flit 包合法。同一包 flit 连续，中间不得插入另一包。
 
 **反压 / 信用**
 
 - 本口 **无** 规范信用细胞。反压 = `ready`。
 - 链路信用在 DLL（§4.6）：NW 把 `nw_tx_ready` 传到 `tp2nw_ready`。SL→VL 在 NW 内（§5.3.4），不出现在本口。
-- RTP 端到端窗（§6.6.1.1）表现为 TP 不再 `valid`，不是 NW 信用。优先通路 bypass **没有** RTP 窗。
+- RTP 发送窗满（§6.5.1.4.1）时 TP 停发新包。拥塞窗见 §6.6，属 `ub_tp_cc`（可选）。优先通路 bypass 无 RTP 发送窗。
 
 **序**
 
@@ -163,7 +172,7 @@ PHY↔DLL、LMSM 侧带已在 [SPEC.md](../SPEC.md) §3.3 写死（M1）。此�
 | 事件 | 建议信号 | 对齐 | 粘滞/irq/计数 |
 | --- | --- | --- | --- |
 | 路由/隔离丢弃 | `nw2tp_drop`（1 拍）+ 原因码 **未知** | 该包 sop 或 eop | 计数；是否 irq **未知** |
-| ICRC 错 | `nw2tp_icrc_err` | 与包 eop | 计数。优先通路是否带 ICRC：**未知**；建议 LS 通路先不做 ICRC |
+| ICRC 错 | `nw2tp_icrc_err` | 与包 eop | 计数。bypass（CFG9）无 ICRC，本信号保持 0。RTP（CFG7）与 eop 对齐 |
 | 无路由 | 不向 DLL 发；`tp2nw_ready` 可保持 1 并 `drop` | — | 计数 |
 | DLL `nw_rx_err` | 上送 `nw2tp_err` | **与 `nw2tp_eop` 同拍** | 计数 |
 
@@ -180,12 +189,26 @@ PHY↔DLL、LMSM 侧带已在 [SPEC.md](../SPEC.md) §3.3 写死（M1）。此�
 4. `nw2tp_err` 仅在 `valid&&eop` 有意义。
 5. `tp2nw_bypass==1` ⇒ 本包无 TPH（NLP 指向 TAH）。
 6. bypass 包不得在 sop…eop 中插入另一包。
+7. `valid` 期间 `tp2nw_dcna/lbf/rt/cci/sl/nlp` 保持。
+8. 优先通路 `tp2nw_dcna` 为 16 b（§5.2.1）。
+
+**未决（规范未给或本仓库未锁）**
+
+- 24-b CNA 格式下 `tp2nw_dcna` 是否加宽到 24：**未知**（后波 CFG=7）。
+- SCNA 是否由 TP 给出：**未知**（NW 可从 `PORT_CNA` / App. D.5.5 填）。
+- RX 侧 `nw2tp_scna` / `nw2tp_cci` 是否另开边带：**未知**（NTH 可随 `nw2tp_data` 上送，或 NW 已剥 NTH；PR #58 Q-1）。
+- 优先通路 CCI 复位取值：建议 0；规范是否要求非零 **未知**。
+- NTH 由边带交给 NW 写入，或由 TP 写入 `tp2nw_data`：**本契约取边带**（与已有 `sl`/`nlp` 同形）。RX 是否已剥 NTH：**未知**。
+- 包字节上限：**未知**（§5.3.8 只给头+尾+最大净荷关系；D.1.13 MTU 本仓库未锁）。PR #61。
+- NTH.NLP→TAH 码点：**未知**（§5.2 有表，本文件不抄）。PR #61。
+- LPH.RT 在 LPH word 内的位切片：**未知**（宽 2 b 已锁，§4.3.2.2.2）。PR #61。
+- Go-Back-N 与选择重传：§6.4.2 两套都有；实现先做哪一套 **未知**。PR #61。
 
 ---
 
 ## 3. Transport ↔ Transaction（线 B；优先通路）
 
-**节号：** §6.1、§6.8、§7.1、§7.3.3–4。
+**节号：** §6.1、§6.7.1.2.1、§6.8、§6.8.2、§7.1、§7.3.3–4。
 
 **方向 / 单位：** 事务操作（请求，可多 TP Packet）；TAACK/TANAK；ROL 时 TP 响应可携带事务完成（§6.8.2）。优先通路：bypass + Read/Write，一操作一请求（可多 flit 净荷）。
 
@@ -193,10 +216,12 @@ PHY↔DLL、LMSM 侧带已在 [SPEC.md](../SPEC.md) §3.3 写死（M1）。此�
 
 | 方向 | 单位 | 建议口 |
 | --- | --- | --- |
-| TA→TP 提交 | 操作描述符 | `ta2tp_op_valid/ready`；`ta2tp_opcode[7:0]`；`ta2tp_tassn[15:0]`；`ta2tp_mode[1:0]`（ROI/ROT/ROL/UNO，编码 **未知**）；`ta2tp_bypass`（电平） |
+| TA→TP 提交 | 操作描述符 | `ta2tp_op_valid/ready`；`ta2tp_opcode[7:0]`；`ta2tp_tassn[15:0]`；`ta2tp_mode[1:0]`（ROI/ROT/ROL/UNO，编码 **未知**）；`ta2tp_bypass`（电平）；`ta2tp_dcna[15:0]`（目的 CNA，优先通路 16-b，§5.2.1；供 TP 填 `tp2nw_dcna`）；`ta2tp_op_len`（字节长度，宽 **未知**，PR #58 Q-8） |
 | TA→TP 净荷 | flit 流 | `ta2tp_data/valid/ready/sop/eop`（160 b、1 flit/拍） |
 | TP→TA 完成 | 操作 | `tp2ta_done`（1 拍，带 `tp2ta_tassn`）；`tp2ta_fail`（1 拍，与 done 互斥）；`tp2ta_err`（与最后净荷 eop 对齐的 Poison/失败） |
-| TP→TA 收向递交 | 操作+净荷 | 对称：`tp2ta_op_*` + `tp2ta_data_*`（目标侧 TA） |
+| TP→TA 整操作完成 | TPMSN | `tp2ta_msn_valid/ready`；`tp2ta_tpmsn[23:0]`（§6.2.1、§6.7.1.2.1）。该 TPMSN 下全部 TP Packet 收齐或对端确认后成交 |
+| TP→TA 收向递交 | 操作+净荷 | 对称：`tp2ta_op_*` + `tp2ta_data_*`（目标侧 TA）；`tp2ta_op_*` 含 `tp2ta_tassn[15:0]`、`tp2ta_tpmsn[23:0]` |
+| TA→TP 完成（ROL 目标） | 操作完成 | `ta2tp_cmp_valid/ready`；`ta2tp_cmp_tassn[15:0]`；`ta2tp_cmp_fail`（1=失败）；`ta2tp_cmp_opcode[7:0]`（取值见 §7.2）；`ta2tp_cmp_rspst` / `ta2tp_cmp_rspinfo`（宽 **未知**，§6.2.1、§6.8.2）。可选净荷：`ta2tp_cmp_data/valid/ready/sop/eop`（160 b、1 flit/拍） |
 
 **数据宽度与每拍 flit**
 
@@ -204,7 +229,7 @@ PHY↔DLL、LMSM 侧带已在 [SPEC.md](../SPEC.md) §3.3 写死（M1）。此�
 | --- | --- |
 | 描述符 | 操作级 valid/ready，每拍最多 **1** 个新操作 |
 | 净荷 | **160 b、1 flit/拍**，与 NW/DLL 同宽 |
-| 分段 | 优先通路 bypass：TA 不要求 TP 按 MTU 再切（§6.8.1 留给 RTP 第二波）。MTU **未知** |
+| 分段 | 优先通路 bypass：TA 不要求 TP 按 MTU 再切（§6.8.1 留给 RTP 第二波）。器件级 MTU 见附录 D.1.13，本仓库未锁，标 **未知** |
 | UNO 净荷 | 不得超过 TP MTU（§7.3.3.5）；优先通路建议不用 UNO |
 
 **字段**
@@ -213,22 +238,30 @@ PHY↔DLL、LMSM 侧带已在 [SPEC.md](../SPEC.md) §3.3 写死（M1）。此�
 | --- | --- | --- |
 | 操作整体 | 请求 ± 可选响应 | §7.1 |
 | TAOpcode 等 | 见 TA 契约 | §7.2 |
+| INI_TASSN | 16 | §7.2.1 |
+| DCNA（优先通路） | 16 | §5.2.1 |
 | last（RTP TPOpcode[7]） | 1 | §6.2.1 |
-| PSN 空间 | **未知**（有 PSN 字段） | §6.4.1 |
+| TPMSN | 24 | §6.2.1、§6.7.1.2.1 |
+| PSN | 24 | §6.2.1 |
+| PSN 空间（窗口/初值） | **未知**（字段本身 24 b） | §6.4.1 |
+| RSPST / RSPINFO | **未知** | §6.2.1、§6.8.2 |
 | 角色 | TA：initiator/target；TP：sender/receiver 可在一次事务中对调 | §6.8 |
 
 **握手（建议，规范只描述过程）**
 
-- 操作级与净荷级都是 **valid/ready**。任一侧可停：TA 无完成槽、TP 窗满、下行 `tp2nw_ready=0`。
-- **禁止** valid-only：ROL 要等目标 TA 完成才发最后 TPACK（§6.8.2）。
-- 优先通路：`ta2tp_bypass==1`，无 TPACK 状态机；完成 = 对端 TAACK 或本地写完成（时序 **未知**，但必须有 `tp2ta_done` 或 `fail`）。
-- 未成交的 `ta2tp_op_valid` 边带保持。一操作的净荷 sop…eop 必须属于当前 `tassn`。
+- 操作级与净荷级都是 **valid/ready**。TA→TP 提交口 `ready=0` 的原因：发送窗满（§6.5.1.4.1）或下游 `tp2nw_ready=0`。ROL 等待走 `ta2tp_cmp_*`（§6.8.2）。
+- `tp2ta_msn_valid/ready`：TP 源，TA 宿可停。成交键为 `tp2ta_tpmsn`（§6.7.1.2.1）。
+- ROL 目标 TA 经 `ta2tp_cmp_valid/ready` 把操作完成交给 TP；TP 成交后再发该操作最后 TPACK（§6.8.2）。`ta2tp_cmp` 边带在 `valid` 期间保持。
+- 发起端 `tp2ta_done` / `tp2ta_fail` 仍按 `tassn` 报告事务完成。
+- 优先通路：`ta2tp_bypass==1`，无 TPACK 状态机；完成 = 对端 TAACK 或本地写完成（时序 **未知**，但必须有 `tp2ta_done` 或 `fail`）。bypass 下 `tp2ta_msn_*` 仍按该操作的 TPMSN 成交。
+- 未成交的 `ta2tp_op_valid` 边带保持（含 `ta2tp_dcna`、`ta2tp_op_len`）。一操作的净荷 sop…eop 必须属于当前 `tassn`。
 - CTP+ROI/ROT（第二波）：无 TPACK，只有 TAACK（§6.8.1）。
 
 **反压 / 信用**
 
-- 无层间信用细胞。RTP 窗满 = `ta2tp_op_ready=0`（第二波）。优先通路：反压只来自 NW/DLL `ready`。
+- 无层间信用细胞。RTP 发送窗满（§6.5.1.4.1）= `ta2tp_op_ready=0`（第二波）。拥塞窗见 §6.6，属 `ub_tp_cc`（可选）。优先通路：反压只来自 NW/DLL `ready`。
 - 共享 TP 信道（§6.1、§6.3.1）：策略 **未知**；契约：不得对 TA 声明无限未决。建议优先通路未决上限 **未知**（实现后回填，至少 1）。
+- TP 计时器为 RTO 与 ACK 合并（§6.4.2.1）。`RETRY_WAIT_CYC` 归 DLL（§4.7.3.3）。`PROBE_WAIT_CYC` 归 LMSM（§3.4.3.2）。
 
 **序**
 
@@ -249,7 +282,7 @@ PHY↔DLL、LMSM 侧带已在 [SPEC.md](../SPEC.md) §3.3 写死（M1）。此�
 
 **复位 / link-down**
 
-- `nw_link_up==0` / `nw2tp_flush`：有限拍内对每个未决 TASSN 给 `fail`（拍数 **未知**）。
+- `nw_link_up==0` / `nw2tp_flush`：有限拍内对每个未决 TASSN 给 `fail`（拍数 **未知**）；每个未决 TPMSN 经 `tp2ta_msn_*` 成交；ROL 未决 `ta2tp_cmp` 由 TA 以 `fail` 成交或随 Entity 复位清空。
 - Entity 复位清 TA 未决，**不应**要求 DLL 回 Disabled（§4.2、§10.6.1）。
 
 **契约级断言（可先写；优先通路）**
@@ -259,6 +292,25 @@ PHY↔DLL、LMSM 侧带已在 [SPEC.md](../SPEC.md) §3.3 写死（M1）。此�
 3. `bypass==1` 时本操作不期待 TPACK 状态。
 4. flush 结束前无残留未决 `tassn`。
 5. 净荷 sop…eop 的 flit 数与该操作声明长度一致（长度字段宽 **未知**）。
+6. `tp2ta_msn_valid&&ready` 成交时 `tp2ta_tpmsn` 为该整操作的 24 b 键（§6.7.1.2.1）。
+7. ROL：`ta2tp_cmp` 成交后，TP 才对该 `tassn` 发末包 TPACK（§6.8.2）。
+8. `ta2tp_cmp_fail==1` 与同拍成功完成互斥。
+9. `valid` 期间 `ta2tp_dcna` 与 `ta2tp_cmp_*` 边带保持。
+
+**未决（规范未给或本仓库未锁）**
+
+- `ta2tp_mode[1:0]` 四模式编码：**未知**。PR #61。
+- `ta2tp_op_len` / 净荷长度字段宽、TA 最大操作长度：**未知**（PR #58 Q-8、PR #61）。
+- `ta2tp_op_ch`（信道号）是否每操作给出：**未知**（可随 TP 信道绑定）。
+- RSPST / RSPINFO 宽：**未知**（§6.2.1、§6.8.2）；Compact ATAH Status 宽：**未知**。PR #58 草案 3 b / 5 b 标为假设。
+- `tp2ta_fail` / TP NAK 原因码集合与编码：**未知**（PR #58 Q-9、PR #61）。
+- flush 拍数：**未知**。flush 未确认操作一律 `fail`，或等 link 恢复后续传：**未知**（PR #58 Q-10、PR #61）。本口建议仍给 `fail`。
+- 未决 TASSN 上限：**未知**（实现后回填，至少 1）。PR #61。
+- 共享 TP 信道策略：**未知**（§6.1、§6.3.1）。PR #61。
+- TPMSN 分配后回 TA 的拍位（提交成交拍 vs 仅 `tp2ta_msn_*`）：**未知**。
+- DstTPN 是否每操作出现在 TA→TP 描述符：**未知**（可随 TP 信道绑定）。
+- `tp2ta_msn_*` 与 `tp2ta_done` 的拍序：**未知**。
+- TX 出口仲裁（bypass vs TPACK/重传）、CTX/RTB 实现、µs 节拍来源、`TP_ATOMIC_EN`、F=1 伪包 obs 名、HOOKS 点名存储：属微架构，标 **未知**（PR #58 Q-3..Q-7、Q-11、Q-13..Q-15）。
 
 ---
 

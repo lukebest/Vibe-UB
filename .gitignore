@@ -34,6 +34,12 @@ formal/*/*_live/
 formal/*/*_assume_diag/
 formal/**/status.sqlite
 
+# SymbiYosys workdirs
+formal/**/*_bmc/
+formal/**/*_cover/
+formal/**/*_prove/
+formal/*/*/
+
 # Impl quick-synth: never commit PDK / liberty / local work dirs
 .cache/sky130/
 scripts/impl/.cache/

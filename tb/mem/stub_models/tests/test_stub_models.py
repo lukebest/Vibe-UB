@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import random
 from pathlib import Path
@@ -10,7 +11,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tb.mem.stub_models.contract_hash import contract_sha256
 from tb.mem.stub_models.contract_encodings import (
     ENC_BLOCK,
     ENC_CLASSES,
@@ -20,7 +20,9 @@ from tb.mem.stub_models.contract_encodings import (
     load_enc_class_table,
 )
 from tb.mem.stub_models.contract_yaml import (
+    GATE_CONTRACT_HASH_PATH,
     ContractHeaderMissing,
+    contract_sha256,
     extract_yaml_header,
     find_contracts_dir,
     load_contract_document,
@@ -126,6 +128,18 @@ def test_live_yaml_assertions_list_is_consumed():
         assert model.checker.enabled == names
         total += len(names)
     assert total == 91
+
+
+def test_uses_gate_contract_sha256_not_local_helper():
+    stub = Path(__file__).resolve().parents[1] / "contract_hash.py"
+    assert not stub.exists()
+    yaml_src = (Path(__file__).resolve().parents[1] / "contract_yaml.py").read_text(
+        encoding="utf-8"
+    )
+    assert "def contract_sha256(" not in yaml_src
+    assert GATE_CONTRACT_HASH_PATH.is_file()
+    assert GATE_CONTRACT_HASH_PATH.as_posix().endswith("scripts/gate/contract_hash.py")
+    assert Path(inspect.getfile(contract_sha256)).resolve() == GATE_CONTRACT_HASH_PATH.resolve()
 
 
 def test_contract_sha256_is_canonical_json_not_raw_text(tmp_path: Path):

@@ -3,7 +3,7 @@
 When a new contract head lands the YAML SHA-256 changes. Rewrite
 ``_derived/yaml_digests.json`` from the live headers and the parsed
 PTW ``desc_lvl`` × ENC_* cross (no raw-bit encodings). Digests use
-``contract_sha256`` (canonical JSON of the YAML object, all fields).
+``contract_sha256`` from ``scripts/gate/contract_hash.py`` (path-loaded).
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from .contract_encodings import load_enc_class_table
-from .contract_hash import contract_sha256
 from .contract_yaml import (
+    contract_sha256,
     extract_yaml_header,
     find_contracts_dir,
     list_leaf_contract_paths,

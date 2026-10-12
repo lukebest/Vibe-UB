@@ -22,12 +22,11 @@ This file does not parse field bit positions out of ``raw``.
 
 from __future__ import annotations
 
+import importlib.util
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-from .contract_hash import contract_sha256
 
 try:
     import yaml
@@ -35,6 +34,35 @@ except ImportError as exc:  # pragma: no cover
     raise ImportError(
         "contract YAML header loader needs PyYAML (scripts/gate/requirements.txt)"
     ) from exc
+
+
+def _repo_gate_hash_file() -> Path:
+    """Locate ``scripts/gate/contract_hash.py`` by walking parents. No sys.path."""
+    for base in Path(__file__).resolve().parents:
+        cand = base / "scripts" / "gate" / "contract_hash.py"
+        if cand.is_file():
+            return cand
+    raise FileNotFoundError(
+        "scripts/gate/contract_hash.py not found (walked from tb/mem/stub_models)"
+    )
+
+
+def _bind_gate_digest():
+    gate = _repo_gate_hash_file()
+    spec = importlib.util.spec_from_file_location("_gate_contract_hash", gate)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {gate}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    fn = getattr(mod, "contract_sha256", None)
+    if not callable(fn):
+        raise ImportError(f"{gate} has no callable contract_sha256")
+    return fn
+
+
+GATE_CONTRACT_HASH_PATH = _repo_gate_hash_file()
+# Bound gate function (assignment, not a local def — GATE-CONTRACT-HASH-SINGLE).
+contract_sha256 = _bind_gate_digest()
 
 
 class ContractHeaderError(ValueError):

@@ -12,7 +12,7 @@
 //         rsp valid and the rsp beat stay.
 //     Ready-only inputs (mem2host_rd_ready, fill_ready, flt_ready,
 //     evt_ready) are free. mem2host_rd_ready is NOT assumed high —
-//     the table-read request hold property would otherwise be vacuous.
+//     AP_TBLRD_REQ_HOLD (SPEC §14) would otherwise be vacuous.
 //     No progress / fairness assumed.
 //
 // MATT_WD (Q-A08): ctx_matt_wd is sampled on the accept cycle
@@ -233,8 +233,9 @@ module ub_mem_ptw_if_props (
   // (4) mem2host_rd_valid |-> len in {RD_LEN_8B, RD_LEN_32B, RD_LEN_64B}
   // (5) first-wave: len == RD_LEN_8B && tag == RD_TAG_ZERO
   // (6) at most one outstanding read (accepted, rsp not yet returned)
-  // (7) request-side hold (architect): valid && !ready |=> valid and
-  //     $stable(addr/len/tag). mem2host_rd_ready stays a free input.
+  // (7) AP_TBLRD_REQ_HOLD (SPEC §14 table-read interface):
+  //     valid && !ready |=> valid and $stable(addr/len/tag).
+  //     mem2host_rd_ready stays a free input.
   // ------------------------------------------------------------------
   reg f_rd_outst;
   reg f_rd_was_outst;
@@ -281,8 +282,10 @@ module ub_mem_ptw_if_props (
     end
   end
 
-  // (7) mem2host_rd_valid && !mem2host_rd_ready |=>
-  //     mem2host_rd_valid && $stable({addr,len,tag})
+  // AP_TBLRD_REQ_HOLD (SPEC §14 table-read interface):
+  // mem2host_rd_valid && !mem2host_rd_ready |=>
+  //   mem2host_rd_valid && $stable(mem2host_rd_addr) &&
+  //   $stable(mem2host_rd_len) && $stable(mem2host_rd_tag)
   reg                 f_rd_req_hold;
   reg [PA_W-1:0]      f_rd_addr_q;
   reg [RD_LEN_W-1:0]  f_rd_len_q;
@@ -311,10 +314,12 @@ module ub_mem_ptw_if_props (
 
   always @(posedge core_clk) begin
     if (chk && f_rd_req_hold) begin
-      a_rd_hold_valid: assert (mem2host_rd_valid);
-      a_rd_hold_addr:  assert (mem2host_rd_addr == f_rd_addr_q);
-      a_rd_hold_len:   assert (mem2host_rd_len == f_rd_len_q);
-      a_rd_hold_tag:   assert (mem2host_rd_tag == f_rd_tag_q);
+      AP_TBLRD_REQ_HOLD: assert (
+        mem2host_rd_valid &&
+        (mem2host_rd_addr == f_rd_addr_q) &&
+        (mem2host_rd_len  == f_rd_len_q) &&
+        (mem2host_rd_tag  == f_rd_tag_q)
+      );
     end
   end
 

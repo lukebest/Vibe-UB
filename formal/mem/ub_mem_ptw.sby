@@ -15,7 +15,7 @@
 # Default tasks (scripts/gate/formal.sh: cd formal/mem && sby -f --sequential):
 #   cover — reach event, MATT_WD complete, read+rsp, fill,
 #           backpressured table-read then accept
-#   bmc   — port safety (Q-A08 / Q-C07) + table-read request hold
+#   bmc   — port safety (Q-A08 / Q-C07) + AP_TBLRD_REQ_HOLD (SPEC §14)
 # prove is not a default task (k-induction is not needed for these
 # port properties; keep the gate under ~90 s).
 #

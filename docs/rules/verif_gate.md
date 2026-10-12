@@ -4,7 +4,7 @@
 | --- | --- |
 | 分册 | `docs/rules/verif_gate.md` |
 | 所有者 | 工具守门（验证负责人兼任，见 [TEAM.md](../TEAM.md) §4） |
-| 版本 | v0.7 (2026-10-12) |
+| 版本 | v0.8 (2026-10-12) |
 | 类别 | 每次提交的 lint / CDC / formal / 综合 / regmap / TB / emit / 端口 / 来源 / 等价 / spec-leak / contract-check |
 | 配套 | [verification.md](verification.md)、[PROCESS.md](../PROCESS.md)、[CODING_STYLE.md](../CODING_STYLE.md) §7、[DECISIONS.md](../DECISIONS.md) D6 / D7 / D10 / D17 |
 
@@ -216,6 +216,7 @@ M1 单时钟 `core_clk`（SPEC §4.1）。`rst_n` 异步置位、同步释放，
 | GATE-FOR-003 | 目录下没有 `*.sby` 时 job 成功并打印 `no assertions yet` | 同上 | 2026-10-10 |
 | GATE-FOR-004 | `formal/**/*.sby` 及其引用的断言里，`bind` 的每个信号必须在对应网表中存在；找不到即拦 | PM | 2026-10-10 |
 | GATE-FOR-005 | `[files]` 里的相对路径先相对 `.sby` 目录解析；找不到报 `SBY_FILE_MISSING`，不得抛 `FileNotFoundError` | #21 cmn.sby | 2026-10-12 |
+| GATE-FORMAL-DEPTH | 深度：**(1)** `formal/<layer>/*.sby` 若有收敛的 `prove` 任务，门禁必须跑，报告记录 k 与 runtime。**(2)** prove 合不上时，BMC 深度至少覆盖 DUT 两笔完整事务加余量；PR 须附归纳反例初态，标 `not fully proven`（不是豁免）。**(3)** BMC depth 必须 ≥ 最深可达 cover 步 + 6。现只拦 (3) 的检查脚本，且 **report-only**（解析 sby cover trace 步数 vs BMC depth） | 验证 | 2026-10-12 |
 
 有 `.sby` 但机器上没有 `sby`：失败（不得假装跑过）。ubuntu-24.04 的 apt 没有 `sby` 包；CI 用 `scripts/gate/setup_sby.sh` 装 YosysHQ/sby（默认 `v0.69`）并要求 `z3`（`smtbmc z3`）。`apt-get install sby || true` 不够。
 

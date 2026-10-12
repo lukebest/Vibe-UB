@@ -37,6 +37,9 @@ for sby in "${SBY_FILES[@]}"; do
   fi
 done
 
+# GATE-FORMAL-DEPTH (3): bmc >= deepest cover + 6. Report-only.
+python3 -P "$GATE_DIR/formal_depth.py"
+
 if [[ "$fail" -ne 0 ]]; then
   echo "formal: FAIL (one or more .sby jobs failed)"
   exit 1

@@ -27,6 +27,7 @@
 
 ### Changed
 
+- 门禁 formal：`GATE-FORMAL-DEPTH`（prove 收敛则必跑并记 k/runtime；否则 BMC 覆盖两笔完整事务+余量并附归纳反例初态，标 `not fully proven`。BMC depth ≥ 最深 cover + 6，现为 report-only）。
 - 门禁 contract-check：扫描 `docs/arch/*/contracts/`（含 pcs）。pcs 的 `parent` 查 `docs/arch/pcs/UARCH.md` §3 叶子列，不看 mem 表。
 - 门禁 contract-check：`scripts/gate/` 以外不得自带 `contract_hash.py` / `def contract_sha256`。#47 进 main 前只报告（`GATE-CONTRACT-HASH-SINGLE`）。
 - 门禁 contract-check：`assertions:` 必填、与正文 `` `AP_*` `` 一一对应。#49 把 README §8 标成「必填 / 参与 hash」之前只报告；标记进 main（或 `assertions_required: true`）后拦截。

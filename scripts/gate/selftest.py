@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from cdc_rdc import analyze_module
 from formal_bind import check_formal_binds, discover_sby_files, sby_run_cwd
+from formal_depth import check_formal_depth, parse_sby_bmc_depth
 from gatelib import (
     Finding,
     collect_lock_completeness_findings,
@@ -452,6 +453,45 @@ def test_sby_relative_and_missing() -> None:
         if any("cmn_bmc/config.sby" in (f.file or "") for f in hits):
             _fail("sby-skip-workdir", "workdir config.sby must not produce findings")
         print("SELFTEST PASS sby-skip-workdir: only formal/<iface>/*.sby")
+
+
+def test_formal_bmc_vs_cover_depth() -> None:
+    if parse_sby_bmc_depth("[options]\nbmc: depth 40\ndepth 8\n") != 40:
+        _fail("formal-depth-parse", "bmc: depth must win over generic depth")
+    if parse_sby_bmc_depth("[options]\ndepth 20\n") != 20:
+        _fail("formal-depth-parse", "unprefixed depth must be the BMC depth")
+    print("SELFTEST PASS formal-depth-parse: bmc: depth wins")
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        sby = repo / "formal" / "cmn" / "toy.sby"
+        sby.parent.mkdir(parents=True)
+        sby.write_text(
+            "[tasks]\nbmc\ncover\n[options]\nbmc: mode bmc\nbmc: depth 10\n"
+            "cover: mode cover\ncover: depth 20\n",
+            encoding="utf-8",
+        )
+        cover = repo / "formal" / "cmn" / "toy_cover"
+        eng = cover / "engine_0"
+        eng.mkdir(parents=True)
+        (eng / "logfile.txt").write_text(
+            "SBY [toy_cover] engine_0: Reached cover statement at "
+            "toy.sv:4.3-4.20 (step 8).\n",
+            encoding="utf-8",
+        )
+        hits = check_formal_depth(repo)
+        hit = _expect_rule("formal-bmc-shallow", hits, "FORMAL_BMC_SHALLOW")
+        if hit.bucket != "report":
+            _fail("formal-bmc-shallow", "GATE-FORMAL-DEPTH (3) must be report-only")
+        if "8" not in hit.message or "10" not in hit.message:
+            _fail("formal-bmc-shallow", hit.message)
+        sby.write_text(
+            "[options]\nmode bmc\ndepth 20\n",
+            encoding="utf-8",
+        )
+        hits = check_formal_depth(repo)
+        if any(f.rule == "FORMAL_BMC_SHALLOW" for f in hits):
+            _fail("formal-bmc-ok", "depth 20 covers step 8 + 6")
+        print("SELFTEST PASS formal-bmc-ok: bmc >= cover + 6")
 
 
 def test_tb_selfcheck_sh_drops_pycircuit_venv() -> None:
@@ -1040,6 +1080,7 @@ def main() -> int:
         test_cdc_pyc_lib_clk_not_core,
         test_setup_sby_refuses_missing_z3_note,
         test_sby_relative_and_missing,
+        test_formal_bmc_vs_cover_depth,
         test_tb_selfcheck_sh_drops_pycircuit_venv,
         test_tb_requires_verilator,
         test_tb_skip_is_fail,

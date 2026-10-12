@@ -19,7 +19,7 @@ Lists live in this directory (`legacy.txt`, `handwritten.yml`, `blackbox.yml`,
 | `lint.sh` | Verilator `--lint-only -Wall` + unlisted stub/macro |
 | `synth_check.sh` | Yosys synth, latch / multi-drive / combo-loop; `-lib` for blackbox.yml; combo depth report; combo-only SCC; runs `synth_selftest.py` (async-FF vs latch / combo-loop / async+combo-loop fixtures) |
 | `cdc_rdc.sh` | Structural CDC / RDC (`cdc_rules.yml`; `valid_outside` for unreset arrays) |
-| `formal.sh` | bind-existence on `formal/**/*.sby` then `sby -f` from the `.sby` directory (includes `formal/cmn/`) |
+| `formal.sh` | bind-existence on `formal/**/*.sby` then `sby -f` from the `.sby` directory (includes `formal/cmn/`); GATE-FORMAL-DEPTH (3) cover-vs-bmc is report-only |
 | `regmap_consistency.sh` | `python3 scripts/gen_regmap.py --check` |
 | `tb_selfcheck.sh` | Auto-discover pytest + cocotb under `tb/` and `model/`; require Verilator; fail on pytest skip |
 

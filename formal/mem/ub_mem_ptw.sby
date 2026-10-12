@@ -68,11 +68,31 @@ setattr -mod -set keep_hierarchy 1
 cd ..
 proc
 flatten
-# Tap decoder public ports by instance name (u_dut.u_desc_dec).
-connect -set \u_blk_exp.out_valid \u_dut.u_desc_dec.out_valid
-connect -set \u_blk_exp.desc_addr \u_dut.u_desc_dec.desc_addr
-connect -set \u_blk_exp.desc_kind \u_dut.u_desc_dec.desc_kind
-connect -set \u_blk_exp.desc_lvl \u_dut.u_desc_dec.desc_lvl
+# keep_hierarchy leaves u_dut.u_desc_dec as a cell. Give its
+# public-port nets stable names (select by cell/port, not by
+# walker-generated wire names), then tap them into u_blk_exp.
+cd ub_mem_ptw_harness
+select c:u_dut.u_desc_dec %x:+[out_valid] c:u_dut.u_desc_dec %d w:* %i
+rename -hide %
+select c:u_dut.u_desc_dec %x:+[out_valid] c:u_dut.u_desc_dec %d w:* %i
+rename -enumerate -pattern dec_ov% %
+select c:u_dut.u_desc_dec %x:+[desc_addr] c:u_dut.u_desc_dec %d w:* %i
+rename -hide %
+select c:u_dut.u_desc_dec %x:+[desc_addr] c:u_dut.u_desc_dec %d w:* %i
+rename -enumerate -pattern dec_addr% %
+select c:u_dut.u_desc_dec %x:+[desc_kind] c:u_dut.u_desc_dec %d w:* %i
+rename -hide %
+select c:u_dut.u_desc_dec %x:+[desc_kind] c:u_dut.u_desc_dec %d w:* %i
+rename -enumerate -pattern dec_kind% %
+select c:u_dut.u_desc_dec %x:+[desc_lvl] c:u_dut.u_desc_dec %d w:* %i
+rename -hide %
+select c:u_dut.u_desc_dec %x:+[desc_lvl] c:u_dut.u_desc_dec %d w:* %i
+rename -enumerate -pattern dec_lvl% %
+connect -set u_blk_exp.out_valid dec_ov0
+connect -set u_blk_exp.desc_addr dec_addr0
+connect -set u_blk_exp.desc_kind dec_kind0
+connect -set u_blk_exp.desc_lvl dec_lvl0
+cd ..
 opt
 memory -nomap
 opt -purge

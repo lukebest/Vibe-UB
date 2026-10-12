@@ -79,26 +79,32 @@ TLB 回填路径上的页表描述符解码叶子。输入一根原始描述符�
 | `desc_illegal` | out | 1 | 配置非法；`desc_illegal == (desc_ill_cause != 0)`。**Xia 裁定 2026-10-12。** |
 | `desc_ill_cause` | out | 4 | 非法原因，编码见 [README.md](README.md) §3 |
 
-`desc_kind` 承担页粒度类别。各级允许的 kind 见 §3。块描述符只给出块基址 `desc_addr`。按 Q-A11，每个块拆成 4 KB TLB 项，合成规则见 §8。UB-MEM 第 9 章未定义 MATT 页表描述符格式与块大小；TCTE.TGS 字段注记写明其位含义跟随体系结构。**Xia 裁定 2026-10-12。**
+`desc_kind` 承担页粒度类别。输入按编码类与 `desc_lvl` 交叉，见 §3。块描述符只给出块基址 `desc_addr`。按 Q-A11，每个块拆成 4 KB TLB 项，合成规则见 §8。UB-MEM 第 9 章未定义 MATT 页表描述符格式与块大小；TCTE.TGS 字段注记写明其位含义跟随体系结构。**Xia 裁定 2026-10-12。**
 
 ---
 
 ## 3. 各级允许的描述符类型
 
-4 KB 粒度，级号 L0..L3，与输入 `desc_lvl[1:0]` 对应。**Xia 裁定 2026-10-12。**
+按输入编码类（只写符号，公开面不写位值）与 `desc_lvl[1:0]` 交叉，共 12 格。依据 TCTE.TGS 注记，描述符格式跟随体系结构；语义取 VMSAv8-64 4 KB 粒度。验证按 `desc_lvl` × 编码类交叉。**Xia 裁定 2026-10-12。**
 
-| 级 | table | block | page |
+输入编码类：
+
+| 符号 | 含义 |
+| --- | --- |
+| `ENC_INVALID` | 无效编码 |
+| `ENC_TBL_PG` | L0–L2 表示 table，L3 表示 page |
+| `ENC_BLOCK` | 块编码 |
+
+输出列定义：table → `desc_kind=1`；block → `desc_kind=2`；page → `desc_kind=3`。翻译故障 → `desc_v=0`，`desc_kind=0`（invalid），`desc_illegal=0`，`desc_ill_cause=ILL_NONE`。
+
+| 级 | `ENC_INVALID` | `ENC_TBL_PG` | `ENC_BLOCK` |
 | --- | --- | --- | --- |
-| L0 | 合法 | 非法 `ILL_RSVD`（512 GB 块） | 该级不产出 |
-| L1 | 合法 | 合法，1 GB | 该级不产出 |
-| L2 | 合法 | 合法，2 MB | 该级不产出 |
-| L3 | 该级不产出（L3 table 编码报 `ILL_RSVD`） | 该级不产出 | 合法，4 KB |
+| L0 | 翻译故障 | table | 翻译故障（保留编码） |
+| L1 | 翻译故障 | table | block 1 GB |
+| L2 | 翻译故障 | table | block 2 MB |
+| L3 | 翻译故障 | page 4 KB | 翻译故障（保留编码） |
 
-「该级不产出」表示该级不产生该 kind 的编码；描述符解码到该 kind 时报 `ILL_RSVD`。
-
-无效描述符走翻译故障：任意级 `desc_v=0`、`desc_kind=0`、`desc_illegal=0`。
-
-L1 的 1 GB 块与 L2 的 2 MB 块合法：`desc_kind=block`，`desc_illegal=0`。本条取代此前对 1 GB 块报 `ILL_UNSUP` 的行。`ILL_MAP_2MB` 只对应 TCTE 范围表颗粒度，只出现在 `ub_mem_tcte_dec`。
+L1 的 1 GB 块与 L2 的 2 MB 块：`desc_kind=2`，`desc_illegal=0`。本条取代此前对 1 GB 块报 `ILL_UNSUP` 的行，也取代此前对 L0 块 / L3 table 报 `ILL_RSVD` 的行。`ILL_MAP_2MB` 只对应 TCTE 范围表颗粒度，只出现在 `ub_mem_tcte_dec`。
 
 ---
 
@@ -121,17 +127,16 @@ L1 的 1 GB 块与 L2 的 2 MB 块合法：`desc_kind=block`，`desc_illegal=0`�
 **Xia 裁定 2026-10-12：**
 
 - `desc_illegal=1` 的同一 `out_valid` 拍，其余解码输出（`desc_v` / `desc_kind` / `desc_addr` / `desc_attr_idx` / `desc_ap` / `desc_uxn` / `desc_pxn` / `desc_af`）为 0。该拍只有 `desc_illegal` 与 `desc_ill_cause` 携带信息。
-- 配置非法（`ILL_HW_AD`、`ILL_RSVD`）先于翻译故障（例如 AF=0）报告。多个非法原因同时成立时，取最小非 0 码。
+- 配置非法（`ILL_HW_AD`）先于翻译故障（例如 AF=0）报告。多个非法原因同时成立时，取最小非 0 码。
 - 描述符 `AF=0` 且需要硬件写回 Access / Dirty → `desc_ill_cause=ILL_HW_AD`。
 - 描述符 `AF=0` 且不要求硬件写回 → `desc_illegal=0`，`desc_af=0`，由遍历器按普通 AF 故障处理。
-- 无效描述符（`desc_v=0`）任意级保持 `desc_kind=0`、`desc_illegal=0`（翻译故障）。
-- 级与 kind 对照见 §3：L0 块、本级不产出的 kind，报 `ILL_RSVD`。
+- §3 标「翻译故障」的格子（含任意级 `ENC_INVALID`、L0 / L3 的 `ENC_BLOCK`）：`desc_v=0`，`desc_kind=0`，`desc_illegal=0`，`desc_ill_cause=ILL_NONE`。
 
 | 符号 | 何时拉起 |
 | --- | --- |
-| `ILL_NONE` | `desc_illegal=0`（含 L1 的 1 GB 块、L2 的 2 MB 块、L3 的 4 KB 页、任意级无效描述符） |
+| `ILL_NONE` | `desc_illegal=0`（含 §3 合法格与全部翻译故障格） |
 | `ILL_HW_AD` | 原始描述符要求硬件写回 Access / Dirty（含「AF=0 且必须写回才能继续」） |
-| `ILL_RSVD` | 保留编码；L0 块（512 GB）；本级不产出的 kind（含 L3 table） |
+| `ILL_RSVD` | 其余保留编码 |
 | `ILL_UNSUP` | 其余已折成非法的首轮不支持编码 |
 
 ---
@@ -161,9 +166,9 @@ L1 的 1 GB 块与 L2 的 2 MB 块合法：`desc_kind=block`，`desc_illegal=0`�
 | `AP_PTW_AF` | `AF=0` 且不要求硬件写回时，`desc_illegal=0` 且 `desc_af=0`。**Xia 裁定 2026-10-12。** |
 | `AP_PTW_KIND` | `desc_illegal=0` 时 `desc_kind` ∈ {0, 1, 2, 3}，分别 invalid / table / block / page。**Xia 裁定 2026-10-12。** |
 | `AP_PTW_LVL` | `desc_lvl` ∈ {0, 1, 2, 3}，对应 L0..L3。**Xia 裁定 2026-10-12。** |
-| `AP_PTW_KIND_LVL` | `desc_v=1` 且 `desc_illegal=0` 时，(`desc_lvl`, `desc_kind`) 属于 §3 合法格：L0/L1/L2 table；L1 block（1 GB）；L2 block（2 MB）；L3 page（4 KB）。**Xia 裁定 2026-10-12。** |
-| `AP_PTW_INV` | `desc_v=0` 时任意级 `desc_kind=0` 且 `desc_illegal=0`。**Xia 裁定 2026-10-12。** |
-| `AP_PTW_ILL_RSVD_LVL` | `desc_v=1` 且 kind 为本级不产出，或 L0 块：`desc_ill_cause=3`（`ILL_RSVD`）。**Xia 裁定 2026-10-12。** |
+| `AP_PTW_XCLASS` | 成交拍按 `desc_lvl` × {`ENC_INVALID`, `ENC_TBL_PG`, `ENC_BLOCK`} 落入 §3 十二格之一。**Xia 裁定 2026-10-12。** |
+| `AP_PTW_KIND_LVL` | `ENC_TBL_PG`：L0/L1/L2 给出 `desc_kind=1`（table）；L3 给出 `desc_kind=3`（page）。`ENC_BLOCK`：L1 给出 1 GB 块、L2 给出 2 MB 块，`desc_kind=2`。上述格子 `desc_v=1` 且 `desc_illegal=0`。**Xia 裁定 2026-10-12。** |
+| `AP_PTW_FAULT` | §3 翻译故障格（任意级 `ENC_INVALID`；L0 / L3 的 `ENC_BLOCK`）：`desc_v=0`，`desc_kind=0`，`desc_illegal=0`，`desc_ill_cause=ILL_NONE`。**Xia 裁定 2026-10-12。** |
 | `AP_PTW_BLOCK` | L1 的 1 GB 块与 L2 的 2 MB 块：`desc_kind=2`（block），`desc_illegal=0`，`desc_addr` 为块基址。`ILL_MAP_2MB` 只出现在 `ub_mem_tcte_dec`。**Xia 裁定 2026-10-12。** |
 
 ---

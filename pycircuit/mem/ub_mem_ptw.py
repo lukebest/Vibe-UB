@@ -2,7 +2,9 @@
 
 4 KB 粒度，最多 L0–L3 四级。表读走 ub_mem_tbl_rd / mem2host_rd_*
 （地址 48 bit、长度、tag；回读 512 bit、tag、错误）。
-SPEC §14 Q-C07 (D20)：首轮单未决，长度恒 8 B、tag 恒 0，口宽一次拉齐。
+SPEC §14 Q-C07 (D20)：首轮单未决，mem2host_rd_len 为 8 bit 字节数（合法
+RD_LEN_8B / RD_LEN_32B / RD_LEN_64B），本叶驱动 RD_LEN_8B；tag 恒
+RD_TAG_ZERO，口宽一次拉齐。
 从 512 bit 回读按地址低位取出 8 B 描述符。读回描述符先寄存，再连同
 desc_lvl 交给 ub_mem_ptw_desc_dec（契约：寄存 1 拍）。表描述符进入
 下一级；L1 1 GB / L2 2 MB 块或 L3 页合成 4 KB 对齐 PA，只把页地址
@@ -26,7 +28,7 @@ from mem.lib.params import (
     DESC_LVL_W,
     ENT_IDX_W,
     EVT_CODE_W,
-    EVT_MATT_WD,
+    EVT_MATT_WD_MISS,
     IA_W,
     ILL_CAUSE_W,
     ILL_NONE,
@@ -242,7 +244,7 @@ def _ptw_body(m: Circuit) -> None:
         mux(m, to_flt_ill, dec["desc_ill_cause"], u(ILL_CAUSE_W, ILL_NONE)),
         when=enter_flt,
     )
-    evt_code_q.set(u(EVT_CODE_W, EVT_MATT_WD), when=to_evt_wd)
+    evt_code_q.set(u(EVT_CODE_W, EVT_MATT_WD_MISS), when=to_evt_wd)
 
     m.output("req_ready", idle)
     # SPEC §14 Q-C07 (D20)：长度恒 8 B，tag 恒 0。

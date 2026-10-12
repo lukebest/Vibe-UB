@@ -44,14 +44,6 @@ LEAVES: list[dict] = [
         "hooks": True,  # SPEC §10 lists no ptw obs yet; HOOKS ports == PRODUCT
         "variants": [{"label": ""}],
     },
-    {
-        "name": "ub_mem_ptw_desc_dec",
-        "layer": "mem",
-        "source": "mem/stub/ub_mem_ptw_desc_dec.py",
-        "hooks": False,
-        "subdir": "stub",  # existing dest is rtl/<layer>/<name>.v; this is the dest-path delta
-        "variants": [{"label": ""}],
-    },
 ]
 
 
@@ -223,11 +215,7 @@ def emit_all(out_root: Path = RTL) -> list[Path]:
         for var in leaf["variants"]:
             extra = {k: v for k, v in var.items() if k != "label"}
             module = leaf["name"]
-            dest_dir = out_root / leaf["layer"]
-            sub = leaf.get("subdir")
-            if sub:
-                dest_dir = dest_dir / sub
-            dest = dest_dir / f"{module}.v"
+            dest = out_root / leaf["layer"] / f"{module}.v"
             written.append(
                 emit_one(
                     source=source,

@@ -53,13 +53,20 @@ for leaf in ub_mem_tlb ub_mem_inv ub_mem_ptw; do
     exit 1
   fi
 done
-if [[ ! -f "$RTL/stub/ub_mem_ptw_desc_dec.v" ]]; then
-  echo "FAIL: placeholder stub missing $RTL/stub/ub_mem_ptw_desc_dec.v"
-  exit 1
-fi
 if ! grep -q 'contract_sha256: HANDWRITTEN' \
   "$ROOT/pycircuit/mem/stub/ub_mem_ptw_desc_dec.py"; then
   echo "FAIL: stub source missing contract_sha256: HANDWRITTEN"
+  exit 1
+fi
+# TODO: switch to scripts/gate/gen_private_stub.py once #47 is on main.
+PY="${PY:-/tmp/spike/venv/bin/python3}"
+if [[ ! -x "$PY" ]]; then
+  PY=python3
+fi
+STUB_V="$WORK/ub_mem_ptw_desc_dec.v"
+"$PY" "$ROOT/scripts/gen_ptw_desc_dec_stub.py" --out "$STUB_V"
+if [[ ! -f "$STUB_V" ]]; then
+  echo "FAIL: failed to emit placeholder stub to tmp"
   exit 1
 fi
 if grep -E '^\s*(input|output).*tb_' "$RTL/ub_mem_tlb.v" "$RTL/ub_mem_inv.v" "$RTL/ub_mem_ptw.v"; then
@@ -129,20 +136,16 @@ do
   fi
 done
 if grep -q 'keep' "$RTL/ub_mem_tlb.v" "$HOOKS/ub_mem_tlb.v" "$RTL/ub_mem_inv.v" "$HOOKS/ub_mem_inv.v" \
-  "$RTL/ub_mem_ptw.v" "$HOOKS/ub_mem_ptw.v" "$RTL/stub/ub_mem_ptw_desc_dec.v"; then
+  "$RTL/ub_mem_ptw.v" "$HOOKS/ub_mem_ptw.v" "$STUB_V"; then
   echo "FAIL: keep attribute present"
   exit 1
 fi
 echo "ports ok"
 
 echo "=== regen byte-identical ==="
-PY="${PY:-/tmp/spike/venv/bin/python3}"
-if [[ ! -x "$PY" ]]; then
-  PY=python3
-fi
 "$PY" "$ROOT/scripts/emit_rtl.py" --out "$WORK/rtl"
 for f in mem/ub_mem_tlb.v mem/hooks/ub_mem_tlb.v mem/ub_mem_inv.v mem/hooks/ub_mem_inv.v \
-  mem/ub_mem_ptw.v mem/hooks/ub_mem_ptw.v mem/stub/ub_mem_ptw_desc_dec.v; do
+  mem/ub_mem_ptw.v mem/hooks/ub_mem_ptw.v; do
   if ! diff -q "$ROOT/rtl/$f" "$WORK/rtl/$f"; then
     echo "FAIL: regen mismatch $f"
     diff -u "$ROOT/rtl/$f" "$WORK/rtl/$f" | head -n 80
@@ -165,7 +168,7 @@ verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
   "$RTL/ub_mem_ptw.v"
 verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
   -I"$PYC_INC" \
-  "$RTL/stub/ub_mem_ptw_desc_dec.v"
+  "$STUB_V"
 echo "=== verilator lint HOOKS ==="
 verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
   -Wno-PINCONNECTEMPTY \

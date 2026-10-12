@@ -44,8 +44,11 @@ MATT_BA_W = 44
 IA_W = 6
 RAW_W = 64
 RD_DATA_W = 512
+# SPEC §14 Q-C07 (D20): 8-bit byte count; legal RD_LEN_8B / 32 / 64.
 RD_LEN_W = 8
 RD_LEN_8B = 8
+RD_LEN_32B = 32
+RD_LEN_64B = 64
 RD_TAG_W = 4
 RD_TAG_ZERO = 0
 # 512-bit beat holds eight 8 B descriptors; slot from address low bits.
@@ -83,9 +86,9 @@ ILL_MAPT_OTHER_BLK = 9
 ILL_S2 = 10
 ILL_UNSUP = 11
 
-# Walker event path (UARCH has no evt_* on this leaf; SPEC §14 Q-A08 (D20)).
+# Walker event path (SPEC §14 Q-A08 (D20)). Code 0 is reserved, never emitted.
 EVT_CODE_W = 4
-EVT_MATT_WD = 0
+EVT_MATT_WD_MISS = 1
 
 # 4 KB granule walk index in the request address (UARCH §4).
 VA_IDX_W = 9

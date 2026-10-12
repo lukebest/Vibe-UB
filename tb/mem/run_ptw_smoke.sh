@@ -25,6 +25,15 @@ if [[ ! -f "$PYC_REG" ]]; then
   exit 1
 fi
 
+# TODO: switch to scripts/gate/gen_private_stub.py once #47 is on main.
+PY="${PY:-/tmp/spike/venv/bin/python3}"
+if [[ ! -x "$PY" ]]; then
+  PY=python3
+fi
+STUB_V="$WORK/ub_mem_ptw_desc_dec.v"
+"$PY" "$ROOT/scripts/gen_ptw_desc_dec_stub.py" --out "$STUB_V"
+grep -v '^`include "pyc_reg.v"' "$STUB_V" > "$WORK/stub_ninc.v"
+
 python3 - "$RTL/ub_mem_ptw.v" "$WORK/ub_mem_ptw_stripped.v" <<'PY'
 import sys
 src, dst = sys.argv[1], sys.argv[2]
@@ -49,8 +58,6 @@ open(dst, "w", encoding="utf-8").write(text[:start] + text[end:])
 print("stripped embedded decoder from parent")
 PY
 
-grep -v '^`include "pyc_reg.v"' "$RTL/ub_mem_ptw.v" > "$WORK/ub_mem_ptw_full.v"
-
 echo "=== functional smoke (TB decoder model) ==="
 verilator --binary --timing --top-module ub_mem_ptw_smoke_tb \
   -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN -Wno-MODDUP -Wno-WIDTHTRUNC \
@@ -68,7 +75,8 @@ verilator --binary --timing --top-module ub_mem_ptw_stub_smoke_tb \
   -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN -Wno-MODDUP -Wno-WIDTHTRUNC \
   -I"$PYC_INC" \
   "$PYC_REG" \
-  "$WORK/ub_mem_ptw_full.v" \
+  "$WORK/ub_mem_ptw_stripped.v" \
+  "$WORK/stub_ninc.v" \
   "$ROOT/tb/mem/ub_mem_ptw_stub_smoke_tb.v" \
   -Mdir "$WORK/obj_stub" \
   -o smoke_stub

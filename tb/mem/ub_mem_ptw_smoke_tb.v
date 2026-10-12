@@ -11,7 +11,12 @@ module ub_mem_ptw_smoke_tb;
   localparam integer ILL_NONE     = 0;
   localparam integer ILL_HW_AD    = 2;
   localparam integer ILL_RSVD     = 3;
-  localparam integer EVT_MATT_WD  = 0;
+  localparam integer EVT_CODE_W   = 4;
+  localparam integer EVT_MATT_WD_MISS = 1;
+  localparam integer RD_LEN_W     = 8;
+  localparam integer RD_LEN_8B    = 8;
+  localparam integer RD_TAG_W     = 4;
+  localparam integer RD_TAG_ZERO  = 0;
 
   reg         core_clk;
   reg         rst_pyc;
@@ -63,6 +68,13 @@ module ub_mem_ptw_smoke_tb;
   integer errors;
   integer cycles;
   integer saw_rd;
+  integer evt_hs;
+  integer evt_seen;
+  integer fill_seen;
+  integer rd_outstand;
+  reg        prev_evt_valid;
+  reg        prev_evt_ready;
+  reg [3:0]  prev_evt_code;
 
   reg [63:0] mem_q [0:7];
   integer mem_n;
@@ -205,12 +217,12 @@ module ub_mem_ptw_smoke_tb;
     end else begin
       if (mem2host_rd_valid && mem2host_rd_ready) begin
         saw_rd <= saw_rd + 1;
-        if (mem2host_rd_len !== 8'd8) begin
-          $display("FAIL: mem2host_rd_len %0d != 8", mem2host_rd_len);
+        if (mem2host_rd_len !== RD_LEN_8B[RD_LEN_W-1:0]) begin
+          $display("FAIL: mem2host_rd_len %0d != RD_LEN_8B", mem2host_rd_len);
           errors = errors + 1;
         end
-        if (mem2host_rd_tag !== 4'd0) begin
-          $display("FAIL: mem2host_rd_tag %0d != 0", mem2host_rd_tag);
+        if (mem2host_rd_tag !== RD_TAG_ZERO[RD_TAG_W-1:0]) begin
+          $display("FAIL: mem2host_rd_tag %0d != RD_TAG_ZERO", mem2host_rd_tag);
           errors = errors + 1;
         end
         rsp_pend <= 1'b1;
@@ -238,6 +250,59 @@ module ub_mem_ptw_smoke_tb;
       end else begin
         mem2host_rd_rsp_valid <= 1'b0;
       end
+    end
+  end
+
+  always @(posedge core_clk) begin
+    if (rst_pyc) begin
+      prev_evt_valid <= 1'b0;
+      prev_evt_ready <= 1'b1;
+      prev_evt_code <= {EVT_CODE_W{1'b0}};
+      rd_outstand <= 0;
+      evt_hs <= 0;
+    end else begin
+      // (a) evt_valid && !evt_ready → next cycle evt_valid stays 1 and
+      // evt_code is unchanged.
+      if (prev_evt_valid && !prev_evt_ready) begin
+        if (!evt_valid) begin
+          $display("FAIL: evt_valid dropped under backpressure");
+          errors = errors + 1;
+        end
+        if (evt_code !== prev_evt_code) begin
+          $display("FAIL: evt_code changed under backpressure");
+          errors = errors + 1;
+        end
+      end
+      // (b) evt_valid implies evt_code != 0 (code 0 reserved).
+      if (evt_valid && evt_code === {EVT_CODE_W{1'b0}}) begin
+        $display("FAIL: evt_valid with reserved evt_code 0");
+        errors = errors + 1;
+      end
+      // (d) whenever mem2host_rd_valid: len==RD_LEN_8B, tag==RD_TAG_ZERO;
+      // at most one read outstanding (no new valid between accept and rsp).
+      if (mem2host_rd_valid) begin
+        if (mem2host_rd_len !== RD_LEN_8B[RD_LEN_W-1:0]) begin
+          $display("FAIL: mem2host_rd_valid with len != RD_LEN_8B");
+          errors = errors + 1;
+        end
+        if (mem2host_rd_tag !== RD_TAG_ZERO[RD_TAG_W-1:0]) begin
+          $display("FAIL: mem2host_rd_valid with tag != RD_TAG_ZERO");
+          errors = errors + 1;
+        end
+        if (rd_outstand != 0) begin
+          $display("FAIL: second mem2host_rd_valid while outstanding");
+          errors = errors + 1;
+        end
+      end
+      if (mem2host_rd_valid && mem2host_rd_ready)
+        rd_outstand <= 1;
+      if (mem2host_rd_rsp_valid && mem2host_rd_rsp_ready)
+        rd_outstand <= 0;
+      if (evt_valid && evt_ready)
+        evt_hs <= evt_hs + 1;
+      prev_evt_valid <= evt_valid;
+      prev_evt_ready <= evt_ready;
+      prev_evt_code <= evt_code;
     end
   end
 
@@ -391,6 +456,13 @@ module ub_mem_ptw_smoke_tb;
     errors = 0;
     cycles = 0;
     saw_rd = 0;
+    evt_hs = 0;
+    evt_seen = 0;
+    fill_seen = 0;
+    rd_outstand = 0;
+    prev_evt_valid = 1'b0;
+    prev_evt_ready = 1'b1;
+    prev_evt_code = {EVT_CODE_W{1'b0}};
     rst_pyc = 1'b1;
     mem2host_rd_rsp_valid = 1'b0;
     mem2host_rd_rsp_data = 512'b0;
@@ -496,18 +568,27 @@ module ub_mem_ptw_smoke_tb;
       end
     end
 
-    // MATT_WD=1: no table read, event, no fill, no translation fault.
+    // (c) ctx_matt_wd=1 miss: no mem2host_rd_valid, no fill_valid,
+    // exactly one event with evt_code == EVT_MATT_WD_MISS.
+    // Hold evt_ready to exercise (a), then complete one handshake.
     begin
       integer guard;
       integer rd_before;
+      integer hs_before;
       mem_reset;
       ctx_matt_wd = 1'b1;
+      evt_ready = 1'b0;
       rd_before = saw_rd;
+      hs_before = evt_hs;
       start_walk({16'b0, 36'h0A00_0008, 12'h000}, 6'd39);
       guard = 0;
       while (!evt_valid && guard <= 20) begin
         if (mem2host_rd_valid) begin
           $display("FAIL: MATT_WD issued table read");
+          errors = errors + 1;
+        end
+        if (fill_valid) begin
+          $display("FAIL: MATT_WD filled");
           errors = errors + 1;
         end
         tick;
@@ -517,20 +598,36 @@ module ub_mem_ptw_smoke_tb;
         $display("FAIL: MATT_WD produced no event");
         errors = errors + 1;
       end else begin
-        if (evt_code !== EVT_MATT_WD[3:0]) begin
-          $display("FAIL: evt_code %0d", evt_code);
+        if (evt_code !== EVT_MATT_WD_MISS[EVT_CODE_W-1:0]) begin
+          $display("FAIL: evt_code != EVT_MATT_WD_MISS");
           errors = errors + 1;
         end
-        if (fill_valid || flt_valid) begin
-          $display("FAIL: MATT_WD filled or faulted");
+        if (fill_valid || flt_valid || mem2host_rd_valid) begin
+          $display("FAIL: MATT_WD filled, faulted, or read");
           errors = errors + 1;
         end
         if (saw_rd !== rd_before) begin
           $display("FAIL: MATT_WD incremented table-read count");
           errors = errors + 1;
         end
+        repeat (3) tick;
+        if (!evt_valid || evt_code !== EVT_MATT_WD_MISS[EVT_CODE_W-1:0]) begin
+          $display("FAIL: MATT_WD event did not hold");
+          errors = errors + 1;
+        end
+        evt_ready = 1'b1;
+        tick;
+        if (evt_hs !== hs_before + 1) begin
+          $display("FAIL: MATT_WD event count %0d", evt_hs - hs_before);
+          errors = errors + 1;
+        end
+        tick;
+        if (evt_valid) begin
+          $display("FAIL: MATT_WD raised a second event");
+          errors = errors + 1;
+        end
       end
-      tick;
+      evt_ready = 1'b1;
       ctx_matt_wd = 1'b0;
       $display("MATT_WD event ok");
     end

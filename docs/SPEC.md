@@ -7,7 +7,7 @@
 | 本文件 M1 | 第一批：PHY/PCS/PMA 模型边界 / LMSM / DLL / 附录 D 端口子集。线 C 第 9 章首轮见 §14 |
 | 规范基线 | UB Base Specification Rev 2.0（2025-12-31），见 [DECISIONS.md](DECISIONS.md) D1。Rev 2.1 待船长确认 |
 | 阶段列 | [SPEC_INDEX.md](SPEC_INDEX.md)：`batch 1 (M1)` / `later batch` / `reference`。线 C 第 9 章首轮裁定见 §14 |
-| 模块清单 | [arch/MODULE_INVENTORY.md](arch/MODULE_INVENTORY.md)（77 模块；S12 / M34 / L31；M1 覆盖 20） |
+| 模块清单 | [arch/MODULE_INVENTORY.md](arch/MODULE_INVENTORY.md)（84 模块；S19 / M34 / L31；M1 覆盖 21） |
 | 层间契约 | [arch/LAYER_CONTRACTS.md](arch/LAYER_CONTRACTS.md) |
 | 权衡 | [arch/TRADEOFFS.md](arch/TRADEOFFS.md) **已定 D19**：线 A/B/C；优先 NW→TP→TA→LS；各层必做先；附录 M10 后。本包截止 **Tue 2026-10-13** |
 | 实现语言 | 产品 RTL 一律由 pyCircuit（pyc4.0）生成，见 [CODING_STYLE.md](CODING_STYLE.md)、D5/D6 |

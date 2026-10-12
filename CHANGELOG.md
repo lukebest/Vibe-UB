@@ -4,6 +4,7 @@
 
 ### Added
 
+- `docs/arch/MODULE_INVENTORY.md`：登记 `ub_pcs_nullblk_det`（线 A；出 `pcs2lmsm_null_blk` / `pcs2lmsm_rx_nonnull_blk` / `pcs2lmsm_tx_null_blk`，SPEC §3.3.4 / §6.1 / §13 A-23）。C 线六片解码叶子按 `docs/arch/mem/contracts/README.md` 对齐：`ub_mem_ptw_desc_dec` / `ub_mem_dec_ent_dec` / `ub_mem_tecte_dec` / `ub_mem_tcte_dec` / `ub_mem_l1tct_dec` / `ub_mem_mapte_dec`（S-01(b) 私有叶子，所有权 设计-C，契约 架构 Xia）。合计 **84** 模块，S19 / M34 / L31；M1 覆盖 21。
 - 门禁 S-01(b)：`scripts/gate/contract_check.py` 扫 `docs/arch/*/contracts/*.md`；`contract_hash.py` 对 YAML 映射做规范 sha256；`gen_private_stub.py` 写 `pycircuit/<layer>/stub/` 并经 pycc 出 `rtl/<layer>/stub/`；公开 attest 路径 `reports/private/<layer>/<leaf>.yml`。规则 `docs/rules/verif_gate.md` §12 GATE-CONTRACT-* / GATE-PRIV-*。
 - `docs/SPEC.md` §14：线 C 第 9 章（UMMU / 译码器）首轮裁定写入 MEM 章（船长 2026-10-12 09:05 / D20；S-01 落地见同日 09:20）。每条引用规范节与决策 ID。§10.5 按 C-D1 撤 `mem_dec_b0`…`mem_dec_b7`。docs-only。
 - `docs/arch/mem/contracts/`：C 线私有解码叶子公开信号契约（D20 S-01 (b)；docs-only）。

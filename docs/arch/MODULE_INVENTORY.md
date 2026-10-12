@@ -39,6 +39,7 @@
 | `ub_pcs_lane_dist` / `ub_pcs_lane_dedist` | A | §3.2.2.3、§3.2.5 | 必做。M1 **是** | FEC↔lane | S — 组合 8-bit 分发 | 无 | `N*32` | combo，无复位 | 无 | 无 |
 | `ub_pcs_amctl_tx` / `ub_pcs_amctl_rx` | A | §3.2.4、§3.2.3.1 | 必做。M1 **是** | PCS↔LMSM | L — eBCH、滑窗、EDF/SDF | `tb_inj_am_lock`（M1 保留）；obs 每 lane lock | 插入占用符号槽，不另开 PMA 口 | 同 | 滑窗/确认：深 **未知**，偏 FF | AM 间隔；锁定状态可进 STATUS |
 | `ub_pcs_deskew` | A | §3.2.3.1 | 必做（x>1）。M1 **是** | AMCTL RX→解扰 | M — 多 lane 对齐 | obs `deskew_ok` | 每 lane 32 b | 同 | 每 lane 弹性：深 **未知**；x8 时可能 SRAM。若走 stub：应当例化 `ub_cmn_mem_1r1w`；读 1 拍寄存、1R1W、同址 read-old（Xia 提案，非规范） | 无 |
+| `ub_pcs_nullblk_det` | A | §3.3.4、§6.1、§13 A-23 | 必做。M1 **是**。所有权：线 A 设计 | 上：PCS flit 旁路、`ub_pcs_amctl_rx`（`pcs_rx_sdf_seen`）；下：`ub_lmsm` | S — 观察 160 b flit、1 拍寄存脉冲 | 无产品钩子；接口断言 `pcs2lmsm_null_blk` 与 `pcs2lmsm_rx_nonnull_blk` 同拍互斥 | 观察 `pcs2dll_*` / `dll2pcs_*`；出 `pcs2lmsm_null_blk` / `pcs2lmsm_rx_nonnull_blk` / `pcs2lmsm_tx_null_blk`（各 1 bit、1 拍脉冲、复位 0） | 同 `core_clk` / `rst_pyc` | 无 | 无 |
 | `ub_pcs_interleave` / `ub_pcs_deinterleave` | A | §3.2.2.3、§3.2.3.4、§3.2.3.6 | 可选（延后）（CodecNum=2）。M1 **部分**（建议 1） | FEC 旁 | M — 交织排 | 无 | 同 FEC 符号 | 同 | 交织缓存 **未知** | `PARAM_FEC.CODEC_NUM` |
 | `ub_lmsm` | A | §3.4、§3.4.3 | 必做。M1 **是** | CSR / PCS / PMA / DLL | L — 10 主态+子态+定时器 | `tb_obs_lmsm_st`（仅顶层）、`tb_obs_link_up/ready`；`tb_inj_lid_bad`；`LMSM_TMR_SCALE` | 侧带电平+LMB 字段，非数据吞吐 | 同；超时周期=规范 ms×`F_CORE` | 定时器 32 b；无大缓冲 | `CTRL.LMSM_START`、`STATUS.LMSM_ST`/`LINK_*`、`CNT_TRAIN_TO`、`IRQ.TRAIN_FAIL`、`APPD_LMSM_ST`。上电：PHY ready 后写 `LMSM_START` |
 | `ub_pma_model` | A | §3.3、§3.4.3.2 | 必做行为模型，不进 ASIC。M1 **部分** | LMSM / PCS | M — 行为；高保真 **可选** | `pma_term_detect`/`phy_ready` 针脚；不 force 模拟态 | N×32 @ `F_CORE` | 仿真可与 `core_clk` 同拍 | 无产品 SRAM | 无产品 CSR |
@@ -133,15 +134,23 @@
 
 UMMU（Home）§9.4、UB decoder（User）§9.5、UBMD §9.3。查表结构大，**优先 SRAM**。延迟分配 MAY（§8.2.1.1）。大表钩子：每张表 backdoor 预载 + 回读，仅 HOOKS 网表；待与表格式一并写入 SPEC §10。
 
+C 线命名、所有权与公开/私有边界对齐 [mem/contracts/README.md](mem/contracts/README.md) 与 [mem/UARCH.md](mem/UARCH.md) §3。六片解码叶子为 S-01(b) 私有叶子（契约作者 架构 Xia，实现所有权 设计-C）。结构叶子公开，所有权 设计-C。私有叶子公开面为端口桩与本目录契约。
+
 | 模块 | 线 | 节号 | 必做 / 可选 | 上游 / 下游 | S/M/L | 可观察性 / 钩子 | 数据通路 / 吞吐 | 时钟复位 + 频率 | 存储 | 软件可见面 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ub_mem_ummu` | C | §9.4 | Home 内存访问必做 | TA 目标；表 | L — 查表流水 | obs 翻译/权限失败（Class 错，§10.6.2）。大表 backdoor 在子块 | UBA 64 b（§9.3）；PA 宽 **未知** | 建议 `core_clk`；表口频率 **未知** | 见子块 | UMMU 配置/失效 |
-| `ub_mem_cfg_lkup` | C | §9.4.2.1 | 必做 | UMMU | M | obs 配置未命中；每张大表 backdoor 预载 + 回读，经 `tb_<inst>_bd_we/addr/wdata`、`tb_<inst>_bd_re/rdata`（宽随表项格式，格式未关前 **未知**）；仅 HOOKS；见 SPEC §10.5 | 控制 | 同 | 配置表深 **未知 SRAM**。**须**例化 `ub_cmn_mem_1r1w`。stub 时序（Xia 提案，非规范）：读 1 拍寄存、1R1W、同址 read-old | 配置基址 |
-| `ub_mem_ctx_lkup` | C | §9.4.2.2 | 必做（线性/两级选一或都做：**未知**） | UMMU | L | obs TCT 未命中；每张大表 backdoor 预载 + 回读，经 `tb_<inst>_bd_we/addr/wdata`、`tb_<inst>_bd_re/rdata`（宽随表项格式，格式未关前 **未知**）；仅 HOOKS；见 SPEC §10.5 | 同 | 同 | TCT **SRAM**。**须**例化 `ub_cmn_mem_1r1w`。stub 时序（Xia 提案，非规范）：读 1 拍寄存、1R1W、同址 read-old | TCT 基/格式 |
-| `ub_mem_xlat` | C | §9.4.3 | 必做 | UBA→PA | L | obs 页失败；每张大表 backdoor 预载 + 回读，经 `tb_<inst>_bd_we/addr/wdata`、`tb_<inst>_bd_re/rdata`（宽随表项格式，格式未关前 **未知**）；仅 HOOKS；见 SPEC §10.5 | 同 | 同 | MATT **SRAM**。**须**例化 `ub_cmn_mem_1r1w`。stub 时序（Xia 提案，非规范）：读 1 拍寄存、1R1W、同址 read-old | 失效/填表 |
-| `ub_mem_perm` | C | §9.4.4 | 必做。委托软件 MAY | Token/MAPT | L | obs Token/排他/类型失败；每张大表 backdoor 预载 + 回读，经 `tb_<inst>_bd_we/addr/wdata`、`tb_<inst>_bd_re/rdata`（宽随表项格式，格式未关前 **未知**）；仅 HOOKS；见 SPEC §10.5 | Token 宽 **未知** | 同 | MAPT **SRAM**。**须**例化 `ub_cmn_mem_1r1w`。stub 时序（Xia 提案，非规范）：读 1 拍寄存、1R1W、同址 read-old | 权限失效（与 §11.4 交叠） |
-| `ub_mem_decoder` | C★ | §9.5、§8.3 | User LS 必做 | PA→UBMD | M | obs 翻译失败；每张大表 backdoor 预载 + 回读，经 `tb_<inst>_bd_we/addr/wdata`、`tb_<inst>_bd_re/rdata`（宽随表项格式，格式未关前 **未知**）；仅 HOOKS；见 SPEC §10.5 | PA→EID+TokenID+UBA | 同 | 解码表 **SRAM 候选**。**须**例化 `ub_cmn_mem_1r1w`。stub 时序（Xia 提案，非规范）：读 1 拍寄存、1R1W、同址 read-old | 用户侧映射 |
-| `ub_mem_ubmd` | C | §9.3 | 描述符格式；可并入上列 | 各内存口 | S | 无 | EID/TokenID 宽 **未知**；UBA 64 b | 同 | 无 | 无 |
+| `ub_mem_ummu` | C | §9.4 | Home 内存访问必做。公开结构；所有权 设计-C | TA 目标；表 | L — 查表流水 | obs 翻译/权限失败（Class 错，§10.6.2）。大表 backdoor 在子块 | UBA 64 b（§9.3）；PA 宽 **未知** | 建议 `core_clk`；表口频率 **未知** | 见子块 | UMMU 配置/失效 |
+| `ub_mem_cfg_lkup` | C | §9.4.2.1 | 必做。公开结构；所有权 设计-C | UMMU；例化 `ub_mem_tecte_dec` | M | obs 配置未命中；每张大表 backdoor 预载 + 回读，经 `tb_<inst>_bd_we/addr/wdata`、`tb_<inst>_bd_re/rdata`（宽随表项格式，格式未关前 **未知**）；仅 HOOKS；见 SPEC §10.5 | 控制 | 同 | 配置表深 **未知 SRAM**。**须**例化 `ub_cmn_mem_1r1w`。stub 时序（Xia 提案，非规范）：读 1 拍寄存、1R1W、同址 read-old | 配置基址 |
+| `ub_mem_tecte_dec` | C | §9.4.2.1；契约 `ub_mem_tecte_dec.md` | 必做。S-01(b) 私有叶子；所有权 设计-C；契约 架构 Xia | 上：CSR 写 TECT；父级 `ub_mem_cfg_lkup` | S — TECTE 解码，1 拍寄存 | 公开契约口；原始表项切分在独立私有仓库 | `raw` 512；出 `cfg_*` 束 | 同 `core_clk` / `rst_pyc` | 无 | 无 |
+| `ub_mem_ctx_lkup` | C | §9.4.2.2 | 必做（线性/两级选一或都做：**未知**）。公开结构；所有权 设计-C | UMMU；例化 `ub_mem_tcte_dec`、`ub_mem_l1tct_dec` | L | obs TCT 未命中；每张大表 backdoor 预载 + 回读，经 `tb_<inst>_bd_we/addr/wdata`、`tb_<inst>_bd_re/rdata`（宽随表项格式，格式未关前 **未知**）；仅 HOOKS；见 SPEC §10.5 | 同 | 同 | TCT **SRAM**。**须**例化 `ub_cmn_mem_1r1w`。stub 时序（Xia 提案，非规范）：读 1 拍寄存、1R1W、同址 read-old | TCT 基/格式 |
+| `ub_mem_tcte_dec` | C | §9.4.2.2.2；契约 `ub_mem_tcte_dec.md` | 必做。S-01(b) 私有叶子；所有权 设计-C；契约 架构 Xia | 上：TCT 填充；父级 `ub_mem_ctx_lkup` | S — TCTE 解码，1 拍寄存 | 公开契约口；原始表项切分在独立私有仓库 | `raw` 512；出 `ctx_*` 束；`ILL_MAP_2MB` 只对应 TCTE 范围表 2 MB 颗粒度 | 同 `core_clk` / `rst_pyc` | 无 | 无 |
+| `ub_mem_l1tct_dec` | C | §9.4.2.2.3；契约 `ub_mem_l1tct_dec.md` | 必做。S-01(b) 私有叶子；所有权 设计-C；契约 架构 Xia | 上：两级 TCT；父级 `ub_mem_ctx_lkup` | S — L1 TCT 描述符解码，1 拍寄存 | 公开契约口；原始表项切分在独立私有仓库 | `raw` 64；出 `l1tct_*` 束 | 同 `core_clk` / `rst_pyc` | 无 | 无 |
+| `ub_mem_xlat` | C | §9.4.3 | 必做。公开结构父级（`ub_mem_tlb` + `ub_mem_ptw`）；所有权 设计-C | UBA→PA；`ub_mem_ptw` 例化 `ub_mem_ptw_desc_dec` | L | obs 页失败；每张大表 backdoor 预载 + 回读，经 `tb_<inst>_bd_we/addr/wdata`、`tb_<inst>_bd_re/rdata`（宽随表项格式，格式未关前 **未知**）；仅 HOOKS；见 SPEC §10.5 | 同 | 同 | MATT **SRAM**。**须**例化 `ub_cmn_mem_1r1w`。stub 时序（Xia 提案，非规范）：读 1 拍寄存、1R1W、同址 read-old | 失效/填表 |
+| `ub_mem_ptw_desc_dec` | C | §9.4.3；契约 `ub_mem_ptw_desc_dec.md` | 必做。S-01(b) 私有叶子；所有权 设计-C；契约 架构 Xia | 上：`ub_mem_ptw`（TLB 回填 / 页表遍历） | S — 页表描述符解码，1 拍寄存 | 公开契约口；原始表项切分在独立私有仓库 | `raw` 64；`AP_PTW_KIND`：`desc_v` 当且仅当 `desc_kind≠0` | 同 `core_clk` / `rst_pyc` | 无 | 无 |
+| `ub_mem_perm` | C | §9.4.4 | 必做。委托软件 MAY。公开结构父级（`ub_mem_plb` + `ub_mem_perm_walk` + `ub_mem_perm_cmp`）；所有权 设计-C | Token/MAPT；`ub_mem_perm_walk` / `ub_mem_plb` 例化 `ub_mem_mapte_dec` | L | obs Token/排他/类型失败；每张大表 backdoor 预载 + 回读，经 `tb_<inst>_bd_we/addr/wdata`、`tb_<inst>_bd_re/rdata`（宽随表项格式，格式未关前 **未知**）；仅 HOOKS；见 SPEC §10.5 | Token 宽 **未知** | 同 | MAPT **SRAM**。**须**例化 `ub_cmn_mem_1r1w`。stub 时序（Xia 提案，非规范）：读 1 拍寄存、1R1W、同址 read-old | 权限失效（与 §11.4 交叠） |
+| `ub_mem_mapte_dec` | C | §9.4.4.2；契约 `ub_mem_mapte_dec.md` | 必做。S-01(b) 私有叶子；所有权 设计-C；契约 架构 Xia | 上：`ub_mem_perm_walk` / `ub_mem_plb` | S — MAPTE 解码，1 拍寄存 | 公开契约口；原始表项切分在独立私有仓库 | `raw` 256；出 `mapte_*` 束 | 同 `core_clk` / `rst_pyc` | 无 | 无 |
+| `ub_mem_decoder` | C★ | §9.5、§8.3 | User LS 必做。公开结构父级（`ub_mem_dec_walk` + `ub_mem_dec_tlb` + `ub_mem_dec_uba`）；所有权 设计-C | PA→UBMD；`ub_mem_dec_walk` 例化 `ub_mem_dec_ent_dec` | M | obs 翻译失败；每张大表 backdoor 预载 + 回读，经 `tb_<inst>_bd_we/addr/wdata`、`tb_<inst>_bd_re/rdata`（宽随表项格式，格式未关前 **未知**）；仅 HOOKS；见 SPEC §10.5 | PA→EID+TokenID+UBA | 同 | 解码表 **SRAM 候选**。**须**例化 `ub_cmn_mem_1r1w`。stub 时序（Xia 提案，非规范）：读 1 拍寄存、1R1W、同址 read-old | 用户侧映射 |
+| `ub_mem_dec_ent_dec` | C | §9.5.1；契约 `ub_mem_dec_ent_dec.md` | 必做。S-01(b) 私有叶子；所有权 设计-C；契约 架构 Xia | 上：`ub_mem_dec_walk`（已寄存的 L0/L1 读回） | S — 译码器表项解码，L0/L1 各 1 拍寄存 | 公开契约口；原始表项切分在独立私有仓库 | L0 `raw` 512；L1 宽见契约 §5 暂缓；出 `dent_*` 束 | 同 `core_clk` / `rst_pyc` | 无 | 无 |
+| `ub_mem_ubmd` | C | §9.3 | 描述符格式；可并入上列。公开解码；所有权 设计-C | 各内存口 | S | 无 | EID/TokenID 宽 **未知**；UBA 64 b | 同 | 无 | 无 |
 
 ---
 
@@ -197,17 +206,17 @@ UBFM 本体是域管理器（§2.2），**不是** 本控制器必做 RTL；控�
 | 层 | 线 | 章 | 模块数 | S | M | L | M1 已覆盖（是/部分） |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 公共 | A/B/C | — | 4 | 2 | 2 | 0 | 4 |
-| PHY | A | 3 | 9 | 1 | 4 | 4 | 9（交织部分） |
+| PHY | A | 3 | 10 | 2 | 4 | 4 | 10（交织部分） |
 | DLL | A | 4 | 7 | 1 | 4 | 2 | 7 |
 | NW | A | 5 | 9 | 2 | 5 | 2 | 0 |
 | TP | B | 6 | 8 | 2 | 1 | 5 | 0 |
 | TA | B | 7 | 8 | 1 | 5 | 2 | 0 |
 | FUN | B | 8 | 7 | 0 | 3 | 4 | 0 |
-| MEM | C | 9 | 7 | 1 | 2 | 4 | 0 |
+| MEM | C | 9 | 13 | 7 | 2 | 4 | 0 |
 | RSC | C | 10 | 9 | 1 | 5 | 3 | 0（CSR 窗仅端口子集） |
 | SEC | C | 11 | 5 | 0 | 1 | 4 | 0 |
 | 附录管理 | 延后（M10+） | F/G/E | 4 | 1 | 2 | 1 | 0 |
-| **合计** | | | **77** | **12** | **34** | **31** | **20** |
+| **合计** | | | **84** | **19** | **34** | **31** | **21** |
 
 ★ = 优先通路（NW→TP→TA→LS）争资源时赢。`ub_mem_decoder` 属线 C，最小表可提前服务优先通路。
 

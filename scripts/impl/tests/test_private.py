@@ -131,7 +131,8 @@ COMBO_NETLIST = """module ub_qs_priv_combo (
   input [3:0] raw,
   output [3:0] dec
 );
-  assign dec = raw ^ 4'h5;
+  // All bits through cells — avoid Yosys concat-LHS that OpenSTA 2.0 rejects.
+  assign dec = ~raw;
 endmodule
 """
 

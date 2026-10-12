@@ -18,6 +18,7 @@ Usage: scripts/impl/quick_synth.sh [--ref GIT_REF | --work-tree DIR] [options]
        scripts/impl/quick_synth.sh --attest LEAF --contract FILE --netlist FILE --out FILE
 
   --ref REF                 synthesize this git ref (git archive; does not checkout)
+  --repo DIR                repository root (default: this checkout)
   --work-tree DIR           synthesize this tree instead
   --base REF                diff base for default tops (default: origin/main)
   --tops m1,m2              top modules (default: rtl/<block>/*.v leaves touched vs --base)
@@ -61,6 +62,7 @@ EOF
 
 OUT=""
 REF=""
+REPO_ARG=""
 WORK_TREE=""
 BASE="origin/main"
 TOPS=""
@@ -81,6 +83,7 @@ SCRATCH="${QS_SCRATCH:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --ref) REF="${2:-}"; shift 2 ;;
+    --repo) REPO_ARG="${2:-}"; shift 2 ;;
     --work-tree) WORK_TREE="${2:-}"; shift 2 ;;
     --base) BASE="${2:-}"; shift 2 ;;
     --tops) TOPS="${2:-}"; shift 2 ;;
@@ -160,6 +163,9 @@ if [[ "$SELF_CHECK" -eq 1 ]]; then
   exec python3 "${SCRIPT_DIR}/tests/test_private.py"
 fi
 
+if [[ -n "$REPO_ARG" ]]; then
+  REPO_ROOT="$(cd "$REPO_ARG" && pwd)"
+fi
 py=(python3 "${SCRIPT_DIR}/quick_synth.py" --repo "$REPO_ROOT" --base "$BASE")
 if [[ -n "$OUT" ]]; then
   py+=(--out "$OUT")

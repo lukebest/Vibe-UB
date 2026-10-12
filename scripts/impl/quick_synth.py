@@ -2408,12 +2408,21 @@ def main(argv: list[str] | None = None) -> int:
 
     cleanup: Path | None = None
     head_sha = None
-    if args.work_tree:
+
+    def maybe_head() -> str | None:
+        cp = run(["git", "rev-parse", "HEAD"], cwd=repo)
+        if cp.returncode != 0:
+            return None
+        return (cp.stdout or "").strip() or None
+
+    if args.attest:
+        tree = (args.work_tree or repo).resolve()
+    elif args.work_tree:
         tree = args.work_tree.resolve()
         if args.ref:
             head_sha = resolve_ref(repo, args.ref)
         else:
-            head_sha = git(repo, "rev-parse", "HEAD").strip()
+            head_sha = maybe_head()
     elif args.ref:
         head_sha = resolve_ref(repo, args.ref)
         cleanup = Path(tempfile.mkdtemp(prefix="quick_synth_"))
@@ -2421,7 +2430,9 @@ def main(argv: list[str] | None = None) -> int:
         tree = cleanup
     else:
         tree = repo
-        head_sha = git(repo, "rev-parse", "HEAD").strip()
+        head_sha = maybe_head()
+        if head_sha is None:
+            die("git rev-parse HEAD failed (pass --work-tree for a non-git tree)")
 
     try:
         extra_incdirs = list(parse_incdirs_env(os.environ.get("QS_INCDIRS")))
@@ -2518,11 +2529,11 @@ def main(argv: list[str] | None = None) -> int:
         mem_catalog = build_mem_catalog(tree, args.sram_bit_threshold, bb_entries)
 
         versions = tool_versions(liberty, liberty_meta)
-        jobs: list[tuple[str, str, Path, dict[str, str] | None]] = []
+        jobs: list[tuple[str, str, Path | None, dict[str, str] | None]] = []
         for top in live_tops:
             rec = leaves.get(top)
             if not rec or ("product" not in rec and "hooks" not in rec):
-                jobs.append((top, "PRODUCT", Path(), None))
+                jobs.append((top, "PRODUCT", None, None))
                 continue
             override = dict(ch_global)
             override.update(ch_per.get(top, {}))
@@ -2534,7 +2545,7 @@ def main(argv: list[str] | None = None) -> int:
 
         results: list[dict[str, Any]] = list(deleted_rows)
         for top, variant, src, extra in jobs:
-            if not src:
+            if src is None or not src.is_file():
                 results.append(
                     {
                         "top": top,

@@ -17,15 +17,14 @@
 #           backpressured table-read then accept
 #   bmc   — port safety (Q-A08 / Q-C07) + AP_TBLRD_REQ_HOLD (SPEC §14)
 #           depth 24 (two full walks + margin; >= deepest cover + 6)
-# prove is defined but not tagged `default` (gatekeeper: not fully
-# proven — not a waiver). Manual: `sby -f ub_mem_ptw.sby prove`.
-# Status vs #48 7f35b31: cover PASS; bmc 24 PASS (1s); prove
-# UNKNOWN (induction FAIL a_matt_no_fill at k=20, 1s) — not default.
-# Hole is multi-hot st_* (pyc_reg_45[5:0]); needs HOOKS obs_st.
-# HOOKS prove converged (see ub_mem_ptw_hooks.sby).
-# State auxiliaries live only in ub_mem_ptw_hooks.sby (#55), on a
-# fully free decoder cut. Encoding table is SPEC §10. Hooks-port
-# registration lands in #50.
+# prove stays untagged. Manual: `sby -f ub_mem_ptw.sby prove`.
+# Fully proven via HOOKS prove + PRODUCT≡HOOKS equivalence when CI
+# `ub_mem_ptw` equiv is a real PASS (not SKIP/PRIVATE_SKIP) covering
+# all PRODUCT outputs except tb_*. Otherwise: bmc 24 PASS, prove
+# not converged.
+# Local: cover PASS; bmc 24 PASS 1s; prove UNKNOWN (induction FAIL
+# a_matt_no_fill, k=20, 1s) — multi-hot st_* needs HOOKS obs_st.
+# HOOKS prove PASS k=20 ~1s (default). Encoding table is SPEC §10.
 #
 # [files] are relative to this directory (sby_dir = formal/mem/).
 

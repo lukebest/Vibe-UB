@@ -11,8 +11,11 @@
 # no legal next falls back to st_idle. a_st_legal / a_rd_pend_st are
 # checked on that free cut (no contract assumes).
 #
-# Default tasks: cover + bmc 24 + prove. prove converged (k=20,
-# 1s, yices) after tracker/obs consistency asserts. Assert-only.
+# Default tasks: cover + bmc 24 + prove. prove PASS k=20 ~1s
+# (yices) after tracker/obs consistency asserts. Assert-only.
+# PRODUCT is fully proven via this prove + PRODUCT≡HOOKS when CI
+# `ub_mem_ptw` equiv is a real PASS (not SKIP/PRIVATE_SKIP) on all
+# PRODUCT outputs except tb_*.
 # hooks-port-consistency may be red until #50 registers the ports.
 
 [tasks]

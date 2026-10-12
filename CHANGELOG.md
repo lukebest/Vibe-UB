@@ -4,6 +4,7 @@
 
 ### Added
 
+- 实现 quick-synth：私有叶子契约发现、公开 CI `PRIVATE_SKIP` 黑盒、attest 模式（公开 `reports/private/<layer>/<leaf>.yml`，私有仓 `attest/<layer>/<leaf>.yml`）。
 - `docs/arch/mem/contracts/`：C 线私有解码叶子公开信号契约（D20 S-01 (b)；docs-only）。
 - `tb/models/ub_pcs_fec.py`：RS(128,120) FEC 编解码黄金模型（UB-PHY §3.2.2.1 / §3.2.3.5，SPEC §2.4 `ub_pcs_fec_enc` / `ub_pcs_fec_dec`；T=4 / T=2 / bypass）。
 - `scripts/impl/buffer_fanout.py`：Yosys JSON 上确定性 `buf_4`/`buf_8` 扇出树（quick-synth 默认在 abc 之后调用）。

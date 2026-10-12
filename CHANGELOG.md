@@ -4,7 +4,8 @@
 
 ### Added
 
-- `pycircuit/tp/ub_tp_bypass.py` → `rtl/tp/` 与 `rtl/tp/hooks/`：wave-1 CFG9 bypass 叶（LAYER_CONTRACTS §2/§3；160 b、1 flit/拍、valid/ready；优先通路 16 b DCNA；无 ICRC / RTP / CTP / GBN）。`scripts/emit_rtl.py` / `make emit` 再现。SPEC §10 无 `tb_*`，PRODUCT 与 HOOKS 端口相同。未知宽口不引出，见 `docs/uarch/tp_uarch.md` §11。`formal/tp/` 接口断言；`tb/tp/` 端口自检（无 `model/tp/`）。
+- `pycircuit/tp/ub_tp_bypass.py` → `rtl/tp/` 与 `rtl/tp/hooks/`：wave-1 CFG9 bypass 叶（LAYER_CONTRACTS §2/§3；160 b、1 flit/拍、valid/ready；优先通路 16 b DCNA；无 ICRC / RTP / CTP / GBN）。`scripts/emit_rtl.py` / `make emit` 再现。SPEC §10 无 `tb_*`，PRODUCT 与 HOOKS 端口相同。未知宽口不引出，见 `docs/uarch/tp_uarch.md` §11。`formal/tp/` 接口断言；`tb/tp/` 端口自检。
+- `model/tp/ub_tp_bypass.py`：CFG9 bypass 传输事务级黄金模型（契约 §2/§3，UB §6.3.2）；净荷直通、无 TPH；TA 字段映到 NW 边带；err/flush/drop 按契约传播。测试在 `model/tests/`。
 - `docs/uarch/tp_uarch.md`：线 B 第 6 章传输层微架构草案 v0（8 模块；对照 LAYER_CONTRACTS / MODULE_INVENTORY 的 M-1..M-9；15 条开放问题待 Xia）。`RETRY_WAIT_CYC` / `PROBE_WAIT_CYC`（323 拍）归 DLL / LMSM。docs-only。
 - 实现 quick-synth：私有叶子契约发现、公开 CI `PRIVATE_SKIP` 黑盒、attest 模式（公开 `reports/private/<layer>/<leaf>.yml`，私有仓 `attest/<layer>/<leaf>.yml`）。
 - `pycircuit/cmn/ub_cmn_mem_1r1w.py` → `rtl/cmn/` 与 `rtl/cmn/hooks/` 的 `ub_cmn_mem_1r1w_{d5w8,d8w16,d64w64m16}.v`：pycc 固定网表（SPEC §2.2，`d<DEPTH>w<WIDTH>`，N>1 加 `m<WMASK_W>`）。PRODUCT=`TEST_HOOKS=0`，HOOKS=`TEST_HOOKS=1`；§10 无 `tb_*`，两套端口与模块名相同。时钟 `core_clk`；无复位口（业务叶标准名 `rst_pyc`，本原语不引出）。生成参数 `WMASK_W`（默认 = `WIDTH`，整字写；`WIDTH` 须整除）；N=`WIDTH/WMASK_W`>1 时多 `wmask[N-1:0]`，bit i 写段 i，其余段保持；同址同拍 per-segment read-old。1R1W、读 1 拍；阵列与 `rdata` 无复位 / 无零初始化；越界不截断。`scripts/emit_rtl.py` / `make emit` 再现。较大 C 线变体（如 `d512w512m64`）不在本登记表，可经清单流后补。pycc 运行时原语（`pyc_reg.v`）只放 `rtl/pyc_lib/`，从 TOOLCHAIN 钉住的 pyCircuit（`43cc5918`）原样拷贝；层目录不再放 `pyc_*`。

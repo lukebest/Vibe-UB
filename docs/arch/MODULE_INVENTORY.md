@@ -84,7 +84,7 @@ LMSM 进入 `Send_NullBlock` 当拍 **s**（状态寄存器更新于 s）；`lms
 
 ## `ub_pcs_amctl_rx`
 
-SPEC §2.4 已点名该叶子。main 无 `pycircuit/` / `rtl/` 实现。与 `ub_pcs_nullblk_det` **同一次 RTL PR** 交付。下列端口、锁定、识别、SDF 均为 **Xia 裁定 2026-10-12**（出处：UB-PHY §3.2.4.2 AMCTL Structure、表 3-7..3-10、「AMCTL Identification Mechanism」、§3.2.4.4）。公开文本只写语义与节/表号；**不**抄码字取值、CW 编号、符号下标区间。
+SPEC §2.4 已点名该叶子。main 无 `pycircuit/` / `rtl/` 实现。与 `ub_pcs_nullblk_det` **同一次 RTL PR** 交付。静态例化 `NUM_LANES_RX` 份 `ub_pcs_amctl_cw_dec`（单 lane；编号 ≥ `pma_rx_width` 忽略）。下列端口、锁定、识别、SDF 均为 **Xia 裁定 2026-10-12**（出处：UB-PHY §3.2.4.2 AMCTL Structure、表 3-7..3-10、「AMCTL Identification Mechanism」、§3.2.4.4）。公开文本只写语义与节/表号；**不**抄码字取值、CW 编号、符号下标区间。
 
 ### 完备性核对（设计写叶用）
 

@@ -64,7 +64,7 @@ from mem.lib.walk import (
 )
 
 
-def _ptw_body(m: Circuit) -> None:
+def _ptw_body(m: Circuit, test_hooks: int = 0) -> None:
     clk = m.clock("core_clk")
     rst = m.reset("rst_pyc")
 
@@ -297,6 +297,21 @@ def _ptw_body(m: Circuit) -> None:
     m.output("evt_code", evt_code_q.out())
     m.output("busy", ~idle)
 
+    if test_hooks != 0:
+        # HOOKS 只读观察，不受 tb_test_mode 门控（SPEC §10）。
+        m.output(
+            "tb_mem_ptw_obs_st",
+            m.cat(
+                st_evt.out(),
+                st_flt.out(),
+                st_fill.out(),
+                st_dec.out(),
+                st_rd.out(),
+                st_idle.out(),
+            ),
+        )
+        m.output("tb_mem_ptw_obs_rd_pend", rd_valid_q.out())
+
 
 @module(name="ub_mem_ptw")
 def build(m: Circuit, test_hooks: int = 0) -> None:
@@ -304,7 +319,7 @@ def build(m: Circuit, test_hooks: int = 0) -> None:
     if test_hooks != 0:
         if test_hooks != 1:
             raise ValueError("test_hooks must be 0 or 1")
-    _ptw_body(m)
+    _ptw_body(m, test_hooks=test_hooks)
 
 
 build.__pycircuit_name__ = "ub_mem_ptw"

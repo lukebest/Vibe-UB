@@ -2,7 +2,8 @@
 # Self-check for C-line ub_mem_tlb / ub_mem_inv / ub_mem_ptw:
 #   * every leaf has PRODUCT + HOOKS
 #   * PRODUCT has no tb_* ports
-#   * tlb HOOKS has §10 obs + mem_tlb_wN backdoors; inv HOOKS has no tb_*
+#   * tlb HOOKS has §10 obs + mem_tlb_wN backdoors; inv HOOKS has no tb_*;
+#     ptw HOOKS has obs_st / obs_rd_pend (SPEC §10; registered in #50)
 #   * pycc regen is byte-identical for all four netlists
 #   * Verilator lint (PRODUCT + HOOKS)
 #   * Yosys synth (PRODUCT, primitive black-boxed)
@@ -73,8 +74,8 @@ if grep -E '^\s*(input|output).*tb_' "$RTL/ub_mem_tlb.v" "$RTL/ub_mem_inv.v" "$R
   echo "FAIL: PRODUCT must not have tb_* ports"
   exit 1
 fi
-if grep -E '^\s*(input|output).*tb_' "$HOOKS/ub_mem_inv.v" "$HOOKS/ub_mem_ptw.v"; then
-  echo "FAIL: inv/ptw HOOKS must not have tb_* (SPEC §10 lists none)"
+if grep -E '^\s*(input|output).*tb_' "$HOOKS/ub_mem_inv.v"; then
+  echo "FAIL: inv HOOKS must not have tb_* (SPEC §10 lists none)"
   exit 1
 fi
 python3 - "$RTL/ub_mem_inv.v" "$HOOKS/ub_mem_inv.v" <<'PY'
@@ -105,10 +106,19 @@ def ports(path):
         raise SystemExit(f"no ub_mem_ptw port list in {path}")
     return [re.sub(r"\s+", " ", p).strip() for p in m.group(1).split(",") if p.strip()]
 a, b = ports(sys.argv[1]), ports(sys.argv[2])
-if a != b:
-    print("FAIL: ub_mem_ptw HOOKS ports != PRODUCT")
+extra = ["output [5:0] tb_mem_ptw_obs_st", "output tb_mem_ptw_obs_rd_pend"]
+shared = [p for p in b if "tb_" not in p]
+if shared != a:
+    print("FAIL: ub_mem_ptw HOOKS shared ports != PRODUCT")
     sys.exit(1)
-print("ub_mem_ptw HOOKS ports == PRODUCT (%d ports)" % len(a))
+if b != a + extra:
+    print("FAIL: ub_mem_ptw HOOKS extras != obs_st / obs_rd_pend")
+    print("  HOOKS", b)
+    sys.exit(1)
+if len(a) != 45:
+    print("FAIL: ub_mem_ptw PRODUCT port count %d != 45" % len(a))
+    sys.exit(1)
+print("ub_mem_ptw PRODUCT %d ports; HOOKS +%d obs" % (len(a), len(extra)))
 PY
 if find "$RTL" -name 'pyc_*.v' | grep -q .; then
   echo "FAIL: pyc_* runtime must live in rtl/pyc_lib/ (#21), not rtl/mem/"
@@ -132,6 +142,12 @@ for p in \
 do
   if ! grep -q "$p" "$HOOKS/ub_mem_tlb.v"; then
     echo "FAIL: tlb HOOKS missing $p"
+    exit 1
+  fi
+done
+for p in tb_mem_ptw_obs_st tb_mem_ptw_obs_rd_pend; do
+  if ! grep -q "$p" "$HOOKS/ub_mem_ptw.v"; then
+    echo "FAIL: ptw HOOKS missing $p"
     exit 1
   fi
 done
@@ -432,8 +448,45 @@ YS
 ( cd "$WORK" && yosys -q -s equiv_inv.ys )
 echo "equiv ok (ub_mem_inv PRODUCT ≡ HOOKS)"
 
-echo "=== yosys equiv ub_mem_ptw PRODUCT vs HOOKS (no tb_*) ==="
+echo "=== yosys equiv ub_mem_ptw PRODUCT vs HOOKS (shared ports) ==="
 strip_include "$HOOKS/ub_mem_ptw.v" "$WORK/ptw_hooks.v"
+python3 - "$WORK/ptw_hooks.v" "$WORK/ptw_hooks_prodports.v" <<'PY'
+import re
+import sys
+
+src, dst = sys.argv[1], sys.argv[2]
+text = open(src, encoding="utf-8").read()
+m = re.search(r"module\s+ub_mem_ptw\s*\((.*?)\);", text, re.S)
+if not m:
+    raise SystemExit("no ub_mem_ptw port list")
+body_start = m.end()
+ports = []
+for raw in m.group(1).split(","):
+    line = " ".join(raw.split())
+    if not line:
+        continue
+    ports.append(line)
+
+prod, tied = [], []
+for p in ports:
+    if re.search(r"\btb_", p):
+        mm = re.match(r"(input|output)\s*(?:\[(\d+):(\d+)\]\s*)?(\w+)$", p)
+        if not mm:
+            raise SystemExit("cannot parse port: " + p)
+        direc, msb, lsb, name = mm.group(1), mm.group(2), mm.group(3), mm.group(4)
+        if direc != "output":
+            raise SystemExit("ptw HOOKS tb_* must be output: " + p)
+        if msb is None:
+            tied.append(f"  wire {name};")
+        else:
+            tied.append(f"  wire [{msb}:{lsb}] {name};")
+    else:
+        prod.append("  " + p)
+new_mod = "module ub_mem_ptw (\n" + ",\n".join(prod) + "\n);\n" + "\n".join(tied) + "\n"
+text = text[: m.start()] + new_mod + text[body_start:]
+open(dst, "w", encoding="utf-8").write(text)
+print("rewrote ptw HOOKS to PRODUCT ports:", dst)
+PY
 cat > "$WORK/equiv_ptw.ys" <<'YS'
 read_verilog pyc_reg.v
 read_verilog ptw_prod.v
@@ -444,7 +497,7 @@ opt -purge
 opt
 design -stash gold
 read_verilog pyc_reg.v
-read_verilog ptw_hooks.v
+read_verilog ptw_hooks_prodports.v
 hierarchy -check -top ub_mem_ptw
 proc
 flatten
@@ -461,6 +514,6 @@ equiv_induct -seq 16
 equiv_status -assert
 YS
 ( cd "$WORK" && yosys -q -s equiv_ptw.ys )
-echo "equiv ok (ub_mem_ptw PRODUCT ≡ HOOKS)"
+echo "equiv ok (ub_mem_ptw PRODUCT ≡ HOOKS shared ports)"
 
 echo "ALL CHECKS PASSED"

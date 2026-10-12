@@ -1,0 +1,79 @@
+# Draft lint waivers for the PCS AMCTL / Null Block RTL PR.
+# Not loaded (waivers/pending/). approver: TODO — 待守门人批准.
+#
+# Fields match waivers/README.md. Move into waivers/lint.yml only after
+# a gatekeeper writes GATE-WAIVER-APPROVED: waivers/lint.yml.
+
+waivers:
+  - id: WAIVER_PCS_NULLBLK_NB_PHASE
+    check: lint
+    module: ub_pcs_nullblk_det
+    file: rtl/pcs/ub_pcs_nullblk_det.v
+    rule: UNUSEDSIGNAL
+    message: "lmsm2pcs_nb_phase"
+    reason: >-
+      MODULE_INVENTORY ub_pcs_nullblk_det：lmsm2pcs_nb_phase 本叶只读作对照；
+      SDF 置位/清零在 ub_pcs_amctl_rx。产品三路脉冲不消费该口。
+      待守门人批准。
+    approver: TODO
+    status: pending
+    approved_date: ""
+    review_when: Xia 裁定本叶是否必须消费 nb_phase
+
+  - id: WAIVER_PCS_AMCTL_RX_DESKEW
+    check: lint
+    module: ub_pcs_amctl_rx
+    file: rtl/pcs/ub_pcs_amctl_rx.v
+    rule: UNUSEDSIGNAL
+    message: "pcs_deskew_ok"
+    reason: >-
+      清单端口表列了 pcs_deskew_ok；分 lane 锁定 / SDF / LID 不消费 deskew
+      （deskew 是兄叶子 ub_pcs_deskew）。待守门人批准。
+    approver: TODO
+    status: pending
+    approved_date: ""
+    review_when: Xia 裁定 amctl_rx 是否用 deskew 限定锁定
+
+  - id: WAIVER_PCS_CWDEC_STUB_UNUSED
+    check: lint
+    module: ub_pcs_amctl_cw_dec
+    file: rtl/pcs/stub/ub_pcs_amctl_cw_dec.v
+    rule: UNUSEDSIGNAL
+    message: "word|word_vld|core_clk|rst_pyc"
+    reason: >-
+      S-01(b) 公开端口桩（compile+pycc，头由 gen_private_stub 契约 hash）
+      输出恒 0，时钟/复位/输入无负载。私有叶进独立仓库后撤。待守门人批准。
+    approver: TODO
+    status: pending
+    approved_date: ""
+    review_when: private netlist replaces the public stub
+
+  - id: WAIVER_PCS_CWDEC_STUB_UNUSED_LAYER
+    check: lint
+    module: ub_pcs_amctl_cw_dec
+    file: rtl/pcs/ub_pcs_amctl_cw_dec.v
+    rule: UNUSEDSIGNAL
+    message: "word|word_vld|core_clk|rst_pyc"
+    reason: >-
+      同 WAIVER_PCS_CWDEC_STUB_UNUSED。清单路径 rtl/pcs/ub_pcs_amctl_cw_dec.v
+      与 GATE-PRIV-002 的 rtl/pcs/stub/ 各一份相同桩，供 discover_rtl 闭合父叶。
+      待守门人批准。
+    approver: TODO
+    status: pending
+    approved_date: ""
+    review_when: private netlist replaces the public stub
+
+  - id: WAIVER_PCS_NULLBLK_FLIT_UNUSED
+    check: lint
+    module: ub_pcs_nullblk_det
+    file: rtl/pcs/ub_pcs_nullblk_det.v
+    rule: UNUSEDSIGNAL
+    message: "pcs2dll_data|dll2pcs_data"
+    reason: >-
+      公开树未给 Null Block 位下标（MODULE_INVENTORY：不抄其余位布局）。
+      占位只取低 9 bit（BLK_TYPE[3:0]+CLENGTH[4:0]）。[159:9] 无负载属预期。
+      待守门人批准。
+    approver: TODO
+    status: pending
+    approved_date: ""
+    review_when: Xia 写出公开 block-type / CLENGTH 位下标

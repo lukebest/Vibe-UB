@@ -4,6 +4,7 @@
 
 ### Added
 
+- `pycircuit/pcs/ub_pcs_nullblk_det.py` + `ub_pcs_amctl_rx.py`：线 A 本批结构叶子（与 `ub_pcs_amctl_cw_dec` 公开端口桩同一次 RTL PR）。`pycircuit/pcs/emit.py`（门禁跳过该文件名）经 compile()+pycc 出 PRODUCT/HOOKS。`gen_private_stub.py` 头写 `pycircuit/pcs/stub/` 与 `rtl/pcs/stub/`，清单路径另有一份 `rtl/pcs/ub_pcs_amctl_cw_dec.v`；`--formal-free` 出 `formal/pcs/cut/ub_pcs_amctl_cw_dec.sv`。Null 判别位下标 / AM 间隔为参数（公开未知，见 PR 规格问答）。豁免草稿 `waivers/pending/lint_pcs_amctl.yml`。不改 `regmap.yaml` / `scripts/gate/` / `rtl/pyc_lib/`。不登记 `private_leaves.yml`（无 attest）。
 - `docs/arch/pcs/UARCH.md`：线 A 本批三叶（`ub_pcs_nullblk_det` / `ub_pcs_amctl_rx` / `ub_pcs_amctl_cw_dec`）。§3 表头与列同 `docs/arch/mem/UARCH.md`，供契约门禁认 `parent`（#47 `PARENT_UNKNOWN`）。
 - `docs/arch/pcs/contracts/ub_pcs_amctl_cw_dec.md`：YAML 头按 main 上 `docs/arch/mem/contracts/README.md` §8 固定键（#43 已合入 `5b0b9fc3`）。船长确认走 C 线 S-01(b)。单 lane、1 拍寄存、无 `comb_budget_ns`。口与项目枚举、`pcs_rx_sdf_seen` t/t+1/t+2 见契约与清单。
 - `docs/arch/MODULE_INVENTORY.md`：`ub_pcs_amctl_rx` 对私有叶输出的稳健性——任意 `cw_dec` 输出须保持合法状态；formal 把 `cw_dec` 出口当自由输入，默认任务无契约 assume。限定场/`*_ok` 仅 `amctl_vld=1` 采用；`amctl_vld=1` 且 `ctrl_ok=0` 或 `lid_ok=0` 视为非 AMCTL（不置 SDF/EDF、不更新 LID）。

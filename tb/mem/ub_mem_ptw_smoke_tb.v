@@ -72,9 +72,15 @@ module ub_mem_ptw_smoke_tb;
   integer evt_seen;
   integer fill_seen;
   integer rd_outstand;
+  integer first_rd_lat;
   reg        prev_evt_valid;
   reg        prev_evt_ready;
   reg [3:0]  prev_evt_code;
+  reg        prev_rd_valid;
+  reg        prev_rd_ready;
+  reg [47:0] prev_rd_addr;
+  reg [7:0]  prev_rd_len;
+  reg [3:0]  prev_rd_tag;
 
   reg [63:0] mem_q [0:7];
   integer mem_n;
@@ -258,6 +264,11 @@ module ub_mem_ptw_smoke_tb;
       prev_evt_valid <= 1'b0;
       prev_evt_ready <= 1'b1;
       prev_evt_code <= {EVT_CODE_W{1'b0}};
+      prev_rd_valid <= 1'b0;
+      prev_rd_ready <= 1'b1;
+      prev_rd_addr <= 48'b0;
+      prev_rd_len <= {RD_LEN_W{1'b0}};
+      prev_rd_tag <= {RD_TAG_W{1'b0}};
       rd_outstand <= 0;
       evt_hs <= 0;
     end else begin
@@ -294,6 +305,26 @@ module ub_mem_ptw_smoke_tb;
           errors = errors + 1;
         end
       end
+      // AP_TBLRD_REQ_HOLD: valid && !ready → next cycle valid stays 1
+      // and addr/len/tag unchanged (SPEC §14 read-table interface).
+      if (prev_rd_valid && !prev_rd_ready) begin
+        if (!mem2host_rd_valid) begin
+          $display("FAIL: AP_TBLRD_REQ_HOLD valid dropped under backpressure");
+          errors = errors + 1;
+        end
+        if (mem2host_rd_addr !== prev_rd_addr) begin
+          $display("FAIL: AP_TBLRD_REQ_HOLD addr changed under backpressure");
+          errors = errors + 1;
+        end
+        if (mem2host_rd_len !== prev_rd_len) begin
+          $display("FAIL: AP_TBLRD_REQ_HOLD len changed under backpressure");
+          errors = errors + 1;
+        end
+        if (mem2host_rd_tag !== prev_rd_tag) begin
+          $display("FAIL: AP_TBLRD_REQ_HOLD tag changed under backpressure");
+          errors = errors + 1;
+        end
+      end
       if (mem2host_rd_valid && mem2host_rd_ready)
         rd_outstand <= 1;
       if (mem2host_rd_rsp_valid && mem2host_rd_rsp_ready)
@@ -303,6 +334,11 @@ module ub_mem_ptw_smoke_tb;
       prev_evt_valid <= evt_valid;
       prev_evt_ready <= evt_ready;
       prev_evt_code <= evt_code;
+      prev_rd_valid <= mem2host_rd_valid;
+      prev_rd_ready <= mem2host_rd_ready;
+      prev_rd_addr <= mem2host_rd_addr;
+      prev_rd_len <= mem2host_rd_len;
+      prev_rd_tag <= mem2host_rd_tag;
     end
   end
 
@@ -460,9 +496,15 @@ module ub_mem_ptw_smoke_tb;
     evt_seen = 0;
     fill_seen = 0;
     rd_outstand = 0;
+    first_rd_lat = 0;
     prev_evt_valid = 1'b0;
     prev_evt_ready = 1'b1;
     prev_evt_code = {EVT_CODE_W{1'b0}};
+    prev_rd_valid = 1'b0;
+    prev_rd_ready = 1'b1;
+    prev_rd_addr = 48'b0;
+    prev_rd_len = {RD_LEN_W{1'b0}};
+    prev_rd_tag = {RD_TAG_W{1'b0}};
     rst_pyc = 1'b1;
     mem2host_rd_rsp_valid = 1'b0;
     mem2host_rd_rsp_data = 512'b0;
@@ -566,6 +608,45 @@ module ub_mem_ptw_smoke_tb;
         expect_fill(36'h0100_0000 | {33'b0, s[2:0]}, 36'h00AB_CDEF, 8'h55, 2'b10, 1'b1, 1'b0, 1'b1);
         $display("8B slot %0d ok", s);
       end
+    end
+
+    // AP_TBLRD_REQ_HOLD + extra cycle from req accept to first rd_valid.
+    // Hold mem2host_rd_ready so the monitor sees valid/addr/len/tag hold.
+    begin
+      integer guard;
+      integer lat;
+      mem_reset;
+      mem2host_rd_ready = 1'b0;
+      first_rd_lat = 0;
+      start_walk({16'b0, 36'h0123_4005, 12'h000}, 6'd21);
+      lat = 1;
+      guard = 0;
+      while (!mem2host_rd_valid && guard <= 20) begin
+        tick;
+        lat = lat + 1;
+        guard = guard + 1;
+      end
+      if (!mem2host_rd_valid) begin
+        $display("FAIL: no table read after registered request");
+        errors = errors + 1;
+      end else begin
+        first_rd_lat = lat;
+        if (first_rd_lat != 2) begin
+          $display("FAIL: first mem2host_rd_valid at +%0d (want +2)", first_rd_lat);
+          errors = errors + 1;
+        end
+        repeat (3) tick;
+        if (!mem2host_rd_valid) begin
+          $display("FAIL: AP_TBLRD_REQ_HOLD valid dropped in hold window");
+          errors = errors + 1;
+        end
+        mem2host_rd_ready = 1'b1;
+        mem_push(pack_tb(1'b1, KIND_PAGE, 36'h00AB_CDEF, 3'd2, 2'b10, 1'b1, 1'b0,
+                         1'b1, 1'b0, ILL_NONE));
+        expect_fill(36'h0123_4005, 36'h00AB_CDEF, 8'h55, 2'b10, 1'b1, 1'b0, 1'b1);
+        $display("AP_TBLRD_REQ_HOLD ok (first rd_valid +%0d)", first_rd_lat);
+      end
+      mem2host_rd_ready = 1'b1;
     end
 
     // (c) ctx_matt_wd=1 miss: no mem2host_rd_valid, no fill_valid,

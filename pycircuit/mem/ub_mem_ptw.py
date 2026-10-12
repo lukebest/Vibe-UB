@@ -4,7 +4,9 @@
 （地址 48 bit、长度、tag；回读 512 bit、tag、错误）。
 SPEC §14 Q-C07 (D20)：首轮单未决，mem2host_rd_len 为 8 bit 字节数（合法
 RD_LEN_8B / RD_LEN_32B / RD_LEN_64B），本叶驱动 RD_LEN_8B；tag 恒
-RD_TAG_ZERO，口宽一次拉齐。
+RD_TAG_ZERO，口宽一次拉齐。表读请求口 mem2host_rd_valid / addr / len / tag
+一律出寄存器（Xia 准：valid/ready 握手；valid 为高期间请求保持；首拍
+表读可多 1 拍）。len / tag 为寄存器常量，无输入时序路径。
 从 512 bit 回读按地址低位取出 8 B 描述符。读回描述符先寄存，再连同
 desc_lvl 交给 ub_mem_ptw_desc_dec（契约：寄存 1 拍）。表描述符进入
 下一级；L1 1 GB / L2 2 MB 块或 L3 页合成 4 KB 对齐 PA，只把页地址
@@ -96,6 +98,15 @@ def _ptw_body(m: Circuit) -> None:
 
     rd_sent = m.out("rd_sent", clk=clk, rst=rst, width=1, init=u(1, 0), en=1)
     dec_sent = m.out("dec_sent", clk=clk, rst=rst, width=1, init=u(1, 0), en=1)
+    # 表读请求口：下一地址组合算出后写入这些寄存器再送出。
+    rd_valid_q = m.out("rd_valid_q", clk=clk, rst=rst, width=1, init=u(1, 0), en=1)
+    rd_addr_q = m.out("rd_addr_q", clk=clk, rst=rst, width=PA_W, init=u(PA_W, 0), en=1)
+    rd_len_q = m.out(
+        "rd_len_q", clk=clk, rst=rst, width=RD_LEN_W, init=u(RD_LEN_W, RD_LEN_8B), en=1
+    )
+    rd_tag_q = m.out(
+        "rd_tag_q", clk=clk, rst=rst, width=RD_TAG_W, init=u(RD_TAG_W, RD_TAG_ZERO), en=1
+    )
 
     ent_q = m.out("ent_q", clk=clk, rst=rst, width=ENT_IDX_W, init=u(ENT_IDX_W, 0), en=1)
     tok_q = m.out("tok_q", clk=clk, rst=rst, width=TOKEN_W, init=u(TOKEN_W, 0), en=1)
@@ -141,8 +152,9 @@ def _ptw_body(m: Circuit) -> None:
     to_evt_wd = do_req & ctx_matt_wd
     to_rd_new = do_req & ~ctx_matt_wd
 
-    rd_req_valid = in_rd & ~rd_sent.out()
+    rd_req_valid = rd_valid_q.out()
     rd_accept = rd_req_valid & rd_ready
+    rd_launch = in_rd & ~rd_sent.out() & ~rd_valid_q.out()
     rd_rsp_ready = in_rd & rd_sent.out()
     tag_live = rd_rsp_tag == rd_rsp_tag
     rd_take = rd_rsp_ready & rd_rsp_valid & tag_live
@@ -209,6 +221,18 @@ def _ptw_body(m: Circuit) -> None:
     rd_sent.set(
         mux(m, enter_rd | done_walk, u(1, 0), mux(m, rd_accept, u(1, 1), rd_sent.out()))
     )
+    # AP_TBLRD_REQ_HOLD：valid && !ready 时 valid/addr/len/tag 保持。
+    rd_valid_q.set(
+        mux(
+            m,
+            rd_accept | done_walk,
+            u(1, 0),
+            mux(m, rd_launch, u(1, 1), rd_valid_q.out()),
+        )
+    )
+    rd_addr_q.set(addr_q.out(), when=rd_launch)
+    rd_len_q.set(u(RD_LEN_W, RD_LEN_8B))
+    rd_tag_q.set(u(RD_TAG_W, RD_TAG_ZERO))
     dec_sent.set(
         mux(m, to_dec | done_walk, u(1, 0), mux(m, dec_accept, u(1, 1), dec_sent.out()))
     )
@@ -247,11 +271,11 @@ def _ptw_body(m: Circuit) -> None:
     evt_code_q.set(u(EVT_CODE_W, EVT_MATT_WD_MISS), when=to_evt_wd)
 
     m.output("req_ready", idle)
-    # SPEC §14 Q-C07 (D20)：长度恒 8 B，tag 恒 0。
-    m.output("mem2host_rd_valid", rd_req_valid)
-    m.output("mem2host_rd_addr", addr_q.out())
-    m.output("mem2host_rd_len", u(RD_LEN_W, RD_LEN_8B))
-    m.output("mem2host_rd_tag", u(RD_TAG_W, RD_TAG_ZERO))
+    # SPEC §14 Q-C07 (D20)：请求口出寄存器；长度恒 8 B，tag 恒 0。
+    m.output("mem2host_rd_valid", rd_valid_q.out())
+    m.output("mem2host_rd_addr", rd_addr_q.out())
+    m.output("mem2host_rd_len", rd_len_q.out())
+    m.output("mem2host_rd_tag", rd_tag_q.out())
     m.output("mem2host_rd_rsp_ready", rd_rsp_ready)
     m.output("fill_valid", in_fill)
     m.output("fill_ent_idx", ent_q.out())

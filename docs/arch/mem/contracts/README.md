@@ -85,7 +85,7 @@ D20 S-01 (b) 覆盖 C 线表项位布局。UARCH 把每一种规范表项做成�
 6. **复位撤销后的 `in_ready`。** SPEC §3.1 原文：「复位撤销后，`valid` 与 `ready` 的首拍值：**待定**（建议 `valid=0`，`ready` 在下游能收时为 1）。」该句未闭合。本目录按下列规则：复位撤销后的第一拍 `in_ready` 可以为 0；从第二拍起，在输出侧未停（`out_ready=1` 或本拍无未决输出）时 `in_ready=1`。
 7. **L0 组合预算。** `ub_mem_dec_ent_dec` 的 L0 路径 `comb_budget_ns: 5.0`（12.412 ns 周期内、输入到输出的最大延迟；周期余量留给其前的存储器读出通路与其后的遍历器寄存器建立时间）。L1 路径仍为寄存 1 拍。**Xia 裁定 2026-10-12。**
 8. **条目尺寸（依据 UB-MEM 第 9 章）。** `ub_mem_tecte_dec.raw` = 512（TECTE 64 B）。`ub_mem_mapte_dec.raw` = 256，每一级皆然（MAPTE 32 B）。`lvl` 宽 2 bit，合法 0..3（4 KB 粒度多级 MAPT 最多 4 级；2 MB 粒度的 3 级形式首轮延后）。延后的「2 MB 映射粒度」指 TCTE 范围表颗粒度选取 2 MB，`ub_mem_tcte_dec` 报 `ILL_MAP_2MB`。`ctx_mapt_bb_sz` 是基块大小指数（4 KB × 2^n），合法 0..9（9 = 2 MB 基块）；10..15 报 `ILL_RSVD`。**Xia 裁定 2026-10-12，依据 UB-MEM 第 9 章条目尺寸。**
-9. **页表块描述符（Q-A11）。** UB-MEM 第 9 章未定义 MATT 页表描述符格式与块大小；TCTE.TGS 字段注记写明其位含义跟随体系结构。按 Q-A11，页表用 4 KB 粒度，每个块拆成 4 KB TLB 项。`ub_mem_ptw_desc_dec` 增加输入 `desc_lvl[1:0]`（L0..L3，由 `ub_mem_ptw` 驱动，与 `in_valid` 同拍采样）。各级允许的 kind 见该叶子「各级允许的描述符类型」：L0/L1/L2 table 合法；L1 的 1 GB 块与 L2 的 2 MB 块合法（`desc_kind=block`，`desc_illegal=0`）；L3 page 合法；L0 块与本级不产出的 kind 报 `ILL_RSVD`。无效描述符任意级 `desc_v=0`、`desc_kind=0`、`desc_illegal=0`。该叶子只输出块基址 `desc_addr` 与 `desc_kind`。父级 `ub_mem_ptw` 把块基址与请求 VA 的块内偏移合成 4 KB 对齐 PA，交给 TLB；`fill_*` 只携带 4 KB 页地址。`ILL_MAP_2MB` 只对应 TCTE 范围表颗粒度选取 2 MB。本条取代此前对 1 GB 块报 `ILL_UNSUP` 的行。遍历器观测口走 SPEC §10。**Xia 裁定 2026-10-12。**
+9. **页表块描述符（Q-A11）。** UB-MEM 第 9 章未定义 MATT 页表描述符格式与块大小；TCTE.TGS 字段注记写明其位含义跟随体系结构。语义取 VMSAv8-64 4 KB 粒度。按 Q-A11，每个块拆成 4 KB TLB 项。`ub_mem_ptw_desc_dec` 保留输入 `desc_lvl[1:0]`（L0..L3，由 `ub_mem_ptw` 驱动，与 `in_valid` 同拍采样）。输入按编码类（`ENC_INVALID` / `ENC_TBL_PG` / `ENC_BLOCK`，公开面不写位值）与级交叉，共 12 格，验证按 `desc_lvl` × 编码类交叉。`ENC_TBL_PG`：L0–L2 为 table（`desc_kind=1`），L3 为 page（`desc_kind=3`）。`ENC_BLOCK`：L1 为 1 GB 块、L2 为 2 MB 块（`desc_kind=2`，`desc_illegal=0`）；L0 / L3 走翻译故障（`desc_v=0`，`desc_kind=0`，`desc_illegal=0`，`ILL_NONE`）。该叶子只输出块基址 `desc_addr` 与 `desc_kind`。父级 `ub_mem_ptw` 把块基址与请求 VA 的块内偏移合成 4 KB 对齐 PA，交给 TLB；`fill_*` 只携带 4 KB 页地址。`ILL_MAP_2MB` 只对应 TCTE 范围表颗粒度选取 2 MB。本条取代此前对 1 GB 块报 `ILL_UNSUP` 的行，以及此前对 L0 块 / L3 table 报 `ILL_RSVD` 的行。遍历器观测口走 SPEC §10。**Xia 裁定 2026-10-12。**
 
 ---
 
@@ -113,7 +113,7 @@ D20 S-01 (b) 覆盖 C 线表项位布局。UARCH 把每一种规范表项做成�
 | `ub_mem_mapte_dec.raw` | 256，每一级（MAPTE 32 B） |
 | `lvl` | 宽 2 bit，合法 0..3 |
 | `ctx_mapt_bb_sz` | 基块指数，合法 0..9；9 = 2 MB 基块；10..15 → `ILL_RSVD`。延后的 2 MB 映射粒度走 TCTE 范围表颗粒度 → `ILL_MAP_2MB` |
-| 页表块描述符 | 4 KB 粒度 L0..L3：L1 的 1 GB 块、L2 的 2 MB 块合法；L0 块与本级不产出的 kind 报 `ILL_RSVD`。输入 `desc_lvl[1:0]`。依据第 9 章：描述符格式跟随体系结构；按 Q-A11 拆成 4 KB TLB 项 |
+| 页表块描述符 | 输入编码类 × `desc_lvl` 十二格（`ENC_INVALID` / `ENC_TBL_PG` / `ENC_BLOCK`）。L1 1 GB 块、L2 2 MB 块合法；L0 / L3 的 `ENC_BLOCK` 与任意级 `ENC_INVALID` 走翻译故障。依据第 9 章与 TCTE.TGS：格式跟随体系结构；语义取 VMSAv8-64 4 KB 粒度 |
 
 ---
 

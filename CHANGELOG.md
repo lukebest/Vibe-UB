@@ -4,7 +4,7 @@
 
 ### Added
 
-- `docs/arch/MODULE_INVENTORY.md`：登记 PCS 叶子 `ub_pcs_nullblk_det`（线 A 设计；`core_clk` / `rst_pyc`；出 `pcs2lmsm_null_blk` / `pcs2lmsm_rx_nonnull_blk` / `pcs2lmsm_tx_null_blk`；参考模型 `tb/models/ub_pcs_nullblk_det.py` 待写）。RX/TX 对齐数据、AMCTL+SDF 事件、Null 判别字段、已配置 lane 集合标未知。延迟 Xia 提议寄存 1 拍。`ub_lmsm` 只记消费侧。
+- `docs/arch/MODULE_INVENTORY.md`：登记 PCS 叶子 `ub_pcs_nullblk_det`（线 A 设计；`core_clk` / `rst_pyc`；出 `pcs2lmsm_null_blk` / `pcs2lmsm_rx_nonnull_blk` / `pcs2lmsm_tx_null_blk`；参考模型 `tb/models/ub_pcs_nullblk_det.py` 待写）。Xia 裁定 2026-10-12：旁路观察 `pcs2dll_data`/`pcs2dll_valid` 与 `dll2pcs_data`/`dll2pcs_valid`（收下看 `dll2pcs_ready`）；内部电平 `pcs_rx_sdf_seen` 由 `ub_pcs_amctl_rx` 驱动；Null 判别对照 UB-DL §4.3.3.2 block-type 表 + `CLENGTH==5'b00000`；无 lane 集合口；延迟寄存 1 拍。`ub_lmsm` 只记消费侧。
 - `tb/models/ub_pcs_fec.py`：RS(128,120) FEC 编解码黄金模型（UB-PHY §3.2.2.1 / §3.2.3.5，SPEC §2.4 `ub_pcs_fec_enc` / `ub_pcs_fec_dec`；T=4 / T=2 / bypass）。
 - `scripts/impl/buffer_fanout.py`：Yosys JSON 上确定性 `buf_4`/`buf_8` 扇出树（quick-synth 默认在 abc 之后调用）。
 - 工具守门 CI：`.github/workflows/gate.yml` + `scripts/gate/` + `make gate`（emit / 端口一致性 / lint / CDC / formal / synth-check / regmap `--check` / tb-selfcheck）。名单在 `gate/`（legacy / handwritten / stubs / hooks_ports），豁免在 `waivers/`，批准规则相同。等价主工具 eqy（`TOOLCHAIN.lock` `eqy_lock`），不可用则回退 Yosys `equiv_*` 并注明工具。规则分册 `docs/rules/verif_gate.md`。CODEOWNERS 将 `waivers/`、`gate/`、gate workflow 指给 `lukebest`。不改 `rtl/`、`tb/models/`、`model/`。SPEC §11 仅补 Xia 端口裁定 (f)。

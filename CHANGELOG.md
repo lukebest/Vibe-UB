@@ -32,6 +32,7 @@
 
 ### Changed
 
+- `docs/arch/LAYER_CONTRACTS.md` §2 / §3：补 TP→NW 请求边带 `tp2nw_dcna[15:0]` / `tp2nw_lbf[7:0]` / `tp2nw_rt[1:0]` / `tp2nw_cci[15:0]`（§5.2、§6.5.1.2、§6.6）；补 TP→TA 整操作完成 `tp2ta_msn_valid/ready` + `tp2ta_tpmsn[23:0]`（§6.7.1.2.1）；补 ROL 目标 TA→TP 完成口 `ta2tp_cmp_*`（§6.8.2）；RTPH DstTPN/PSN/TPMSN 按 §6.2.1 锁 24 b；TA→TP 提交加 `ta2tp_dcna[15:0]`。
 - `docs/arch/mem/contracts/ub_mem_ptw_desc_dec.md`：`AP_PTW_KIND` 改为 `desc_v ⇔ desc_kind≠0`（`desc_v=1` 当且仅当 `desc_kind` 非 0；`desc_v=0` 时 `desc_kind` 必须为 0）。编码仍为 0 = invalid / 1 = table / 2 = block / 3 = page。芯片开发PM 2026-10-12。
 - SPEC §14 Q-A11：TCTE 范围表的 2 MB 颗粒度配置只由 `ub_mem_tcte_dec` 解码并报 `ILL_MAP_2MB`；L1 的 1 GB 与 L2 的 2 MB 页表块描述符合法（`desc_kind=2`，`desc_illegal=0`），遍历器将其拆成 4 KB TLB 回填。
 - 门禁 hooks：`HOOKS-UB-MEM-PTW` 登记 `tb_mem_ptw_obs_st` / `tb_mem_ptw_obs_rd_pend`（只读、不受 `tb_test_mode`；批准人验证）。

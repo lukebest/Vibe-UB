@@ -1,11 +1,11 @@
 """ub_dll_retry_ack_sm — DLL RETRY_ACK_SM (real pyc4.0 leaf).
 
-SPEC #41 / D20 §6.4 / §13 A-13.
-Event names, pulse vs level, and fixed priority are from that head.
+SPEC main 62d9ce63 (#41 / D20) §6.4 / §13 A-13.
+Event names, pulse vs level, and fixed priority are from that merge.
 SPEC §10 lists no hooks: HOOKS ports match PRODUCT.
 
 No SUB_SET / SUB_REPLAY: parent folds ack-set + replay into one
-ub_dll_retry_ack_set_done pulse (#41 §6.4).
+ub_dll_retry_ack_set_done pulse (SPEC §6.4).
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def _build_body(m: Circuit) -> None:
     is_a = st == ST_ACK
     illegal = ~(is_n | is_a)
 
-    # Priority (#41 §6.4): reset → NORMAL; req_set → ACK (covers same-cycle
+    # Priority (SPEC §6.4): reset → NORMAL; req_set → ACK (covers same-cycle
     # ack_set_done); ack_set_done → NORMAL.
     st_n = mux(
         port_rst | illegal,

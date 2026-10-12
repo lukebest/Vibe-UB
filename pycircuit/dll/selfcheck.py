@@ -3,7 +3,7 @@
 
 Proves emit() runs, PRODUCT and HOOKS have the same ports (Xia: no
 tb_test_mode when SPEC §10 lists no hooks), no reserved encodings,
-A-13 priorities, and directed WAIT-timer cases (#41 / D20):
+A-13 priorities, and directed WAIT-timer cases (SPEC §6.3 / A-10):
   default 323 (no fire at 322, fire at 323),
   value 1, a large value, value 0 treated as 323,
   mid-count rewrite takes effect only on the next wait.
@@ -38,7 +38,7 @@ CNT_SAT = 0xFF
 
 
 def _map_wait(port: int) -> int:
-    """#41 / D20: write 0 is illegal; hardware treats 0 as 323."""
+    """SPEC §6.3 / A-10: write 0 is illegal; hardware treats 0 as 323."""
     return WAIT_DEFAULT if port == 0 else port
 
 
@@ -400,7 +400,7 @@ def main() -> int:
             )
             assert n.st in (ST_N, ST_Q, ST_W, ST_R, ST_E), n.st
 
-    # --- directed WAIT (#41 / D20) ---
+    # --- directed WAIT (SPEC §6.3 / A-10) ---
     # default 323: no fire at 322, fire at 323
     s = _enter_wait(WAIT_DEFAULT, num_retry=1)
     s = _run_wait(s, 322, WAIT_DEFAULT)
@@ -413,7 +413,7 @@ def main() -> int:
     s = step_req(s, retry_wait_cyc=1)
     assert s.st == ST_Q and s.num_retry == 2
 
-    # large value 65535 (#41 / D20 legal max): no fire at 65534, fire at 65535
+    # large value 65535 (SPEC §6.3 legal max): no fire at 65534, fire at 65535
     large = (1 << WAIT_W) - 1
     s = _enter_wait(large, num_retry=1)
     s = _run_wait(s, large - 1, large)
@@ -474,7 +474,7 @@ def main() -> int:
         "selfcheck ok: PRODUCT + HOOKS "
         f"{req_prod.name} / {ack_prod.name}, DECLFILENAME, "
         "HOOKS ports == PRODUCT (no tb_test_mode; Xia / no §10 hooks), "
-        "SPEC §6.3 / §6.4 / A-13, #41/D20 WAIT 16-bit latch + 0→323"
+        "SPEC §6.3 / §6.4 / A-13, WAIT 16-bit latch + 0→323"
     )
     return 0
 

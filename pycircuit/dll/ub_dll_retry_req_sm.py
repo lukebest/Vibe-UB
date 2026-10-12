@@ -1,10 +1,10 @@
 """ub_dll_retry_req_sm — DLL RETRY_REQ_SM (real pyc4.0 leaf).
 
-SPEC #41 / D20 §6.3 / §13 A-12 A-13 / §4.1.
-Event names, pulse vs level, and fixed priority are from that head.
+SPEC main 62d9ce63 (#41 / D20) §6.3 / §13 A-12 A-13 / §4.1.
+Event names, pulse vs level, and fixed priority are from that merge.
 SPEC §10 lists no hooks: HOOKS ports match PRODUCT.
 
-RETRY_WAIT_CYC (#41 / D20, Xia):
+RETRY_WAIT_CYC (SPEC §6.3 / §13 A-10 / D20):
   16-bit input, units core_clk cycles, reset / default 323,
   legal range 1-65535. Write 0 is illegal: hardware treats 0 as 323.
   Counter and comparator are 16 bits.
@@ -18,12 +18,12 @@ from pathlib import Path
 
 from pycircuit import Circuit, module, mux, u
 
-# Closed by #41 / D20.
+# Closed by SPEC main 62d9ce63 (#41 / D20).
 NUM_RETRY_THRESHOLD = 15  # SPEC §9 / §6.3 / §13 A-12
 NUM_PHY_REINIT_THRESHOLD = 4  # SPEC §9 / §6.3 / §13 A-12
-# CSR reset / default (#41 / D20 / §4.1 / A-10). Also the 0-write substitute.
+# CSR reset / default (SPEC §4.1 / §6.3 / A-10). Also the 0-write substitute.
 RETRY_WAIT_CYC_DEFAULT = 323
-# #41 / D20: port, counter, and comparator width.
+# SPEC §6.3 / A-10: port, counter, and comparator width.
 WAIT_CYC_W = 16
 
 CNT_W = 8  # holds closed thresholds 15 / 4 (A-12); not a CSR field width
@@ -64,7 +64,7 @@ def _build_body(m: Circuit) -> None:
     num_retry = m.out("num_retry", clk=clk, rst=rst, width=CNT_W, init=u(CNT_W, 0))
     num_phy = m.out("num_phy", clk=clk, rst=rst, width=CNT_W, init=u(CNT_W, 0))
     tmr = m.out("tmr", clk=clk, rst=rst, width=WAIT_CYC_W, init=u(WAIT_CYC_W, 0))
-    # Latched on WAIT entry (#41 / D20). Reset value matches CSR default.
+    # Latched on WAIT entry (SPEC §6.3). Reset value matches CSR default.
     wait_lat = m.out(
         "wait_lat",
         clk=clk,
@@ -80,7 +80,7 @@ def _build_body(m: Circuit) -> None:
     is_e = st == ST_ERROR
     illegal = ~(is_n | is_q | is_w | is_r | is_e)
 
-    # Write 0 is illegal config: hardware treats 0 as 323 (#41 / D20).
+    # Write 0 is illegal config: hardware treats 0 as 323 (SPEC §6.3 / A-10).
     wait_cyc_eff = mux(
         retry_wait_cyc == 0,
         u(WAIT_CYC_W, RETRY_WAIT_CYC_DEFAULT),

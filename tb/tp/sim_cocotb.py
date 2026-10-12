@@ -189,7 +189,9 @@ async def _send_tx(dut, spec: TxSpec, mon: _Monitors, rng=None) -> None:
             dut.ta2tp_data.value = remaining[0]
             dut.ta2tp_sop.value = int(idx == 0)
             dut.ta2tp_eop.value = int(len(remaining) == 1)
-        await RisingEdge(clk)
+        # Sample combo ready in this cycle, then take the edge that
+        # captures the handshake. Post-edge ready already sees busy_q.
+        await NextTimeStep()
         await ReadOnly()
         op_hs = op_pending and _sample_int(dut.ta2tp_op_ready) == 1 and _sample_int(
             dut.ta2tp_op_valid
@@ -197,7 +199,10 @@ async def _send_tx(dut, spec: TxSpec, mon: _Monitors, rng=None) -> None:
         data_hs = bool(remaining) and _sample_int(dut.ta2tp_ready) == 1 and _sample_int(
             dut.ta2tp_valid
         ) == 1
-        await NextTimeStep()
+        op_rdy = _sample_int(dut.ta2tp_op_ready)
+        data_rdy = _sample_int(dut.ta2tp_ready)
+        nw_valid = _sample_int(dut.tp2nw_valid)
+        await RisingEdge(clk)
         if op_hs:
             op_pending = False
             dut.ta2tp_op_valid.value = 0
@@ -211,7 +216,15 @@ async def _send_tx(dut, spec: TxSpec, mon: _Monitors, rng=None) -> None:
         timeout -= 1
         if timeout <= 0:
             raise AssertionError(
-                f"cycle {mon.cycle}: TX handshake timeout tassn={spec.tassn}"
+                f"cycle {mon.cycle}: TX handshake timeout tassn={spec.tassn} "
+                f"op_pending={op_pending} nflit_left={len(remaining)} "
+                f"op_ready={op_rdy} ta2tp_ready={data_rdy} "
+                f"tp2nw_valid={nw_valid}. "
+                "expected: DUT accepts TA submit (UbTpBypass.submit); "
+                "actual: no valid/ready handshake. "
+                "If op_ready stays 0 after a finished packet, busy_q did not "
+                "clear on same-cycle op+eop "
+                "(busy_next = op_hs | (busy & ~data_eop_hs))."
             )
     _idle_inputs(dut)
 
@@ -234,10 +247,10 @@ async def _send_rx(dut, spec: RxSpec, mon: _Monitors, rng=None) -> None:
         dut.nw2tp_eop.value = int(len(remaining) == 1)
         # err only presented on the eop beat (LAYER_CONTRACTS §2).
         dut.nw2tp_err.value = int(bool(spec.err) and len(remaining) == 1)
-        await RisingEdge(clk)
+        await NextTimeStep()
         await ReadOnly()
         hs = _sample_int(dut.nw2tp_ready) == 1 and _sample_int(dut.nw2tp_valid) == 1
-        await NextTimeStep()
+        await RisingEdge(clk)
         if hs:
             remaining.pop(0)
             if not remaining:
@@ -289,11 +302,11 @@ async def _assert_no_tx(dut, mon: _Monitors, beats: int = 8) -> None:
     dut.ta2tp_data.value = 0xDEAD
     before = len(mon.tx)
     for _ in range(beats):
-        await RisingEdge(clk)
+        await NextTimeStep()
         await ReadOnly()
         op_hs = _sample_int(dut.ta2tp_op_valid) == 1 and _sample_int(dut.ta2tp_op_ready) == 1
         data_hs = _sample_int(dut.ta2tp_valid) == 1 and _sample_int(dut.ta2tp_ready) == 1
-        await NextTimeStep()
+        await RisingEdge(clk)
         if op_hs or data_hs:
             raise AssertionError(
                 f"cycle {mon.cycle}: TX handshake while flush/link-down "

@@ -4,7 +4,7 @@
 
 ### Added
 
-- `docs/arch/pcs/contracts/ub_pcs_amctl_cw_dec.md`：船长确认走 C 线 S-01(b)。YAML 头复用 `docs/arch/mem/contracts/README.md` §8（PR #43），不另立。单 lane 实例、1 拍寄存、无 `comb_budget_ns`。口：`word[31:0]` / `word_vld` / `end_hit` / `amctl_vld` 及限定场。项目枚举宽与符号名入契约。`pcs_rx_sdf_seen` 拍位 t / t+1 / t+2。源码 `lukebest/Vibe-UB-private`；码字表不进公开 SPEC。Xia 裁定 2026-10-12。
+- `docs/arch/pcs/contracts/ub_pcs_amctl_cw_dec.md`：YAML 头按 `docs/arch/mem/contracts/README.md` §8 固定键（schema 源在 PR #43 @ `3d08513a`，本 PR 不合并该分支）。船长确认走 C 线 S-01(b)。单 lane、1 拍寄存、无 `comb_budget_ns`。口与项目枚举、`pcs_rx_sdf_seen` t/t+1/t+2 见契约与清单。合入顺序：先 #43 后 #45。
 - `docs/arch/MODULE_INVENTORY.md`：Xia 裁定 2026-10-12 关闭 `ub_pcs_amctl_rx` 三条 MISSING。M1：无分 lane valid，锁定按 UB-PHY §3.2.4.4 在叶内做，`pcs_am_locked` = 已配置 lane 全锁定。M2：公开只写识别/场语义（表 3-7、「AMCTL Identification Mechanism」）；码字解码进私有叶 `ub_pcs_amctl_cw_dec`（S-01(b)，船长已确认）。M3：SDF/EDF 按 `CTRL_TYPE`/`CTRL_DETAIL`（§3.2.4.2「AMCTL Controlling」）。`pcs_rx_lid[3:0]` 公开只称 `LID_NULL`。不抄码字/CW/符号下标。
 - `docs/arch/MODULE_INVENTORY.md`：`ub_pcs_amctl_rx` 完备性核对表（端口 / AMCTL 识别 / SDF / 已配置 lane / `pcs_rx_lid[3:0]`+`pcs_rx_lid_vld`）。scrambler placeholder 期 LID 口 Tie，waiver `placeholder, D20`。
 - `docs/arch/MODULE_INVENTORY.md` + SPEC §3.3.4 / §6.1 / A-23：登记 `ub_pcs_nullblk_det`（线 A 设计）。Xia 裁定 2026-10-12：旁路观察 `pcs2dll_*` / `dll2pcs_*`；`ub_pcs_amctl_rx` 出寄存电平 `pcs_rx_sdf_seen`；新增 `lmsm2pcs_nb_phase`；Null 判别 UB-DL §4.3.3.2 + `CLENGTH==5'b00000`；每拍至多一个 block（§3.3.1 / §3.3.2），保持 1-bit 脉冲；RX 门控在寄存前，TX 无门控；t→t+1，LMSM 计 ≥s+1。参考模型待写。

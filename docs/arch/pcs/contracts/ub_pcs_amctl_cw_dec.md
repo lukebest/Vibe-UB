@@ -31,7 +31,7 @@ status: draft
 
 # 公开信号契约 — `ub_pcs_amctl_cw_dec`
 
-YAML 机读头 schema 复用 [docs/arch/mem/contracts/README.md](../../mem/contracts/README.md) §8（PR #43）。本文件不另立键。`ill_cause_width` 按该 schema 填写；本叶**无** `*_ill_cause` 口。
+YAML 机读头按 [docs/arch/mem/contracts/README.md](../../mem/contracts/README.md) §8 的固定键写（`leaf` / `parent` / `clock` / `latency` / `ports` / `params` / `ill_cause_width` / `status`）。寄存叶子不写 `comb_budget_ns`。该 README 现于 PR #43，尚未合入 main；本 PR 不把它并进来。schema 源就是那一份，本文件不另立键。
 
 | 项 | 值 |
 | --- | --- |
@@ -39,9 +39,9 @@ YAML 机读头 schema 复用 [docs/arch/mem/contracts/README.md](../../mem/contr
 | 父级例化点 | `ub_pcs_amctl_rx`。每硬件 lane **一份**单 lane 实例；父叶静态例化 `NUM_LANES_RX` 份（`PARAM_PHY.NUM_LANES_RX` 同参数族）。编号 ≥ `pma_rx_width` 的实例由 `amctl_rx` 忽略。面积按**单实例**证明 |
 | 规范 | UB-PHY §3.2.4.2 / 表 3-7..3-10 / 「AMCTL Identification Mechanism」/ §3.2.4.4。公开只写语义与节/表号 |
 | 清单 | [MODULE_INVENTORY.md](../../MODULE_INVENTORY.md) `ub_pcs_amctl_rx` / `ub_pcs_amctl_cw_dec` |
-| 裁定 | 船长确认：走 C 线 S-01(b)。Xia 裁定 2026-10-12 |
-| 私有源 | `lukebest/Vibe-UB-private`。码字表、eBCH-16 纠正、场符号位置**不**进公开 SPEC |
-| 时钟域 | 单一 `core_clk`，周期 12.412 ns（SPEC §4.1 `F_CORE` ≈80.57 MHz），同步复位 `rst_pyc`。无 `comb_budget_ns`（1 拍寄存） |
+| 裁定 | 船长确认走 C 线 S-01(b)。Xia 裁定 2026-10-12 |
+| 私有源 | `lukebest/Vibe-UB-private`（公开叙述称独立私有仓库）。码字表不进公开 SPEC |
+| 时钟域 | 单一 `core_clk`，同步复位 `rst_pyc`，目标周期 12.412 ns（`F_CORE` 80.57 MHz，SPEC §4.1），时序估计走 Sky130 代理；本叶子内部不做 CDC。**Xia 裁定 2026-10-12。** |
 
 本叶内部持有 AMCTL 窗口（40 符号）及全部场/符号位置；公开契约不列下标。父叶只认具名口。
 
@@ -51,8 +51,10 @@ YAML 机读头 schema 复用 [docs/arch/mem/contracts/README.md](../../mem/contr
 
 | 端口 | 方向 | 宽度 | 含义 |
 | --- | --- | --- | --- |
-| `core_clk` | in | 1 | 单时钟，周期 12.412 ns |
-| `rst_pyc` | in | 1 | 项目复位名；`pyc_reg` 原生极性；同步复位 |
+| `core_clk` | in | 1 | 单时钟，≈80.57 MHz，目标周期 12.412 ns（SPEC §4.1） |
+| `rst_pyc` | in | 1 | `pyc_reg` 原生极性；业务寄存器同步复位（CODING_STYLE §2） |
+
+`clock` / `rst_pyc` 同时列入 YAML `ports`（schema §8）。
 
 ---
 
@@ -72,19 +74,20 @@ YAML 机读头 schema 复用 [docs/arch/mem/contracts/README.md](../../mem/contr
 | `ctrl_detail` | out | 4 | 项目枚举，见 §4 |
 | `ctrl_detail_ok` | out | 1 | 与 `ctrl_type_ok` 同一半场规则 |
 
-`end_ok` / `lid` / `lid_ok` / `ctrl_type` / `ctrl_type_ok` / `ctrl_detail` / `ctrl_detail_ok` 受 `amctl_vld` 限定。输出相对输入字寄存 **1** 拍。
+`end_ok` / `lid` / `lid_ok` / `ctrl_type` / `ctrl_type_ok` / `ctrl_detail` / `ctrl_detail_ok` 受 `amctl_vld` 限定。`desc` 只写解码后语义。
 
 ---
 
-## 3. 时序
+## 3. 握手与时序
 
-- `latency.kind = registered`，`cycles = 1`，`max_cycles = 1`。不写 `comb_budget_ns`。
-- `word` / `word_vld` 在 **t** → `end_hit` 与（若该字是末符号）`amctl_vld` 及限定场在 **t+1**。
+- 本叶是 **valid-only**（SPEC §3.2.4 / §13 A-05）：输入 `word_vld`，无 `ready`。不套 schema README §1 第 4 条的 valid/ready 成交（那条写的是 C 线表项解码）。
+- `latency.kind = registered`，`cycles = 1`，`max_cycles = 1`。不写 `comb_budget_ns`（schema §8：寄存叶子不得带该键）。
+- `word` / `word_vld` 在 **t** → 输出在 **t+1**。
 - `pcs_rx_sdf_seen` 的 t / t+1 / t+2 在父叶，见 [MODULE_INVENTORY.md](../../MODULE_INVENTORY.md)。
 
 ---
 
-## 4. 项目枚举（不是规范码字）
+## 4. 项目枚举（不是规范码字）与 `ill_cause_width`
 
 下列取值是本项目枚举，**不是** UB-PHY 码字。
 
@@ -119,11 +122,13 @@ YAML 机读头 schema 复用 [docs/arch/mem/contracts/README.md](../../mem/contr
 
 `LID_NULL`：公开只称此名。
 
+`ill_cause_width: 4` 按 schema 固定键填写。本叶**不**产 `*_illegal` / `*_ill_cause` 口，也不引用 C 线 §3 非法码表。
+
 ---
 
 ## 5. 复位值
 
-`rst_pyc` 有效期间全部输出为 0：`end_hit`、`amctl_vld`、`end_ok`、`lid`、`lid_ok`、`ctrl_type`、`ctrl_type_ok`、`ctrl_detail`、`ctrl_detail_ok`。
+寄存输出在 `rst_pyc` 有效期间为 0：`end_hit`、`amctl_vld`、`end_ok`、`lid`、`lid_ok`、`ctrl_type`、`ctrl_type_ok`、`ctrl_detail`、`ctrl_detail_ok`。
 
 ---
 
@@ -139,3 +144,9 @@ YAML 机读头 schema 复用 [docs/arch/mem/contracts/README.md](../../mem/contr
 | `AP_CWDEC_LID_OK` | `amctl_vld=1` 时，`lid_ok=1` 当且仅当两半 LID 一致。 |
 | `AP_CWDEC_CTRL_OK` | `amctl_vld=1` 时：任一半合法则对应 `*_ok` 可为 1；两半解出不同合法码字则 `*_ok=0`。 |
 | `AP_CWDEC_RST` | `rst_pyc` 有效期间 §5 各输出为 0。 |
+
+---
+
+## 7. 未知
+
+无。公开面已由 Xia 裁定 2026-10-12 闭合。码字表与符号下标按 S-01(b) 留在私有源，不是未知。

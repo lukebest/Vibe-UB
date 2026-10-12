@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -23,6 +26,55 @@ from gatelib import (
     verilator_inc_args,
     module_closure,
 )
+
+def _pyc_reg_incdirs(incdirs: list[Path]) -> list[Path]:
+    """Make `` `include "pyc_reg.v" `` resolve before #21 lands ``rtl/pyc_lib/``.
+
+    Prefer the in-tree copy; else the locked toolchain; else fetch PR #21.
+    Never write ``pyc_reg.v`` into the repo (PR #21 owns that path).
+    """
+    repo = REPO_ROOT / "rtl" / "pyc_lib"
+    if (repo / "pyc_reg.v").is_file():
+        resolved = repo.resolve()
+        return [resolved] + [d for d in incdirs if d != resolved]
+    root = os.environ.get("PYC_TOOLCHAIN_ROOT", "")
+    for cand in (
+        Path(root) / "include" / "verilog" if root else None,
+        Path("/tmp/pyCircuit/.pycircuit_out/toolchain/install/include/verilog"),
+        Path("/tmp/spike/pyCircuit/.pycircuit_out/toolchain/install/include/verilog"),
+    ):
+        if cand is None:
+            continue
+        if (cand / "pyc_reg.v").is_file():
+            resolved = cand.resolve()
+            print(f"lint: pyc_reg.v via toolchain {resolved} (#21 not in tree)")
+            return [resolved] + [d for d in incdirs if d != resolved]
+    ref = os.environ.get("PR21_REF", "origin/cursor/cmn-mem-1r1w-5d26")
+    tmp = Path(tempfile.mkdtemp(prefix="ub_lint_pyc_reg_"))
+    dest = tmp / "pyc_reg.v"
+    show = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "show", f"{ref}:rtl/pyc_lib/pyc_reg.v"],
+        check=False,
+        capture_output=True,
+    )
+    if show.returncode != 0:
+        subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "fetch", "origin", "cursor/cmn-mem-1r1w-5d26"],
+            check=False,
+            capture_output=True,
+        )
+        show = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "show", f"{ref}:rtl/pyc_lib/pyc_reg.v"],
+            check=False,
+            capture_output=True,
+        )
+    if show.returncode == 0 and show.stdout:
+        dest.write_bytes(show.stdout)
+        print(f"lint: pyc_reg.v via {ref} → {tmp} (#21 not in tree)")
+        return [tmp] + incdirs
+    print("lint: WARN pyc_reg.v not found (rtl/pyc_lib, toolchain, or #21)")
+    return incdirs
+
 
 WARN_RE = re.compile(
     r"^%(Error|Warning)(?:-([A-Z0-9_]+))?:(?:\s+(\S+):(\d+):)?"
@@ -129,7 +181,7 @@ def main() -> int:
     disc = discover_rtl()
     modules = disc["modules"]
     sources = disc["sources"]
-    incdirs = disc["incdirs"]
+    incdirs = _pyc_reg_incdirs(disc["incdirs"])
     print(
         f"RTL discovery: {len(sources)} file(s), {len(modules)} module(s), "
         f"filelists={'yes' if disc['used_filelists'] else 'no (directory scan)'}"

@@ -1327,6 +1327,9 @@ def discover_rtl() -> dict[str, Any]:
     for extra in (REPO_ROOT / "rtl", REPO_ROOT / "rtl" / "common"):
         if extra.is_dir() and extra.resolve() not in uniq_inc:
             uniq_inc.append(extra.resolve())
+    pyc_lib = REPO_ROOT / "rtl" / "pyc_lib"
+    if pyc_lib.is_dir() and pyc_lib.resolve() not in uniq_inc:
+        uniq_inc.insert(0, pyc_lib.resolve())
 
     return {
         "sources": sources,

@@ -594,6 +594,17 @@ module ub_mem_ptw_smoke_tb;
     expect_fault(1'b1, 1'b0, ILL_NONE, 1'b0);
     $display("translation fault ok");
 
+    // desc_v=1, kind=0: catch-all translation fault, no fill, back to idle.
+    mem_reset;
+    mem_push(pack_tb(1'b1, KIND_INVALID, 36'b0, 3'b0, 2'b0, 1'b0, 1'b0, 1'b0, 1'b0, ILL_NONE));
+    start_walk({16'b0, 36'h0A00_0003, 12'h000}, 6'd39);
+    expect_fault(1'b1, 1'b0, ILL_NONE, 1'b0);
+    if (!req_ready) begin
+      $display("FAIL: desc_v=1 kind=0 did not return to idle");
+      errors = errors + 1;
+    end
+    $display("desc_v=1 kind=0 catch-all xlat fault ok");
+
     // Config-illegal: no fill, ill_cause forwarded.
     mem_reset;
     mem_push(pack_tb(1'b0, KIND_INVALID, 36'b0, 3'b0, 2'b0, 1'b0, 1'b0, 1'b0, 1'b1, ILL_HW_AD));

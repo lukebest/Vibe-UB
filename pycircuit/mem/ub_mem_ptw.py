@@ -173,12 +173,16 @@ def _ptw_body(m: Circuit, test_hooks: int = 0) -> None:
     is_block = kind == u(DESC_KIND_W, KIND_BLOCK)
     is_page = kind == u(DESC_KIND_W, KIND_PAGE)
     is_leaf = is_block | is_page
+    kind_ok = is_table | is_leaf
     lvl_l3 = lvl_q.out() == u(DESC_LVL_W, LVL_L3)
     nxt_lvl = lvl_q.out() + u(DESC_LVL_W, 1)
     naddr = next_walk_addr(m, dec["desc_addr"], uba_q.out(), nxt_lvl)
 
     to_flt_ill = dec_fire & dec["desc_illegal"]
-    to_flt_xlat = dec_fire & ~dec["desc_illegal"] & ~dec["desc_v"]
+    # SPEC §14：desc_v=1 且 kind 不是 table/block/page 走翻译故障（与 !desc_v 同 flt_xlat）。
+    to_flt_xlat = (
+        dec_fire & ~dec["desc_illegal"] & (~dec["desc_v"] | ~kind_ok)
+    )
     to_next = dec_fire & ~dec["desc_illegal"] & dec["desc_v"] & is_table & ~lvl_l3
     enter_rd = to_rd_new | to_next
     to_flt_bad = dec_fire & ~dec["desc_illegal"] & dec["desc_v"] & is_table & lvl_l3
@@ -209,12 +213,19 @@ def _ptw_body(m: Circuit, test_hooks: int = 0) -> None:
     stay_flt = in_flt & ~flt_ready
     stay_evt = in_evt & ~evt_ready
 
-    st_idle.set(stay_idle | to_idle_fill | to_idle_flt | to_idle_evt)
-    st_rd.set(to_rd_new | to_next | stay_rd)
-    st_dec.set(to_dec | stay_dec)
-    st_fill.set(to_fill | stay_fill)
-    st_flt.set(to_flt_rd | to_flt_ill | to_flt_xlat | to_flt_bad | to_flt_af | stay_flt)
-    st_evt.set(to_evt_wd | stay_evt)
+    nxt_idle = stay_idle | to_idle_fill | to_idle_flt | to_idle_evt
+    nxt_rd = to_rd_new | to_next | stay_rd
+    nxt_dec = to_dec | stay_dec
+    nxt_fill = to_fill | stay_fill
+    nxt_flt = to_flt_rd | to_flt_ill | to_flt_xlat | to_flt_bad | to_flt_af | stay_flt
+    nxt_evt = to_evt_wd | stay_evt
+    any_nxt = nxt_idle | nxt_rd | nxt_dec | nxt_fill | nxt_flt | nxt_evt
+    st_idle.set(nxt_idle | ~any_nxt)
+    st_rd.set(nxt_rd)
+    st_dec.set(nxt_dec)
+    st_fill.set(nxt_fill)
+    st_flt.set(nxt_flt)
+    st_evt.set(nxt_evt)
 
     done_walk = to_idle_fill | to_idle_flt | to_idle_evt
     rd_sent.set(

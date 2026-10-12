@@ -26,7 +26,7 @@
 
 ### Changed
 
-- `docs/arch/mem/contracts/`：Xia 裁定 2026-10-12（共用 4 bit 非法码、illegal 时其余输出清零、原因优先级、`desc_kind`、`out_ready` 反压、`in_ready` 复位后首拍、时钟域、YAML 机读头；D-05 项改暂缓；TECTE/MAPTE 条目尺寸、`lvl`、`ctx_mapt_bb_sz`；按 Q-A11，2 MB / 1 GB 页表块合法，`ILL_MAP_2MB` 只对应 TCTE 范围表颗粒度；`ub_mem_ptw_desc_dec` 保留 `desc_lvl[1:0]`，各级表按输入编码类 `ENC_INVALID` / `ENC_TBL_PG` / `ENC_BLOCK` 交叉，L0 / L3 保留编码走翻译故障；C-D1 后 `ub_mem_dec_ent_dec` L0/L1 均为寄存 1 拍，去掉 `comb_budget_ns`）。
+- `docs/arch/mem/contracts/`：Xia 裁定 2026-10-12（共用 4 bit 非法码、illegal 时其余输出清零、原因优先级、`desc_kind`、`out_ready` 反压、`in_ready` 复位后首拍、时钟域、YAML 机读头；D-05 项改暂缓；TECTE/MAPTE 条目尺寸、`lvl`、`ctx_mapt_bb_sz`；按 Q-A11，2 MB / 1 GB 页表块合法，`ILL_MAP_2MB` 只对应 TCTE 范围表颗粒度；`ub_mem_ptw_desc_dec` 保留 `desc_lvl[1:0]`，各级表按输入编码类 `ENC_INVALID` / `ENC_TBL_PG` / `ENC_BLOCK` 交叉，L0 / L3 保留编码走翻译故障；C-D1 后 `ub_mem_dec_ent_dec` L0/L1 均为寄存 1 拍；`comb_budget_ns` 仅 0 拍组合路径必填，寄存叶子不写该键）。
 - SPEC §3.3.4 / §6.1 / §13 A-23：新增 PCS→LMSM `pcs2lmsm_rx_nonnull_blk`（1 bit、`core_clk`、1 拍脉冲、复位 0；与 `pcs2lmsm_null_blk` 同一对齐点与门控，同拍互斥，接口断言）。LMSM `Send_NullBlock` RX 连续计数在该脉冲清零。Xia 裁定 2026-10-12 / D20。
 - SPEC §6.1 / §4.1 / §9 / §13 A-08 / A-23 + D20：`PROBE_WAIT_CYC` 与 `RETRY_WAIT_CYC` 同规则（16 bit CSR、复位 323、合法 1..65535、0→323、进入等待当拍采样）；叶子口 `probe_wait_cyc[15:0]`。`Send_NullBlock` 计数：规范派生 UB-PHY §3.4.3.6（RX 连续 8、TX 在首个 RX 之后 ≥16）；Xia 裁定 2026-10-12 / D20（进入拍保持 0 且该拍脉冲不计入、离态重开、RX 清零时 TX/标志保持、饱和、当拍条件成立下一沿进 Active、2 ms / Discovery 优先）。本 PR 不改 `regmap.yaml`。
 - SPEC §13 / §2.4 / §3 / §6.1 / §6.3 / §9 + DECISIONS D20：船长 2026-10-12 09:05 裁定 104 条待决表，全部按建议。A 线 A-01~A-24 / A-VL 逐行关闭（占位 / 已定 / 实现后回填）；Probe 与 RETRY_WAIT 默认 4 µs（ceil → 323 拍）；`NUM_RETRY_THRESHOLD`/`NUM_PHY_REINIT_THRESHOLD`=15/4；`LFSR_INIT` 全 0 且 `en=0`；工艺 Sky130 代理；scrambler 只出 `_placeholder`。本 PR 吸收并收口 PR #9。

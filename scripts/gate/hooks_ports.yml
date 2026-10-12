@@ -155,3 +155,17 @@ entries:
     approver: lukebest
     approved_date: 2026-10-10
     review_when: SPEC §10 ub_mem_tlb hook list changes
+
+  # SPEC §10.5: walker observe only (HOOKS = PRODUCT + these two).
+  # No tb_test_mode: ports are read-only Q, not gated by tb_test_mode.
+  - id: HOOKS-UB-MEM-PTW
+    module: ub_mem_ptw
+    extra_ports:
+      - name: tb_mem_ptw_obs_st
+        width: 6
+      - name: tb_mem_ptw_obs_rd_pend
+        width: 1
+    reason: SPEC §10 / §10.5 — ub_mem_ptw observe (AP_TBLRD_REQ_HOLD k-induction)
+    approver: lukebest
+    approved_date: 2026-10-12
+    review_when: SPEC §10 ub_mem_ptw hook list changes

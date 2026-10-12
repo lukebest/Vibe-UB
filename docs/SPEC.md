@@ -1019,6 +1019,24 @@ Retry 深度下界公式见 UB-DL §4.7.3.2（含 FEC 120/128 与 RTT）。M1 25
 
 断言意图（formal，HOOKS bind；仅 `lkup_v=1`）：one-hot hit、无重复 tag、invalid way 不得 hit。不在此展开表项字段布局。
 
+第二个登记叶子：`ub_mem_ptw`（线 C 页表遍历器；PM 裁定）。两口仅 `TEST_HOOKS=1`；只出不进；直出状态寄存器 / `rd_valid_q` 的 Q；**不受** `tb_test_mode` 门控。状态机编码保持实现侧既有拼接（#48 `d1f42ab9` `pycircuit/mem/ub_mem_ptw.py`），不改为一hot 重新编码。用途：walker 形式证明的辅助不变量（`AP_TBLRD_REQ_HOLD` k-induction）。
+
+| 端口 | 方向 | 宽度 | 时钟域 | 接入 | 含义 |
+| --- | --- | --- | --- | --- | --- |
+| `tb_mem_ptw_obs_st` | out | 6 | `core_clk` | `ub_mem_ptw` | 状态寄存器 Q 直出（只读）。拼接 `{st_evt, st_flt, st_fill, st_dec, st_rd, st_idle}` |
+| `tb_mem_ptw_obs_rd_pend` | out | 1 | `core_clk` | `ub_mem_ptw` | `= rd_valid_q`（Q 直出，只读） |
+
+`tb_mem_ptw_obs_st` 编码（宽 6；未列出的值非法）：
+
+| 值 | 状态 |
+| --- | --- |
+| 1 | `st_idle` |
+| 2 | `st_rd` |
+| 4 | `st_dec` |
+| 8 | `st_fill` |
+| 16 | `st_flt` |
+| 32 | `st_evt` |
+
 ---
 
 ## 11. 两套生成网表（`TEST_HOOKS`）

@@ -4,6 +4,7 @@
 
 ### Added
 
+- `docs/SPEC.md` §14：线 C 第 9 章（UMMU / 译码器）首轮裁定写入 MEM 章（船长 2026-10-12 09:05 / D20；S-01 落地见同日 09:20）。每条引用规范节与决策 ID。§10.5 按 C-D1 撤 `mem_dec_b0`…`mem_dec_b7`。docs-only。
 - `docs/arch/mem/contracts/`：C 线私有解码叶子公开信号契约（D20 S-01 (b)；docs-only）。
 - `tb/models/ub_pcs_fec.py`：RS(128,120) FEC 编解码黄金模型（UB-PHY §3.2.2.1 / §3.2.3.5，SPEC §2.4 `ub_pcs_fec_enc` / `ub_pcs_fec_dec`；T=4 / T=2 / bypass）。
 - `scripts/impl/buffer_fanout.py`：Yosys JSON 上确定性 `buf_4`/`buf_8` 扇出树（quick-synth 默认在 abc 之后调用）。
@@ -26,6 +27,7 @@
 
 ### Changed
 
+- SPEC §14 Q-C07 / Q-A08 / Q-A11：`ub_mem_tbl_rd` 的 `len`（8 bit 字节数，合法 8/32/64）与 `tag`（4 bit）；请求侧由寄存器驱动、不要求同拍首读，`valid && !ready` 时下一拍保持 `valid` 与 `addr`/`len`/`tag`（`AP_TBLRD_REQ_HOLD`）；遍历器事件口暂定 `evt_valid`/`evt_ready`、`EVT_CODE_W=4`、`EVT_MATT_WD_MISS`=1（等 Q-E09）；遍历器对 `ub_mem_ptw_desc_dec` 任意输出回到合法态，`desc_v=1` 且 `desc_kind` ∉ {1,2,3} 走既有翻译故障分支与既有故障码。§10 登记 `ub_mem_ptw` 观察口 `tb_mem_ptw_obs_st`（6 bit 一hot `{st_evt, st_flt, st_fill, st_dec, st_rd, st_idle}`，#48 `b522fd6`）与 `tb_mem_ptw_obs_rd_pend`（1 bit，`= rd_valid_q`；仅 `TEST_HOOKS=1`，不受 `tb_test_mode` 门控；`AP_TBLRD_REQ_HOLD` k-induction）。Xia 裁定 2026-10-12 11:05。
 - GATE-EQY-004 (split from #16 onto main): `equiv_ref.sh` / `equiv_regpair.py` write per-side named binary combinational AIGER for `&cec` (never `write_aiger -miter` / `-ascii`). NOT EQ is a verdict only with a replayable CEX; otherwise `SCRIPT_ERROR`. After `&cec` timeout, method (5) affine next-state folds `start`/`valid_in`/`last` (8 combos, `rst_pyc=0`) at Yosys coarse grain; allowed `$xor`/`$xnor`/`$not`/`$reduce_xor`/`$reduce_xnor`/`$pos`/const; leftover `$mux`/`$pmux` or other cells = N/A. Self-tests: `d[0]&d[1]` and data-bit `$mux` fail the precondition; one-bit affine plant is NOT EQ with CEX. **Open:** ABC `&cec` AIGER export on RX leaves 294 PIs unused (script bug); RX 1-bit POs fall back to Yosys `sat -prove-asserts`, remaining wide `rp_d_*` to affine.
 - `docs/arch/mem/contracts/`：六份叶子契约 YAML 增补必填 `assertions:`（正文引用的 `AP_*` ID，去重排序，参与契约 hash）。
 - 门禁（#21 对接）：lint 不再把 `rtl/pyc_lib/` 原语既 `-I` 又当第二份源（`MODDUP`）；cdc 对 `rtl/pyc_lib/` 的 `clk` 不报 `CLOCK_NOT_CORE`（产品叶子仍必须 `core_clk`）；`formal.sh` 在 `.sby` 目录跑 `sby`（`[files]` 同目录相对路径，与 `make -C formal` 一致），缺文件报 `SBY_FILE_MISSING` 不抛异常；CI 用 `setup_sby.sh` 装 YosysHQ/sby + z3（apt 没有 sby 包）；tb-selfcheck 按 `TOOLCHAIN.lock` 安装/要求 Verilator，`model/` / `tb/cmn` / `tb/models` 分别计数，pytest skip 即失败。provenance 维持 AST-only，重生成逐字节仍走 `scripts/emit_rtl.py`（不采纳自制 pycc argv 比对）。

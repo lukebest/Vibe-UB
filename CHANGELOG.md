@@ -4,6 +4,7 @@
 
 ### Added
 
+- 实现 quick-synth：私有叶子契约发现、公开 CI `PRIVATE_SKIP` 黑盒、attest 模式（公开 `reports/private/<layer>/<leaf>.yml`，私有仓 `attest/<layer>/<leaf>.yml`）。
 - `pycircuit/cmn/ub_cmn_mem_1r1w.py` → `rtl/cmn/` 与 `rtl/cmn/hooks/` 的 `ub_cmn_mem_1r1w_{d5w8,d8w16,d64w64m16}.v`：pycc 固定网表（SPEC §2.2，`d<DEPTH>w<WIDTH>`，N>1 加 `m<WMASK_W>`）。PRODUCT=`TEST_HOOKS=0`，HOOKS=`TEST_HOOKS=1`；§10 无 `tb_*`，两套端口与模块名相同。时钟 `core_clk`；无复位口（业务叶标准名 `rst_pyc`，本原语不引出）。生成参数 `WMASK_W`（默认 = `WIDTH`，整字写；`WIDTH` 须整除）；N=`WIDTH/WMASK_W`>1 时多 `wmask[N-1:0]`，bit i 写段 i，其余段保持；同址同拍 per-segment read-old。1R1W、读 1 拍；阵列与 `rdata` 无复位 / 无零初始化；越界不截断。`scripts/emit_rtl.py` / `make emit` 再现。较大 C 线变体（如 `d512w512m64`）不在本登记表，可经清单流后补。pycc 运行时原语（`pyc_reg.v`）只放 `rtl/pyc_lib/`，从 TOOLCHAIN 钉住的 pyCircuit（`43cc5918`）原样拷贝；层目录不再放 `pyc_*`。
 - `model/ub_cmn_mem_1r1w.py` + `formal/cmn/`：1R1W 存储原语参考模型与接口断言（CODING_STYLE §10 / PR #20 时序提案；`ASSERT_NO_UNINIT_READ` 默认 1；formal 用 anyconst 单地址抽象）。
 - `scripts/gate/handwritten.yml`：`HW-PYC-REG`（`rtl/pyc_lib/pyc_reg.v`，批准人 验证）；免 emit-consistency / hooks / equiv，仍走 lint 与 Yosys。
@@ -41,6 +42,7 @@
 
 ### Changed
 
+- `scripts/impl/quick_synth.*`：`rtl/pyc_lib/` 缺失改为硬失败（目录来自 PR #21，必须存在）；去掉回退 `rtl/common` 的临时 WARN。attest 的 `contract_sha256` 只调用 main 上 `scripts/gate/contract_hash.py`；自测假仓库拷该文件，不再自带副本。
 - SPEC §2.4 / §3.3.4 / §9 / §10.2：`pcs_am_locked` / `tb_inj_am_lock` 改为 1 bit（已配置 RX lane 全锁定）；`ub_pcs_amctl_rx` 含 §3.2.4.4 分 lane 锁定，码字解码在 `ub_pcs_amctl_cw_dec`。Xia 裁定 2026-10-12。
 - `docs/arch/pcs/contracts/ub_pcs_amctl_cw_dec.md`：YAML 增补必填 `assertions:`（正文 8 条 `AP_CWDEC_*`，去重排序）。schema 源 main `73cfa6e1`（#49）。
 - `docs/arch/mem/contracts/ub_mem_ptw_desc_dec.md`：`AP_PTW_KIND` 改为 `desc_v ⇔ desc_kind≠0`（`desc_v=1` 当且仅当 `desc_kind` 非 0；`desc_v=0` 时 `desc_kind` 必须为 0）。编码仍为 0 = invalid / 1 = table / 2 = block / 3 = page。芯片开发PM 2026-10-12。

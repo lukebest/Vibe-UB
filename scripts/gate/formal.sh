@@ -9,7 +9,7 @@ source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
 python3 -P "$GATE_DIR/formal_bind.py"
 
-# stdout = runnable .sby paths; PRIVATE_SKIP lines go to stderr (job log).
+# formal/<iface>/*.sby only (GATE-FOR-002); PRIVATE_SKIP on stderr.
 mapfile -t SBY_FILES < <(python3 -P "$GATE_DIR/private_leaves.py" --list-sby)
 
 if [[ ${#SBY_FILES[@]} -eq 0 ]]; then
@@ -26,8 +26,12 @@ fi
 
 fail=0
 for sby in "${SBY_FILES[@]}"; do
-  echo "=== sby -f ${sby#"$REPO_ROOT/"} ==="
-  if ! sby -f "$sby"; then
+  sby_dir=$(dirname "$sby")
+  sby_base=$(basename "$sby")
+  rel_sby=${sby#"$REPO_ROOT/"}
+  echo "=== sby -f ${rel_sby} (cwd ${sby_dir#"$REPO_ROOT/"}) ==="
+  # [files] tokens are sibling-relative, same as `make -C formal` (`cd iface && sby`).
+  if ! (cd "$sby_dir" && sby -f --sequential "$sby_base"); then
     echo "formal FAIL: $sby"
     fail=1
   fi

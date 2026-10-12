@@ -152,6 +152,7 @@ spec-leak finding 一律按新叶子拦截，不用 `legacy.txt` 放行。
 | GATE-LINT-002 | error 数为 0 | CODING_STYLE §7 | 2026-10-10 |
 | GATE-LINT-003 | warning 必须命中已批准豁免，否则按 §1 分栏处理 | CODING_STYLE §7 | 2026-10-10 |
 | GATE-LINT-004 | 未登记桩 / 黑盒拦截；已登记桩照常 lint | §1.2 | 2026-10-10 |
+| GATE-LINT-005 | `rtl/pyc_lib/` 原语只经 `-I` + `` `include `` 读入；不得再当作第二份源文件（否则 `%Warning-MODDUP`）。原语自己仍单独 lint | #21 pyc_reg | 2026-10-12 |
 
 **发现方式：** 若存在 `rtl/**/*.f` 或 `scripts/gate/filelists/*.f` 则读 filelist（支持 `+incdir+` / `-I`）；否则扫描 `rtl/<layer>/` 与 `rtl/<layer>/hooks/`，以及 `rtl/` 根下手写残留。排除 `*_tb.v` 与 `tb/`。
 
@@ -200,6 +201,7 @@ M1 单时钟 `core_clk`（SPEC §4.1）。`rst_n` 异步置位、同步释放，
 | GATE-CDC-004 | `rst_n` 入口 | 带 `rst_n` 的时序模块未实例化合法复位同步单元 | SPEC §4.2 | 2026-10-10 |
 | GATE-CDC-005 | 异步 / 非 `core_clk` 输入 | 命中 `async_input_regex` 的输入未进 2 级同步器 | CODING_STYLE §2 | 2026-10-10 |
 | GATE-CDC-006 | `ub_cmn_mem_1r1w` 时钟口 | 不是 `core_clk`（Xia） | SPEC §4.1 | 2026-10-10 |
+| GATE-CDC-007 | `rtl/pyc_lib/` 原语时钟口 | 锁定的 pycc 原语保持 `clk` 等引脚名，不报 `CLOCK_NOT_CORE`；产品叶子仍必须 `core_clk` | #21 pyc_reg | 2026-10-12 |
 
 **失败判据：** 新叶子上出现未豁免的上述 id。legacy（当前手写 `clk` + `or negedge rst_n`）只报告，不拦合入。
 
@@ -210,11 +212,12 @@ M1 单时钟 `core_clk`（SPEC §4.1）。`rst_n` 异步置位、同步释放，
 | ID | 规则 | 来源 | 日期 |
 | --- | --- | --- | --- |
 | GATE-FOR-001 | 路径 `formal/<iface>/*.sv` + `*.sby`；每个接口自带小桩，无产品 RTL 也能跑 | 架构约定；TEAM 接口断言归 Xia | 2026-10-10 |
-| GATE-FOR-002 | 遍历 `formal/*/*.sby`（含 `formal/cmn/`），`sby -f` 逐个跑；任一失败即失败 | 同上 | 2026-10-10 |
+| GATE-FOR-002 | 遍历 `formal/*/*.sby`（含 `formal/cmn/`），在 `.sby` 所在目录执行 `sby -f`（与 `make -C formal` 的 `cd <iface> && sby` 相同，`[files]` 为同目录相对路径）；任一失败即失败 | 同上 | 2026-10-10 |
 | GATE-FOR-003 | 目录下没有 `*.sby` 时 job 成功并打印 `no assertions yet` | 同上 | 2026-10-10 |
 | GATE-FOR-004 | `formal/**/*.sby` 及其引用的断言里，`bind` 的每个信号必须在对应网表中存在；找不到即拦 | PM | 2026-10-10 |
+| GATE-FOR-005 | `[files]` 里的相对路径先相对 `.sby` 目录解析；找不到报 `SBY_FILE_MISSING`，不得抛 `FileNotFoundError` | #21 cmn.sby | 2026-10-12 |
 
-有 `.sby` 但机器上没有 `sby`：失败（不得假装跑过）。
+有 `.sby` 但机器上没有 `sby`：失败（不得假装跑过）。ubuntu-24.04 的 apt 没有 `sby` 包；CI 用 `scripts/gate/setup_sby.sh` 装 YosysHQ/sby（默认 `v0.69`）并要求 `z3`（`smtbmc z3`）。`apt-get install sby || true` 不够。
 
 ---
 
@@ -300,7 +303,12 @@ Xia 裁定（SPEC §11 (f)）。钩子清单：`scripts/gate/hooks_ports.yml`，
 | cocotb | `tb/Makefile` 与 `tb/*/Makefile` 上的 `selfcheck-both`（优先）或 `selfcheck`；`SIM=icarus` |
 | 不跑 | D10 `*_tb.v` 手写台 |
 
-Icarus 是仿真过 / 不过（D7）。门禁脚本不修改 `model/`、`tb/models/`。
+Icarus 是 D7 仿真过 / 不过。Verilator 按 `TOOLCHAIN.lock`（当前 5.020）安装并必须在 PATH 上，否则 tb/cmn PRODUCT+HOOKS RTL sim 会 skip。`model/`、`tb/cmn`、`tb/models` 分开收集并打印条数；任一 skip / fail 即失败。门禁脚本不修改 `model/`、`tb/models/`。
+
+| ID | 规则 | 来源 | 日期 |
+| --- | --- | --- | --- |
+| GATE-TB-VL-001 | tb-selfcheck 安装并核对 `TOOLCHAIN.lock` 的 Verilator；缺工具失败，不得 skip | 验证-B / #21 | 2026-10-12 |
+| GATE-TB-VL-002 | pytest 对 `model/`、`tb/cmn`、`tb/models` 分别计数；skip>0 或 fail>0 即失败 | 验证-B | 2026-10-12 |
 
 ### 8.0 成对模块 TB（审查项，不自动拦截）
 
@@ -345,7 +353,7 @@ PR 审查清单见 §11。本条不写自动 finding，避免误杀尚未补齐�
 | --- | --- | --- | --- |
 | GATE-PROV-001 | `pycircuit/<layer>/*.py` 叶子必须 `import pycircuit`（`ast.Import` / `ast.ImportFrom`） | PM | 2026-10-10 |
 | GATE-PROV-002 | 只扫代码里的字符串常量与 f-string（`JoinedStr`）；跳过注释和模块 / 类 / 函数 docstring。命中 `module ` / `endmodule` / `always @` 即失败 | PM | 2026-10-10 |
-| GATE-PROV-003 | `scripts/gate/setup_pycircuit.sh` 按设计已跑通的步骤安装。版本只在仓库根 `TOOLCHAIN.lock` 一处（第二份报冲突）。重生成比对归 rtl-emit-consistency，只调用 `scripts/emit_rtl.py`，本 job 不拼 pycc 命令 | 设计 spike | 2026-10-10 |
+| GATE-PROV-003 | `scripts/gate/setup_pycircuit.sh` 按设计已跑通的步骤安装。版本只在仓库根 `TOOLCHAIN.lock` 一处（第二份报冲突）。重生成比对归 rtl-emit-consistency，只调用 `scripts/emit_rtl.py`，本 job 不拼 pycc 命令。#14 自制 `pycircuit.cli emit` + `pycc --include-primitives=0` 裸字节比对会逼产品叶子丢掉 `` `include "pyc_reg.v" `` / SPEC §2.2 变体名 / HOOKS 路径，**不**回退；逐字节一致规则不放宽 | 设计-B #21；#33 | 2026-10-10 |
 | GATE-PROV-004 | 白名单手写 SV 不受此项约束。`ub_cmn_mem_1r1w` 按普通叶子检查 | Xia | 2026-10-10 |
 | GATE-PROV-005 | 参数变体按 SPEC §2.2 逐个发现与比对。`_placeholder` 变体只跑 lint 与 TB，报告标出，不算 PRODUCT | SPEC §2.2 | 2026-10-10 |
 | GATE-PROV-006 | PRODUCT 网表不得例化 `_placeholder`；placeholder 源码必须有 `PLACEHOLDER_SOURCE` | SPEC §2.2 | 2026-10-10 |

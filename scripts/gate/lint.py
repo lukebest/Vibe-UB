@@ -15,6 +15,7 @@ from gatelib import (
     collect_stub_findings,
     discover_rtl,
     emit_report,
+    is_pyc_lib_path,
     print_tool_versions,
     rel,
     run_cmd,
@@ -66,6 +67,29 @@ def parse_verilator(text: str, module: str, default_file: str) -> list[Finding]:
     return findings
 
 
+def lint_sources_for(module_file: Path, closure: list[Path]) -> list[Path]:
+    """Sources passed to Verilator for one top.
+
+    ``rtl/pyc_lib/`` primitives are pulled in via ``-I`` + `` `include ``.
+    Passing them again as sources is ``%Warning-MODDUP``. Still lint the
+    primitive itself when it is the top.
+    """
+    top = module_file.resolve()
+    seen: set[Path] = set()
+    ordered: list[Path] = []
+    for p in [module_file, *closure]:
+        if p.suffix.lower() not in {".v", ".sv"}:
+            continue
+        rp = p.resolve()
+        if rp in seen:
+            continue
+        if is_pyc_lib_path(rp) and rp != top:
+            continue
+        seen.add(rp)
+        ordered.append(rp)
+    return ordered
+
+
 def lint_module(module: str, file: Path, sources: list[Path], incdirs: list[Path]) -> list[Finding]:
     argv = [
         "verilator",
@@ -76,16 +100,7 @@ def lint_module(module: str, file: Path, sources: list[Path], incdirs: list[Path
         *verilator_inc_args(incdirs),
     ]
     # Unit + discovered children only (do not feed the whole tree as sources).
-    seen: set[Path] = set()
-    ordered: list[Path] = []
-    for p in [file, *sources]:
-        if p.suffix.lower() not in {".v", ".sv"}:
-            continue
-        rp = p.resolve()
-        if rp in seen:
-            continue
-        seen.add(rp)
-        ordered.append(rp)
+    ordered = lint_sources_for(file, sources)
     argv.extend(str(p) for p in ordered)
     proc = run_cmd(argv)
     text = proc.stdout or ""

@@ -855,18 +855,20 @@ def collect_contract_findings(
 
 
 def list_runnable_sby(root: Path) -> list[Path]:
+    """formal/<iface>/*.sby only (GATE-FOR-002). Skip registered private leaves."""
     formal = root / "formal"
     if not formal.is_dir():
         return []
     out: list[Path] = []
-    for path in sorted(formal.rglob("*.sby")):
-        if is_private_leaf(path.stem, root):
-            print(
-                f"PRIVATE_SKIP: {path.relative_to(root).as_posix()}",
-                file=sys.stderr,
-            )
-            continue
-        out.append(path)
+    for iface in sorted(p for p in formal.iterdir() if p.is_dir()):
+        for path in sorted(iface.glob("*.sby")):
+            if is_private_leaf(path.stem, root):
+                print(
+                    f"PRIVATE_SKIP: {path.relative_to(root).as_posix()}",
+                    file=sys.stderr,
+                )
+                continue
+            out.append(path)
     return out
 
 

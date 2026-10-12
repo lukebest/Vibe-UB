@@ -452,6 +452,30 @@ def load_handwritten() -> list[dict[str, Any]]:
     return _load_approved_list(HANDWRITTEN_LIST, "entries", "HANDWRITTEN")
 
 
+def is_pyc_lib_path(path: Path | str) -> bool:
+    """True for files under ``rtl/pyc_lib/`` (any absolute or relative path)."""
+    return "pyc_lib" in {p.lower() for p in Path(path).parts}
+
+
+def is_library_primitive_path(path: Path | str, rules: dict | None = None) -> bool:
+    """pycc runtime primitives: pin names stay as the locked cell (clk, not core_clk)."""
+    if is_pyc_lib_path(path):
+        return True
+    rels = str(path).replace("\\", "/")
+    try:
+        rels = rel(path)
+    except Exception:
+        pass
+    rels = rels.replace("\\", "/")
+    for raw in (rules or {}).get("library_primitive_dirs") or ():
+        d = str(raw).replace("\\", "/").rstrip("/")
+        if not d:
+            continue
+        if rels == d or rels.startswith(d + "/"):
+            return True
+    return False
+
+
 def is_handwritten_path(path: Path) -> bool:
     rel_path = rel(path)
     for entry in load_handwritten():

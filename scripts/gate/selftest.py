@@ -9,7 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from formal_bind import check_formal_binds
+from cdc_rdc import analyze_module
+from formal_bind import check_formal_binds, discover_sby_files, sby_run_cwd
 from gatelib import (
     Finding,
     collect_lock_completeness_findings,
@@ -24,9 +25,11 @@ from gatelib import (
     repo_root_on_sys_path,
     run_cmd,
     sha256_file,
+    shutil_which,
 )
 from hooks_port_consistency import compare_ports
 from large_mem_manifest import check_large_mem_manifest
+from lint import lint_module, lint_sources_for, parse_verilator
 from pyc_lib_check import check_pyc_lib
 from pycircuit_provenance import static_splice_check
 from private_selftest import run_all as run_private_selftests
@@ -35,6 +38,7 @@ from rtl_emit_consistency import (
     emit_unavailable_findings,
     run_equiv,
 )
+from tb_selfcheck import parse_junit_counts, pytest_skip_is_fail, required_sim_tools
 
 
 def _fail(name: str, detail: str) -> None:
@@ -315,6 +319,193 @@ def test_sby_bind_missing_signal() -> None:
         )
         hits = check_formal_binds(repo)
         _expect_rule("sby-bind-missing-signal", hits, "BIND_SIGNAL_MISSING")
+
+
+def test_lint_pyc_lib_not_passed_twice() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        lib = Path(tmp) / "rtl" / "pyc_lib" / "pyc_reg.v"
+        leaf = Path(tmp) / "rtl" / "cmn" / "ub_leaf.v"
+        lib.parent.mkdir(parents=True)
+        leaf.parent.mkdir(parents=True)
+        lib.write_text(
+            "module pyc_reg(input clk, input d, output q);\n"
+            "  assign q = d;\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        leaf.write_text(
+            '`include "pyc_reg.v"\n'
+            "module ub_leaf(input core_clk, input d, output q);\n"
+            "  pyc_reg u_r(.clk(core_clk), .d(d), .q(q));\n"
+            "endmodule\n",
+            encoding="utf-8",
+        )
+        srcs = lint_sources_for(leaf, [leaf, lib])
+        if any(p.resolve() == lib.resolve() for p in srcs):
+            _fail("lint-pyc-lib-filter", "pyc_lib primitive must not be a second source")
+        if leaf.resolve() not in {p.resolve() for p in srcs}:
+            _fail("lint-pyc-lib-filter", "leaf itself must stay in the source list")
+        print("SELFTEST PASS lint-pyc-lib-filter: include-only, no second source")
+        if shutil_which("verilator"):
+            hits = lint_module("ub_leaf", leaf, [leaf, lib], [lib.parent])
+            if any(f.rule == "MODDUP" for f in hits):
+                _fail("lint-pyc-lib-include", hits[0].message)
+            print("SELFTEST PASS lint-pyc-lib-include: no MODDUP with -I rtl/pyc_lib")
+
+
+def test_lint_moddup_still_caught() -> None:
+    text = (
+        "%Warning-MODDUP: rtl/cmn/dup.v:1:1: Duplicate declaration of module: 'ub_dup'"
+    )
+    hits = parse_verilator(text, "ub_dup", "rtl/cmn/dup.v")
+    _expect_rule("lint-moddup-parse", hits, "MODDUP")
+    if shutil_which("verilator"):
+        with tempfile.TemporaryDirectory() as tmp:
+            a = Path(tmp) / "a.v"
+            b = Path(tmp) / "b.v"
+            body = "module ub_dup(input core_clk);\nendmodule\n"
+            a.write_text(body, encoding="utf-8")
+            b.write_text(body, encoding="utf-8")
+            hits = lint_module("ub_dup", a, [a, b], [])
+            _expect_rule("lint-moddup-live", hits, "MODDUP")
+
+
+def test_cdc_pyc_lib_clk_not_core() -> None:
+    rules = {
+        "clock_port_regex": r"(^clk$|_clk$|^clock$)",
+        "allowed_clocks": ["core_clk"],
+        "forbidden_clocks": ["pma_clk"],
+        "require_single_clock": True,
+        "library_primitive_dirs": ["rtl/pyc_lib"],
+        "async_reset_whitelist_cells": ["ub_rst_sync"],
+        "sync_cells": [],
+        "async_input_regex": [],
+    }
+    lib = Path("/tmp/cdc-lib/rtl/pyc_lib/pyc_reg.v")
+    prod = Path("/tmp/cdc-lib/rtl/cmn/ub_foo.v")
+    lib_text = "input clk;\ninput d;\noutput q;\n"
+    prod_text = "input clk;\noutput q;\n"
+    lib_hits = analyze_module("pyc_reg", lib, lib_text, rules)
+    if any(f.rule == "CLOCK_NOT_CORE" for f in lib_hits):
+        _fail("cdc-pyc-lib-clk", "rtl/pyc_lib clk must not be CLOCK_NOT_CORE")
+    print("SELFTEST PASS cdc-pyc-lib-clk: primitive clk ignored")
+    prod_hits = analyze_module("ub_foo", prod, prod_text, rules)
+    _expect_rule("cdc-product-clk", prod_hits, "CLOCK_NOT_CORE")
+
+
+def test_setup_sby_refuses_missing_z3_note() -> None:
+    setup = Path(__file__).resolve().parent / "setup_sby.sh"
+    text = setup.read_text(encoding="utf-8")
+    if "SBY_REF" not in text or "z3" not in text:
+        _fail("setup-sby", "setup_sby.sh must pin a sby ref and require z3")
+    print("SELFTEST PASS setup-sby: pin + z3 required")
+
+
+def test_sby_relative_and_missing() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        sby = repo / "formal" / "cmn" / "cmn.sby"
+        props = repo / "formal" / "cmn" / "ub_if_props.sv"
+        sby.parent.mkdir(parents=True)
+        props.write_text("module ub_if_props;\nendmodule\n", encoding="utf-8")
+        sby.write_text(
+            "\n".join(
+                [
+                    "[options]",
+                    "mode bmc",
+                    "[script]",
+                    "read -sv ub_if_props.sv",
+                    "[files]",
+                    "ub_if_props.sv",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        if sby_run_cwd(sby) != sby.parent.resolve():
+            _fail("sby-cwd", f"expected {sby.parent}, got {sby_run_cwd(sby)}")
+        hits = check_formal_binds(repo)
+        if any(f.rule == "SBY_FILE_MISSING" for f in hits):
+            _fail("sby-relative-found", hits[0].message)
+        print("SELFTEST PASS sby-relative-found: sibling [files] token resolves")
+        sby.write_text(
+            "\n".join(
+                [
+                    "[options]",
+                    "mode bmc",
+                    "[files]",
+                    "ub_cmn_mem_1r1w_if_props.sv",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        hits = check_formal_binds(repo)
+        _expect_rule("sby-file-missing", hits, "SBY_FILE_MISSING")
+        work = repo / "formal" / "cmn" / "cmn_bmc"
+        work.mkdir()
+        (work / "config.sby").write_text("[files]\nmissing.sv\n", encoding="utf-8")
+        found = {p.resolve() for p in discover_sby_files(repo)}
+        if (work / "config.sby").resolve() in found:
+            _fail("sby-skip-workdir", "sby workdir config.sby must not be discovered")
+        hits = check_formal_binds(repo)
+        if any("cmn_bmc/config.sby" in (f.file or "") for f in hits):
+            _fail("sby-skip-workdir", "workdir config.sby must not produce findings")
+        print("SELFTEST PASS sby-skip-workdir: only formal/<iface>/*.sby")
+
+
+def test_tb_selfcheck_sh_drops_pycircuit_venv() -> None:
+    text = (Path(__file__).resolve().parent / "tb_selfcheck.sh").read_text(
+        encoding="utf-8"
+    )
+    if ".pycircuit-venv" not in text or "deactivate" not in text:
+        _fail("tb-drop-pyc-venv", "tb_selfcheck.sh must leave the pycc venv")
+    print("SELFTEST PASS tb-drop-pyc-venv: provenance venv is not used for TB")
+
+
+def test_tb_requires_verilator() -> None:
+    missing = required_sim_tools(
+        which=lambda name: "/usr/bin/iverilog" if name == "iverilog" else None
+    )
+    if "verilator" not in missing:
+        _fail("tb-requires-verilator", "missing verilator must be reported")
+    if "iverilog" in missing:
+        _fail("tb-requires-verilator", "present iverilog must not be reported")
+    print("SELFTEST PASS tb-requires-verilator: Verilator absence is a hard fail")
+
+
+def test_tb_skip_is_fail() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        xml = Path(tmp) / "skip.xml"
+        xml.write_text(
+            """<?xml version="1.0" encoding="utf-8"?>
+<testsuite name="tb.cmn.tests.test_sim" tests="2" failures="0" skipped="1" errors="0">
+  <testcase classname="tb.cmn.tests.test_sim" name="test_rtl_positive_all_variants[product]"/>
+  <testcase classname="tb.cmn.tests.test_sim" name="test_rtl_positive_all_variants[hooks]">
+    <skipped message="Verilator not on PATH"/>
+  </testcase>
+</testsuite>
+""",
+            encoding="utf-8",
+        )
+        counts = parse_junit_counts(xml)
+        if int(counts["collected"]) != 2 or int(counts["skipped"]) != 1:
+            _fail("tb-skip-is-fail", f"bad counts {counts}")
+        if not pytest_skip_is_fail(counts):
+            _fail("tb-skip-is-fail", "a skipped RTL sim must fail the job")
+        print("SELFTEST PASS tb-skip-is-fail: skipped pytest is a gate fail")
+        xml.write_text(
+            """<?xml version="1.0" encoding="utf-8"?>
+<testsuite name="model.tests" tests="28" failures="0" skipped="0" errors="0">
+  <testcase classname="model.tests.test_ub" name="test_ok"/>
+</testsuite>
+""",
+            encoding="utf-8",
+        )
+        ok = parse_junit_counts(xml)
+        if pytest_skip_is_fail(ok) or int(ok["skipped"]) != 0:
+            _fail("tb-skip-is-fail", "clean junit must pass")
+        print("SELFTEST PASS tb-junit-clean: 0 fail / 0 skip accepted")
 
 
 def test_deleted_roster_not_error() -> None:
@@ -844,6 +1035,14 @@ def main() -> int:
         test_unlisted_tb_obs,
         test_obs_must_be_output,
         test_sby_bind_missing_signal,
+        test_lint_pyc_lib_not_passed_twice,
+        test_lint_moddup_still_caught,
+        test_cdc_pyc_lib_clk_not_core,
+        test_setup_sby_refuses_missing_z3_note,
+        test_sby_relative_and_missing,
+        test_tb_selfcheck_sh_drops_pycircuit_venv,
+        test_tb_requires_verilator,
+        test_tb_skip_is_fail,
         test_deleted_roster_not_error,
         test_layer_lib_discovered_and_emit,
         test_helper_at_layer_root_is_leaf,

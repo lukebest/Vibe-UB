@@ -21,6 +21,7 @@ from gatelib import (
     emit_report,
     handwritten_modules,
     is_cmn_mem_module,
+    is_library_primitive_path,
     is_placeholder_module,
     load_yaml,
     print_tool_versions,
@@ -134,6 +135,8 @@ def analyze_module(name: str, path: Path, text: str, rules: dict) -> list[Findin
                 )
             )
         elif clk not in allowed:
+            if is_library_primitive_path(path, rules):
+                continue
             findings.append(
                 Finding(
                     check="cdc",

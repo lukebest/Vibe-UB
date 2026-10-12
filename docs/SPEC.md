@@ -174,7 +174,7 @@ M1 PCS 子块：
 | `ub_pcs_fec_enc` / `ub_pcs_fec_dec` | TX/RX | RS(128,120)，T=4 默认；T=2 / bypass 可协商 | §3.2.2.1、§3.2.3.5 |
 | `ub_pcs_scrambler` / `ub_pcs_descrambler` | TX/RX | 每 lane 加法 PRBS23；见下 | §3.2.2.4、§3.2.3.2、§3.2.6 |
 | `ub_pcs_lane_dist` / `ub_pcs_lane_dedist` | TX/RX | **8-bit FEC 符号** 跨 lane 分发/回收，不是 2-bit | §3.2.2.3、§3.2.5 |
-| `ub_pcs_amctl_tx` / `ub_pcs_amctl_rx` | TX/RX | AMCTL 插入、锁定、滑窗、确认。RX 含 §3.2.4.4 分 lane 锁定；码字解码在私有叶 `ub_pcs_amctl_cw_dec` | §3.2.4、§3.2.3.1、§3.2.4.4 |
+| `ub_pcs_amctl_tx` / `ub_pcs_amctl_rx` | TX/RX | AMCTL 插入、锁定、滑窗、确认。RX 含 §3.2.4.4 分 lane 锁定；码字解码在私有叶 `ub_pcs_amctl_cw_dec`（S-01(b)，契约 `docs/arch/pcs/contracts/ub_pcs_amctl_cw_dec.md`；码字表不进公开 SPEC） | §3.2.4、§3.2.3.1、§3.2.4.4 |
 | `ub_pcs_deskew` | RX | 多 lane 对齐 | §3.2.3.1 |
 | 交织/解交织 | TX/RX | 仅当 FEC 交织（`FEC_CODEC_NUM=2`）开启；M1 用 CodecNum=1，交织列为非目标 | §3.2.2.3、§3.2.3.4、§3.2.3.6 |
 

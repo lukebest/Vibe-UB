@@ -53,9 +53,9 @@ PCS 内部**寄存**电平，1 bit，`core_clk`。`ub_pcs_amctl_rx`（SPEC §2.4
 
 | 项 | 值 |
 | --- | --- |
-| 置位 | 全部已配置 lane（`pma_rx_width`）收到带 SDF 的 AMCTL、且当拍 `lmsm2pcs_nb_phase==1`：下一拍置 1。SDF / EDF 语义见 `ub_pcs_amctl_rx` |
+| 置位 | 全部已配置 lane（`pma_rx_width`）的分 lane「已收 SDF」旗都立起之后，再寄一拍。末已配置 lane 的 AMCTL **末字**在 **t** → `cw_dec` 输出在 **t+1** → `pcs_rx_sdf_seen` 从 **t+2** 起为 1。旗在 `amctl_vld` 且 `LW_SWITCH`+{`X1`,`X2`,`X4`,`X8`} 且 `lmsm2pcs_nb_phase==1` 时置。SDF / EDF 语义见 `ub_pcs_amctl_rx` |
 | 保持 | 置位后保持 |
-| 清零 | `lmsm2pcs_nb_phase==0` 或复位的下一拍清 0 |
+| 清零 | `lmsm2pcs_nb_phase==0` 或复位的**下一拍**清 0；分 lane 旗一并清 |
 
 ### Null Block 判别（Xia 裁定 2026-10-12）
 
@@ -92,7 +92,7 @@ SPEC §2.4 已点名该叶子。main 无 `pycircuit/` / `rtl/` 实现。与 `ub_
 | --- | --- | --- | --- |
 | 1 | 全端口表 | Xia 裁定 2026-10-12（M1） | **无** 分 lane valid 输入。输入保持 `pma_rx_data` + 共享 `pma_rx_valid`（§3.2.4；§13 A-05 / A-CL-3）。本叶含 §3.2.4.4 分 lane AMCTL 锁定（在固定插入间隔上做 END 检测，滑窗），分 lane 锁定位在叶内产生；`pcs_am_locked` = 全部已配置 lane（`pma_rx_width`）已锁定 |
 | 2 | AMCTL 识别与字段 | Xia 裁定 2026-10-12（M2） | 公开只写语义：END 场经 eBCH-16 纠正后在预期位置匹配，即识别为 AMCTL（「AMCTL Identification Mechanism」）。场名 BODY / END / LID / CTRL_TYPE / CTRL_DETAIL（表 3-7）。LID 仅两半一致时有效；连续两次相同的已纠正 LID 才更新 lane ID。CTRL_TYPE / CTRL_DETAIL：任一半解出合法码字即有效；两半解出**不同**合法码字则忽略该控制。码字级解码（eBCH-16 纠正、码字表、场符号位置）在私有叶 `ub_pcs_amctl_cw_dec` |
-| 3 | SDF / EDF | Xia 裁定 2026-10-12（M3） | 「带 SDF」：`CTRL_TYPE` = Link Width Switch Indicator 且 `CTRL_DETAIL` ∈ {X1, X2, X4, X8}（§3.2.4.2「AMCTL Controlling」），且当拍 `lmsm2pcs_nb_phase==1`。「带 EDF」：同 `CTRL_TYPE` 且 `CTRL_DETAIL` = X0。`pcs_rx_sdf_seen` 仍按「全部已配置 lane」置位（见 `ub_pcs_nullblk_det` 节） |
+| 3 | SDF / EDF | Xia 裁定 2026-10-12（M3） | 「带 SDF」：`CTRL_TYPE` = `LW_SWITCH` 且 `CTRL_DETAIL` ∈ {`X1`,`X2`,`X4`,`X8`}（§3.2.4.2「AMCTL Controlling」），且当拍 `lmsm2pcs_nb_phase==1`。「带 EDF」：同类型且 `CTRL_DETAIL` = `X0`。`amctl_rx` 为每 lane 记「已收 SDF」旗（在 `amctl_vld` 上置）。`pcs_rx_sdf_seen` 仍要全部已配置 lane；拍位 **t / t+1 / t+2** 见下表 |
 | 4 | 「全部已配置 lane」来源 | 已有配置口 | `pma_rx_width[3:0]`（§3.2.5，与 `PARAM_PHY.NUM_LANES_RX[13:10]` 同编码，§9）；参数 `NUM_LANES_RX`。§3.3.4 无 LMSM→PCS 宽度口 |
 | 5 | LID 出口 | Xia 裁定 2026-10-12 | `pcs_rx_lid` 宽 **4**：lane 0..7 加空身份，公开只称 `LID_NULL`（`LID_NULL` 的线码/半场编码是 `ub_pcs_amctl_cw_dec` 私有叶细节）。`pcs_rx_lid_vld`：全部已配置 lane 上 LID 一致解码时 **1 拍脉冲** |
 
@@ -107,10 +107,20 @@ SPEC §2.4 已点名该叶子。main 无 `pycircuit/` / `rtl/` 实现。与 `ub_
 | `pcs_deskew_ok` | in | 1 | §3.3.4 | deskew 完成 |
 | `lmsm2pcs_nb_phase` | in | 1 | §3.3.4 | `Send_NullBlock` / `Link_Active` 为 1 |
 | `pma_rx_width` | in | 4 | §3.2.5 | 已配置 RX lane 数；二进制 1/2/4/8 |
-| `pcs_rx_sdf_seen` | out | 1 | 本清单；Xia 裁定 2026-10-12 | 寄存电平；置位/清零见 `ub_pcs_nullblk_det` 节；SDF 语义见上表 #3 |
+| `pcs_rx_sdf_seen` | out | 1 | 本清单；Xia 裁定 2026-10-12 | 寄存电平。末已配置 lane AMCTL 末字 **t** → `cw_dec` **t+1** → 本口从 **t+2** 起为 1（`amctl_rx` 多一拍寄存）。清零：`nb_phase==0` 或复位的下一拍；分 lane 旗一并清 |
 | `pcs_am_locked` | out | 1 | §3.3.4；Xia 裁定 2026-10-12 | 全部已配置 lane（`pma_rx_width`）已锁定。分 lane 锁定位在叶内，不出口 |
 | `pcs_rx_lid` | out | 4 | Xia 裁定 2026-10-12 | 已解码 LID：lane 0..7 或 `LID_NULL` |
 | `pcs_rx_lid_vld` | out | 1 | Xia 裁定 2026-10-12 | 全部已配置 lane 上 LID 一致解码时 **1 拍脉冲** |
+
+`pcs_rx_sdf_seen` 拍位（Xia 裁定 2026-10-12）：
+
+| 拍 | 事件 |
+| --- | --- |
+| **t** | 末已配置 lane 的 AMCTL **末字**到达（滑窗后 `word` / `word_vld`） |
+| **t+1** | 该 lane 的 `ub_pcs_amctl_cw_dec` 输出（`amctl_vld` 及限定场）。`amctl_rx` 在 `amctl_vld` 且 `LW_SWITCH`+{`X1`,`X2`,`X4`,`X8`} 且 `lmsm2pcs_nb_phase==1` 时置该 lane「已收 SDF」旗 |
+| **t+2** | 全部已配置 lane 旗已立时，`pcs_rx_sdf_seen` 从本拍起为 1（`amctl_rx` 多一拍寄存） |
+
+清零：`lmsm2pcs_nb_phase==0` 或复位的下一拍；分 lane 旗一并清。
 
 `ub_pcs_scrambler` / `ub_pcs_descrambler` 在 `_placeholder` 期间（§13 A-01 / A-02，D20）不接 `pcs_rx_lid`：该输入口悬空并 Tie 到占位常量，种子保持 placeholder。lint waiver 注记：`placeholder, D20`。
 
@@ -118,7 +128,7 @@ SPEC §2.4 已点名该叶子。main 无 `pycircuit/` / `rtl/` 实现。与 `ub_
 
 ## `ub_pcs_amctl_cw_dec`
 
-**待船长确认：把 S-01(b) 私有叶方案延到线 A。** D20 / UARCH D-01 原文写的是 C 线表项位布局；本叶按同一套落地：公开仓只留端口桩，源码在私有仓，附 attest 文件。码字取值、CW 编号、符号下标区间只出现在私有源，不入库。
+**船长已确认：** 走 C 线 S-01(b)。公开仓只留端口桩；源码在 `lukebest/Vibe-UB-private`；码字表不进公开 SPEC。契约 [docs/arch/pcs/contracts/ub_pcs_amctl_cw_dec.md](pcs/contracts/ub_pcs_amctl_cw_dec.md)，YAML 头 schema 复用 [docs/arch/mem/contracts/README.md](mem/contracts/README.md) §8（PR #43），不另立。
 
 | 项 | 值 |
 | --- | --- |
@@ -126,28 +136,33 @@ SPEC §2.4 已点名该叶子。main 无 `pycircuit/` / `rtl/` 实现。与 `ub_
 | 层 | `pcs` |
 | 所有者 | 设计（线 A） |
 | 父叶 | `ub_pcs_amctl_rx` |
-| 时钟 | `core_clk` |
+| 粒度 | **单 lane 一份**。父叶静态例化 `NUM_LANES_RX` 份（`PARAM_PHY.NUM_LANES_RX` 同参数族）；编号 ≥ `pma_rx_width` 的实例由 `amctl_rx` 忽略。面积按单实例证明 |
+| 时钟 | `core_clk`，`period_ns` 12.412 |
 | 复位 | `rst_pyc`（同步） |
-| 延迟 | **1 拍寄存** |
+| 延迟 | **1 拍寄存**（`kind: registered`，`cycles: 1`）。无 `comb_budget_ns` |
 | 公开仓 | 仅端口桩 `rtl/pcs/ub_pcs_amctl_cw_dec.v`（待写；与 `ub_pcs_amctl_rx` 同一次 RTL PR） |
-| 源码 | 私有仓对应叶子（S-01(b)，生成物不入库） |
-| attest | `docs/arch/attest/ub_pcs_amctl_cw_dec.attest`（待写；证明公开桩端口与私有源一致） |
+| 源码 | `lukebest/Vibe-UB-private`（S-01(b)，生成物不入库） |
+| attest | `reports/private/` 拷贝私有侧 `attest/ub_pcs_amctl_cw_dec.yml`（待写；与 C 线同一套） |
 | 参考模型 | 私有仓；Xia 所有 |
 | TEST_HOOKS 观察口 | 无 |
 
-职责：对每 lane 做码字级解码（eBCH-16 纠正、表 3-7..3-10 的码字表、场符号位置）。父叶 `ub_pcs_amctl_rx` 只认本叶具名口，不认比特位置。公开文本只列端口语义。
+本叶内部持有 40 符号 AMCTL 窗口及场/符号位置（不入库）。父叶只认具名口。输入：`word[31:0]`（该 lane 经 `amctl_rx` 滑窗后的字）、`word_vld`（来自共享 `pma_rx_valid`）。
 
-### 每 lane 输出（Xia 裁定 2026-10-12）
+### 每实例输出（Xia 裁定 2026-10-12；相对输入字 1 拍）
 
 | 信号 | 宽 | 含义 |
 | --- | --- | --- |
-| `end_ok` | 1 | 该 lane 本拍 END 场经 eBCH-16 纠正后匹配 |
-| `lid` | 4 | 已纠正 LID；空身份公开称 `LID_NULL`（编码是本叶私有细节） |
-| `lid_ok` | 1 | 两半 LID 一致 |
-| `ctrl_type` | 枚举 | `FEC_CTRL` / `LW_SWITCH` / `EI` / `PERIOD_CTRL` / `REMOTE_LW_SWITCH` / `RSVD` / `NO_CMD` |
-| `ctrl_type_ok` | 1 | 任一半解出合法 CTRL_TYPE 码字；两半不同合法码字时父叶忽略控制 |
-| `ctrl_detail` | 枚举 | 按类型分类，含 `X0` / `X1` / `X2` / `X4` / `X8` / `EEI` / `PERIOD0` / `PERIOD1` / `OPEN_FEC` / `CLOSE_FEC` / `RSVD` |
-| `ctrl_detail_ok` | 1 | 与 `ctrl_type_ok` 同一半场规则 |
+| `end_hit` | 1 | 本字 END 经 eBCH-16 纠正后匹配。`amctl_rx` 锁定/滑窗用。**不受** `amctl_vld` 限定 |
+| `amctl_vld` | 1 | 1 拍脉冲；末符号字之后 1 拍 |
+| `end_ok` | 1 | 本窗 END 有效。仅 `amctl_vld` |
+| `lid` | 4 | 已纠正 LID；空身份公开称 `LID_NULL` |
+| `lid_ok` | 1 | 两半一致。仅 `amctl_vld` |
+| `ctrl_type` | 3 | 项目枚举：`FEC_CTRL` / `LW_SWITCH` / `EI` / `PERIOD_CTRL` / `REMOTE_LW_SWITCH` / `RSVD` / `NO_CMD` |
+| `ctrl_type_ok` | 1 | 任一半合法；两半不同合法码字则 0。仅 `amctl_vld` |
+| `ctrl_detail` | 4 | 项目枚举：`X0` / `X1` / `X2` / `X4` / `X8` / `EEI` / `PERIOD0` / `PERIOD1` / `OPEN_FEC` / `CLOSE_FEC` / `RSVD` / `NO_CMD` |
+| `ctrl_detail_ok` | 1 | 与 `ctrl_type_ok` 同一半场规则。仅 `amctl_vld` |
+
+断言：`amctl_vld=0` 时除 `end_hit` 外输出为 0；`*_ok` 只随 `amctl_vld`。枚举取值见契约，不是规范码字。
 
 ---
 

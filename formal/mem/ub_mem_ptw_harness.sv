@@ -123,6 +123,7 @@ module ub_mem_ptw_harness (
     .ctx_matt_wd(ctx_matt_wd),
     .mem2host_rd_valid(mem2host_rd_valid),
     .mem2host_rd_ready(mem2host_rd_ready),
+    .mem2host_rd_addr(mem2host_rd_addr),
     .mem2host_rd_len(mem2host_rd_len),
     .mem2host_rd_tag(mem2host_rd_tag),
     .mem2host_rd_rsp_valid(mem2host_rd_rsp_valid),

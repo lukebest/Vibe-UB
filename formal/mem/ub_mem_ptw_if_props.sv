@@ -11,7 +11,9 @@
 //       - mem2host_rd_rsp_valid && !mem2host_rd_rsp_ready → next cycle
 //         rsp valid and the rsp beat stay.
 //     Ready-only inputs (mem2host_rd_ready, fill_ready, flt_ready,
-//     evt_ready) are free. No progress / fairness assumed.
+//     evt_ready) are free. mem2host_rd_ready is NOT assumed high —
+//     the table-read request hold property would otherwise be vacuous.
+//     No progress / fairness assumed.
 //
 // MATT_WD (Q-A08): ctx_matt_wd is sampled on the accept cycle
 // (req_valid && req_ready). f_matt_pend tracks that request until the
@@ -41,6 +43,7 @@ module ub_mem_ptw_if_props (
   input  wire        ctx_matt_wd,
   input  wire        mem2host_rd_valid,
   input  wire        mem2host_rd_ready,
+  input  wire [47:0] mem2host_rd_addr,
   input  wire [7:0]  mem2host_rd_len,
   input  wire [3:0]  mem2host_rd_tag,
   input  wire        mem2host_rd_rsp_valid,
@@ -58,6 +61,7 @@ module ub_mem_ptw_if_props (
   // One mapping block. Names from RTL / UARCH (params.py, SPEC §14).
   localparam integer EVT_CODE_W       = 4;
   localparam integer EVT_MATT_WD_MISS = 1;
+  localparam integer PA_W             = 48;
   localparam integer RD_LEN_W         = 8;
   localparam integer RD_LEN_8B        = 8;
   localparam integer RD_LEN_32B       = 32;
@@ -229,6 +233,8 @@ module ub_mem_ptw_if_props (
   // (4) mem2host_rd_valid |-> len in {RD_LEN_8B, RD_LEN_32B, RD_LEN_64B}
   // (5) first-wave: len == RD_LEN_8B && tag == RD_TAG_ZERO
   // (6) at most one outstanding read (accepted, rsp not yet returned)
+  // (7) request-side hold (architect): valid && !ready |=> valid and
+  //     $stable(addr/len/tag). mem2host_rd_ready stays a free input.
   // ------------------------------------------------------------------
   reg f_rd_outst;
   reg f_rd_was_outst;
@@ -275,6 +281,43 @@ module ub_mem_ptw_if_props (
     end
   end
 
+  // (7) mem2host_rd_valid && !mem2host_rd_ready |=>
+  //     mem2host_rd_valid && $stable({addr,len,tag})
+  reg                 f_rd_req_hold;
+  reg [PA_W-1:0]      f_rd_addr_q;
+  reg [RD_LEN_W-1:0]  f_rd_len_q;
+  reg [RD_TAG_W-1:0]  f_rd_tag_q;
+
+  initial begin
+    f_rd_req_hold = 1'b0;
+    f_rd_addr_q   = {PA_W{1'b0}};
+    f_rd_len_q    = {RD_LEN_W{1'b0}};
+    f_rd_tag_q    = {RD_TAG_W{1'b0}};
+  end
+
+  always @(posedge core_clk) begin
+    if (rst_pyc) begin
+      f_rd_req_hold <= 1'b0;
+      f_rd_addr_q   <= {PA_W{1'b0}};
+      f_rd_len_q    <= {RD_LEN_W{1'b0}};
+      f_rd_tag_q    <= {RD_TAG_W{1'b0}};
+    end else begin
+      f_rd_req_hold <= mem2host_rd_valid && !mem2host_rd_ready;
+      f_rd_addr_q   <= mem2host_rd_addr;
+      f_rd_len_q    <= mem2host_rd_len;
+      f_rd_tag_q    <= mem2host_rd_tag;
+    end
+  end
+
+  always @(posedge core_clk) begin
+    if (chk && f_rd_req_hold) begin
+      a_rd_hold_valid: assert (mem2host_rd_valid);
+      a_rd_hold_addr:  assert (mem2host_rd_addr == f_rd_addr_q);
+      a_rd_hold_len:   assert (mem2host_rd_len == f_rd_len_q);
+      a_rd_hold_tag:   assert (mem2host_rd_tag == f_rd_tag_q);
+    end
+  end
+
   // ------------------------------------------------------------------
   // Covers
   // ------------------------------------------------------------------
@@ -284,6 +327,9 @@ module ub_mem_ptw_if_props (
                               (evt_code == EVT_MATT_WD_MISS[EVT_CODE_W-1:0]));
     c_rd_req_and_rsp:  cover (chk && f_rd_got_rsp);
     c_fill_issued:     cover (chk && fill_valid && fill_ready);
+    // Backpressured request then accept (proves rd_ready is not stuck high).
+    c_rd_bp_then_acc:  cover (chk && f_rd_req_hold &&
+                              mem2host_rd_valid && mem2host_rd_ready);
   end
 
 endmodule

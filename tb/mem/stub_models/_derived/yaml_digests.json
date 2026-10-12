@@ -1,0 +1,88 @@
+{
+  "ptw_enc_classes": [
+    "ENC_INVALID",
+    "ENC_TBL_PG",
+    "ENC_BLOCK"
+  ],
+  "ptw_enc_cross": {
+    "0": {
+      "ENC_BLOCK": {
+        "fault": true,
+        "kind": "invalid",
+        "note": "reserved"
+      },
+      "ENC_INVALID": {
+        "fault": true,
+        "kind": "invalid",
+        "note": ""
+      },
+      "ENC_TBL_PG": {
+        "fault": false,
+        "kind": "table",
+        "note": ""
+      }
+    },
+    "1": {
+      "ENC_BLOCK": {
+        "fault": false,
+        "kind": "block",
+        "note": "1 GB"
+      },
+      "ENC_INVALID": {
+        "fault": true,
+        "kind": "invalid",
+        "note": ""
+      },
+      "ENC_TBL_PG": {
+        "fault": false,
+        "kind": "table",
+        "note": ""
+      }
+    },
+    "2": {
+      "ENC_BLOCK": {
+        "fault": false,
+        "kind": "block",
+        "note": "2 MB"
+      },
+      "ENC_INVALID": {
+        "fault": true,
+        "kind": "invalid",
+        "note": ""
+      },
+      "ENC_TBL_PG": {
+        "fault": false,
+        "kind": "table",
+        "note": ""
+      }
+    },
+    "3": {
+      "ENC_BLOCK": {
+        "fault": true,
+        "kind": "invalid",
+        "note": "reserved"
+      },
+      "ENC_INVALID": {
+        "fault": true,
+        "kind": "invalid",
+        "note": ""
+      },
+      "ENC_TBL_PG": {
+        "fault": false,
+        "kind": "page",
+        "note": "4 KB"
+      }
+    }
+  },
+  "ptw_source": "markdown-cross",
+  "ptw_yaml_digest": "68a4aca4455779b0792ac79b1e00b1f0021035af775761eeeb7b3fcadc2d36b2",
+  "yaml_digests": {
+    "README.md": "121439714ca05efbb3785ec141ced398e93928c398a2b4616ca57b0e8acc86f2",
+    "ub_mem_dec_ent_dec.md": "754871738104eaedce8829452156d3a10bd432ccfe2125af3d78e9dc5aebffd3",
+    "ub_mem_l1tct_dec.md": "47e3bd57d18fa8f2e72b9627db6ba208a1496bbb5f2b44c4ebcccd0978fec839",
+    "ub_mem_mapte_dec.md": "256ee5e6eab6c9b32b288e302d4195129bb6c8938ee76e9e28c6a8c0ad530b22",
+    "ub_mem_ptw_desc_dec.md": "68a4aca4455779b0792ac79b1e00b1f0021035af775761eeeb7b3fcadc2d36b2",
+    "ub_mem_tcte_dec.md": "2ac4921f7fb12a1f0478c54f2a2e9783abceea61409901f63b2e03361e0f00b3",
+    "ub_mem_tecte_dec.md": "c0976c078ca26193880fd20c01fa6ef508bec39e0e4a0b8b186db0e1b1a1a6b1"
+  }
+}

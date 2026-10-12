@@ -1196,11 +1196,10 @@ def sat_one_po(
                 ys.append(f"delete -output {yosys_id(name)}")
         ys.append("opt_clean")
     ys += [
-        "miter -equiv -flatten gold gate miter",
-        "hierarchy -top miter",
-        "sat -verify -prove trigger 0 -show-inputs",
+        "miter -equiv -make_assert -flatten gold gate miter",
+        "sat -verify -prove-asserts -show-inputs",
     ]
-    print(f"equiv_ref REGPAIR sat_cmd=sat -verify -prove trigger 0 po={po}")
+    print(f"equiv_ref REGPAIR sat_cmd=sat -verify -prove-asserts po={po}")
     proc = run_yosys_p("\n".join(ys) + "\n", tmo, quiet=False)
     log = proc.stdout or ""
     print(log[-2000:] if len(log) > 2000 else log)

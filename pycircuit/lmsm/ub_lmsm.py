@@ -1,46 +1,34 @@
-"""ub_lmsm — UB link-management state machine (pyc4.0 leaf).
+"""ub_lmsm — UB link-management state machine (real pyc4.0 @module).
 
-Source of truth for this leaf. Business registers are ``pyc_reg``
-(synchronous, active-high ``rst_pyc``; sensitive to ``core_clk`` only).
-``TEST_HOOKS`` is expanded here at Python generation time (SPEC §11);
-the generated Verilog has no ``ifdef TEST_HOOKS``.
+Business registers are ``pyc_reg`` (sync, active-high ``rst_pyc``,
+``core_clk`` only). ``TEST_HOOKS`` is a Python-time compile parameter
+(SPEC §11); generated Verilog has no ifdef.
 
-Source lives under ``pycircuit/lmsm/`` (PR #5 layout: pyCircuit in
-``pycircuit/<layer>/``, generated ``.v`` only under ``rtl/<layer>/``).
-Temporary emit until ``scripts/emit_rtl.py`` lands via PR #5:
+SPEC: §2.5 / §3.2.5 / §3.3.3 / §3.3.4 / §4.2 / §6.1 / §9 / §10.
+Null-block handshake and ``PROBE_WAIT_CYC``: PR #41 @ 9a85b136 (D20).
+Earlier PR #9 closures kept: CTRL.LMSM_START, lane_id_mode never 3,
+LTB type bytes, Change_Speed bit7=0, LinkReady = Active.
+Architectural ``link_up`` is Null|Active|Retrain (SPEC §6.1 / A-22);
+``tb_obs_link_up`` stays Null|Active (§10.2).
 
-    python3 pycircuit/lmsm/emit.py
-
-SPEC §2.2 / CODING_STYLE §5:
-
-    PRODUCT (TEST_HOOKS=0) → ``rtl/lmsm/ub_lmsm.v``
-    HOOKS   (TEST_HOOKS=1) → ``rtl/lmsm/hooks/ub_lmsm.v``
-
-Filename equals the module (Verilator ``DECLFILENAME``). Do not put the
-repo root on ``PYTHONPATH`` (toolchain package is also named pycircuit).
-
-Module name ``ub_lmsm`` = ``ub_<层>_<功能>`` (CODING_STYLE §5 / SPEC §2.2).
-
-Mapped to SPEC §2.5 / §3.2.5 / §3.3.3 / §3.3.4 / §4.2 / §6.1 / §9 / §10.
-Does not compute LMB CRC (PCS does, §3.3.4). Does not generate the
-16-cycle PORT_RST pulse (ub_csr does); ``port_rst`` is a sync clear
-back to Link_Idle.
+Does not compute LMB CRC (PCS). Does not generate the 16-cycle PORT_RST
+pulse (ub_csr); ``port_rst`` is a sync clear to Link_Idle.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+from pycircuit import Circuit, module, mux, u
+
+LEAF = "ub_lmsm"
+VARIANTS: dict[str, dict] = {"": {}}
 
 # ---------------------------------------------------------------------------
-# Parameters (SPEC §9). Identifiers match the spec table.
+# Parameters (SPEC §9 / §6.1). Identifiers match the spec table.
 # ---------------------------------------------------------------------------
 
-NUM_LANES_TX = 1  # SPEC §9 / REGMAP PARAM_PHY: binary, legal 1/2/4/8, reset 1
-NUM_LANES_RX = 1  # SPEC §9: default equals TX; same legal set
-NLANE = NUM_LANES_RX  # SPEC §9 / §10 hook width
+NUM_LANES_TX = 1
+NUM_LANES_RX = 1
 
-# F_CORE = 2.578125e9 / 32 = 80566406.25 Hz (SPEC §4.1 / §9).
-# Official timeouts: cycles = round(duration × F_CORE) (SPEC §6.1 per PR #9 @1277cce0).
 F_CORE_HZ = 2_578_125_000 / 32
 
 
@@ -49,28 +37,29 @@ def _cycles(seconds: float) -> int:
 
 
 TMR_W = 32
-# Probe.Wait / Probe.Confirm: still implementation / SPEC §13 (PR #9). Stubs.
-P_TMR_PROBE_WAIT = 806  # stub ~10 us @ F_CORE; SPEC §13 Probe
-P_TMR_PROBE_CONFIRM = 806  # stub; SPEC §13 Probe
-P_TMR_RXEQ = _cycles(0.048)  # 48 ms; SPEC §6.1 / §3.4.3.3 (PR #9 @1277cce0)
-P_TMR_DISC_ACTIVE = _cycles(0.024)  # 24 ms; other-entry Discovery.Active §6.1
-P_TMR_DISC_ACTIVE_RTR_CFG = _cycles(10e-6)  # 10 us; from Retrain/Config §6.1
-P_TMR_DISC_CONFIRM = _cycles(0.048)  # 48 ms; SPEC §6.1
-P_TMR_CFG = _cycles(0.002)  # 2 ms per Config substate; SPEC §6.1 / §3.4.3.5
-P_TMR_NULL = _cycles(0.002)  # 2 ms Send_NullBlock; SPEC §6.1 / §3.4.3.6
-P_TMR_RETRAIN_ACTIVE = _cycles(0.024)  # 24 ms; SPEC §6.1
-P_TMR_RETRAIN_CONFIRM = _cycles(0.048)  # 48 ms; SPEC §6.1
-P_TMR_CHG_SPD = _cycles(0.048)  # 48 ms fail → Idle; SPEC §6.1 / §3.4.3.9
-P_TMR_EQ_PASSIVE = _cycles(0.032)  # 32 ms EQ.Passive ≤DR4; SPEC §6.1
-P_TMR_EQ_ACTIVE = _cycles(0.024)  # 24 ms EQ.Active ≤DR4; SPEC §6.1
-# Official Null Block counts (SPEC §6.1 / §3.4.3.6). Count interface still §13-open.
+PROBE_W = 16
+RX_CNT_W = 4
+TX_CNT_W = 5
+
+# Official timeouts: cycles = round(duration × F_CORE) (SPEC §6.1).
+P_TMR_RXEQ = _cycles(0.048)
+P_TMR_DISC_ACTIVE = _cycles(0.024)
+P_TMR_DISC_ACTIVE_RTR_CFG = _cycles(10e-6)
+P_TMR_DISC_CONFIRM = _cycles(0.048)
+P_TMR_CFG = _cycles(0.002)
+P_TMR_NULL = _cycles(0.002)
+P_TMR_RETRAIN_ACTIVE = _cycles(0.024)
+P_TMR_RETRAIN_CONFIRM = _cycles(0.048)
+P_TMR_CHG_SPD = _cycles(0.048)
+P_TMR_EQ_PASSIVE = _cycles(0.032)
+P_TMR_EQ_ACTIVE = _cycles(0.024)
+
 P_NULL_RX_NEED = 8
 P_NULL_TX_NEED = 16
-P_MAX_RETRAIN = 4  # SPEC §9 NUM_PHY_REINIT_THRESHOLD (draft / recommended)
-P_PROBE_MAX_RETRY = 8  # stub; SPEC §13 Probe
+P_MAX_RETRAIN = 4
+P_PROBE_MAX_RETRY = 8
+P_PROBE_WAIT_CYC = 323
 
-# LTB Type bytes (SPEC §3.3.4 / UB-PHY §3.4.1.1; PR #9 @1277cce0).
-# Send_NullBlock has NO LTB Type — DLL Null Blocks, pattern=3.
 P_LTB_TYPE_DLTB_ACTIVE = 0xA0
 P_LTB_TYPE_DLTB_CONFIRM = 0xA1
 P_LTB_TYPE_RXEQ = 0xE0
@@ -83,14 +72,10 @@ P_LTB_TYPE_RLTB_LP1 = 0xC2
 P_LTB_TYPE_RLTB_EQ_INIT = 0xC3
 P_LTB_TYPE_ELTB = 0xD0
 
-# LTB Lane_ID / Link_ID NULL (SPEC §3.3.4). Distinct from amctl_lid 8=NULL.
 P_LANE_ID_NULL = 0xFF
 P_LINK_ID_NULL = 0xFF
-
-# Change_Speed = data_rate_support_2[7]; M1 drives 0 (SPEC §3.3.4).
 P_CHG_SPD_BIT = 7
 
-# Top-level LMSM encoding (SPEC §10.3). tb_obs_lmsm_st is this only.
 ST_LINK_IDLE = 0
 ST_PROBE = 1
 ST_RXEQ_OPTIMIZE = 2
@@ -102,902 +87,702 @@ ST_RETRAIN = 7
 ST_CHANGE_SPEED = 8
 ST_EQUALIZATION = 9
 
-# Substates are internal; never appear on tb_obs_lmsm_st.
-SUB_0 = 0  # Wait / Active / Prepare
-SUB_1 = 1  # Confirm / Keep
-SUB_2 = 2  # Config.Confirm
+SUB_0 = 0
+SUB_1 = 1
+SUB_2 = 2
 
-# lmsm2pcs_pattern (SPEC §3.3.4)
 PAT_IDLE = 0
 PAT_EEIB = 1
 PAT_LTB = 2
 PAT_DLL = 3
 
-# lmsm2pcs_lane_id_mode (SPEC §3.3.4; encoding 3 is RESERVED)
 LANE_ID_PHYS = 0
 LANE_ID_ASCEND = 1
 LANE_ID_NULL = 2
-# LANE_ID_RESERVED = 3  — LMSM must never drive this.
-
-HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[1]
-PRODUCT_V = REPO / "rtl" / "lmsm" / "ub_lmsm.v"
-HOOKS_V = REPO / "rtl" / "lmsm" / "hooks" / "ub_lmsm.v"
 
 
-def _header(test_hooks: int) -> str:
-    return f"""\
-// Generated by rtl/lmsm/ub_lmsm.py — do not hand-edit.
-// pyc4.0 leaf ub_lmsm. TEST_HOOKS={test_hooks} (Python generation-time).
-// Registers: pyc_reg semantics (sync, rst_pyc active-high, core_clk).
-// SPEC: §2.5, §3.2.5, §3.3.3, §3.3.4, §4.2, §6.1, §9, §10, §11.
-// LTB Type / official timeouts / NullBlock pattern: SPEC §3.3.4 / §6.1
-// per PR #9 @1277cce0 (pending merge). Do not merge that docs branch here.
-// CRC / padding / per-lane Lane_ID fill: PCS, not this leaf.
-// PORT_RST 16-cycle pulse: ub_csr; this leaf sees port_rst as sync clear.
-"""
+def _red_or(word):
+    bits = [word.slice(lsb=i, width=1) for i in range(int(word.width))]
+    acc = bits[0]
+    for bit in bits[1:]:
+        acc = acc | bit
+    return acc
 
 
-def emit_verilog(test_hooks: bool) -> str:
-    """Emit one netlist. ``test_hooks`` is the Python-level TEST_HOOKS flag."""
-    th = 1 if test_hooks else 0
-    ntx = NUM_LANES_TX
-    nrx = NUM_LANES_RX
+def _red_and(word):
+    bits = [word.slice(lsb=i, width=1) for i in range(int(word.width))]
+    acc = bits[0]
+    for bit in bits[1:]:
+        acc = acc & bit
+    return acc
+
+
+def _red_xor(words):
+    acc = words[0]
+    for word in words[1:]:
+        acc = acc ^ word
+    return acc
+
+
+def _sat_add(cur, step):
+    summed = cur + step
+    return mux(_red_and(cur), cur, summed)
+
+
+def _auto_ascend(base, ntx: int):
+    if ntx == 1:
+        return base
+    pieces = [base + u(8, i) for i in range(ntx - 1, -1, -1)]
+    return pieces[0].m.cat(*pieces)
+
+
+def _null_map(m: Circuit, ntx: int):
+    if ntx == 1:
+        return u(8, P_LANE_ID_NULL)
+    pieces = [u(8, P_LANE_ID_NULL) for _ in range(ntx)]
+    return m.cat(*pieces)
+
+
+def _ports(m: Circuit, *, test_hooks: int, ntx: int, nrx: int, probe_wait_def: int):
+    clk = m.clock("core_clk")
+    rst = m.reset("rst_pyc")
+    port_rst = m.input("port_rst", width=1)
+
+    csr_lmsm_start = m.input("csr_lmsm_start", width=1)
+    csr_bypass_probe = m.input("csr_bypass_probe", width=1)
+    cfg_fixed_rate_rxeq = m.input("cfg_fixed_rate_rxeq", width=1)
+    cfg_req_change_speed = m.input("cfg_req_change_speed", width=1)
+    cfg_req_equalization = m.input("cfg_req_equalization", width=1)
+    cfg_null_need_rediscovery = m.input("cfg_null_need_rediscovery", width=1)
+    cfg_lane_reverse_tx = m.input("cfg_lane_reverse_tx", width=1)
+    cfg_lane_reverse_rx = m.input("cfg_lane_reverse_rx", width=1)
+    cfg_polarity_inv = m.input("cfg_polarity_inv", width=nrx)
+    cfg_link_id = m.input("cfg_link_id", width=8)
+    cfg_tlw = m.input("cfg_tlw", width=6)
+    cfg_rlw = m.input("cfg_rlw", width=6)
+    cfg_data_rate_support_1 = m.input("cfg_data_rate_support_1", width=8)
+    cfg_data_rate_support_2 = m.input("cfg_data_rate_support_2", width=8)
+    cfg_fec_mode_support = m.input("cfg_fec_mode_support", width=8)
+    cfg_port_type = m.input("cfg_port_type", width=1)
+    cfg_portnego_random_value = m.input("cfg_portnego_random_value", width=7)
+    cfg_fec_interleave_support = m.input("cfg_fec_interleave_support", width=4)
+    cfg_rx_lane0_id = m.input("cfg_rx_lane0_id", width=3)
+    cfg_max_link_width = m.input("cfg_max_link_width", width=3)
+    cfg_eq_mode = m.input("cfg_eq_mode", width=2)
+    cfg_fec_mode_ctrl = m.input("cfg_fec_mode_ctrl", width=3)
+    cfg_fec_interleave_ctrl = m.input("cfg_fec_interleave_ctrl", width=1)
+    cfg_eq_ctrl1 = m.input("cfg_eq_ctrl1", width=6)
+    cfg_eq_ctrl2 = m.input("cfg_eq_ctrl2", width=8)
+    cfg_eq_ctrl3 = m.input("cfg_eq_ctrl3", width=8)
+    cfg_eq_ctrl4 = m.input("cfg_eq_ctrl4", width=8)
+    cfg_fec_crc_mode_reject = m.input("cfg_fec_crc_mode_reject", width=1)
+    cfg_pre_fec_ber_meas_st = m.input("cfg_pre_fec_ber_meas_st", width=2)
+    cfg_fec_interleave_enable = m.input("cfg_fec_interleave_enable", width=1)
+    cfg_fec_interleave_ctrl_reject = m.input("cfg_fec_interleave_ctrl_reject", width=1)
+    cfg_request_equalization = m.input("cfg_request_equalization", width=1)
+    cfg_crc_mode_ctrl = m.input("cfg_crc_mode_ctrl", width=3)
+    cfg_local_tx_preset = m.input("cfg_local_tx_preset", width=4)
+    cfg_first_pre_cursor = m.input("cfg_first_pre_cursor", width=6)
+    cfg_eq_reject = m.input("cfg_eq_reject", width=1)
+    cfg_current_eq_phase = m.input("cfg_current_eq_phase", width=2)
+    cfg_preset_mode_en = m.input("cfg_preset_mode_en", width=1)
+    cfg_tx_preset = m.input("cfg_tx_preset", width=4)
+    cfg_lane_id_base = m.input("cfg_lane_id_base", width=8)
     map_w = 8 * ntx
-    lines: list[str] = [_header(th)]
+    cfg_lane_id_map = m.input("cfg_lane_id_map", width=map_w)
+    csr_tmr_scale = m.input("csr_tmr_scale", width=8)
+    probe_wait_cyc = m.input("probe_wait_cyc", width=PROBE_W)
 
-    def w(s: str = "") -> None:
-        lines.append(s)
+    pma_term_detect = m.input("pma_term_detect", width=ntx)
+    pma_rx_eidle_exit = m.input("pma_rx_eidle_exit", width=nrx)
+    pma_phy_ready = m.input("pma_phy_ready", width=1)
+    dll_retrain_req = m.input("dll_retrain_req", width=1)
 
-    w("module ub_lmsm #(")
-    w(f"  parameter NUM_LANES_TX              = {ntx},      // SPEC §9 / REGMAP PARAM_PHY; binary 1/2/4/8")
-    w(f"  parameter NUM_LANES_RX              = {nrx},      // SPEC §9; default equals TX")
-    w(f"  parameter TMR_W                     = {TMR_W},     // core_clk counter width; F_CORE SPEC §4.1 / §9")
-    w(f"  parameter P_TMR_PROBE_WAIT          = {P_TMR_PROBE_WAIT},    // OPEN stub; SPEC §13 Probe")
-    w(f"  parameter P_TMR_PROBE_CONFIRM       = {P_TMR_PROBE_CONFIRM},    // OPEN stub; SPEC §13 Probe")
-    w(f"  parameter P_TMR_RXEQ                = {P_TMR_RXEQ}, // 48 ms × F_CORE; SPEC §6.1 (PR #9 @1277cce0)")
-    w(f"  parameter P_TMR_DISC_ACTIVE         = {P_TMR_DISC_ACTIVE}, // 24 ms; SPEC §6.1 other-entry")
-    w(f"  parameter P_TMR_DISC_ACTIVE_RTR_CFG = {P_TMR_DISC_ACTIVE_RTR_CFG},    // 10 us; from Retrain/Config §6.1")
-    w(f"  parameter P_TMR_DISC_CONFIRM        = {P_TMR_DISC_CONFIRM}, // 48 ms; SPEC §6.1")
-    w(f"  parameter P_TMR_CFG                 = {P_TMR_CFG},  // 2 ms / Config substate; SPEC §6.1")
-    w(f"  parameter P_TMR_NULL                = {P_TMR_NULL},  // 2 ms; SPEC §6.1 Send_NullBlock")
-    w(f"  parameter P_TMR_RETRAIN_ACTIVE      = {P_TMR_RETRAIN_ACTIVE}, // 24 ms; SPEC §6.1")
-    w(f"  parameter P_TMR_RETRAIN_CONFIRM     = {P_TMR_RETRAIN_CONFIRM}, // 48 ms; SPEC §6.1")
-    w(f"  parameter P_TMR_CHG_SPD             = {P_TMR_CHG_SPD}, // 48 ms fail; SPEC §6.1")
-    w(f"  parameter P_TMR_EQ_PASSIVE          = {P_TMR_EQ_PASSIVE}, // 32 ms EQ.Passive; SPEC §6.1")
-    w(f"  parameter P_TMR_EQ_ACTIVE           = {P_TMR_EQ_ACTIVE}, // 24 ms EQ.Active; SPEC §6.1")
-    w(f"  parameter P_NULL_RX_NEED            = {P_NULL_RX_NEED},      // 8 RX Null Blocks; SPEC §6.1 (count IF §13-open)")
-    w(f"  parameter P_NULL_TX_NEED            = {P_NULL_TX_NEED},     // 16 TX after first RX; SPEC §6.1")
-    w(f"  parameter P_MAX_RETRAIN             = {P_MAX_RETRAIN},      // SPEC §9 NUM_PHY_REINIT_THRESHOLD (draft)")
-    w(f"  parameter P_PROBE_MAX_RETRY         = {P_PROBE_MAX_RETRY},      // OPEN stub; SPEC §13 Probe")
-    w(f"  parameter P_LTB_TYPE_DLTB_ACTIVE    = {P_LTB_TYPE_DLTB_ACTIVE},    // 0xA0 Discovery.Active; SPEC §3.3.4")
-    w(f"  parameter P_LTB_TYPE_DLTB_CONFIRM   = {P_LTB_TYPE_DLTB_CONFIRM},    // 0xA1 Discovery.Confirm; SPEC §3.3.4")
-    w(f"  parameter P_LTB_TYPE_RXEQ           = {P_LTB_TYPE_RXEQ},    // 0xE0 RXEQ_Optimize; SPEC §3.3.4")
-    w(f"  parameter P_LTB_TYPE_CLTB_ACTIVE    = {P_LTB_TYPE_CLTB_ACTIVE},    // 0xB0 Config.Active; SPEC §3.3.4")
-    w(f"  parameter P_LTB_TYPE_CLTB_CHECK     = {P_LTB_TYPE_CLTB_CHECK},    // 0xB1 Config.Check; SPEC §3.3.4")
-    w(f"  parameter P_LTB_TYPE_CLTB_CONFIRM   = {P_LTB_TYPE_CLTB_CONFIRM},    // 0xB2 Config.Confirm; SPEC §3.3.4")
-    w(f"  parameter P_LTB_TYPE_RLTB_ACTIVE    = {P_LTB_TYPE_RLTB_ACTIVE},    // 0xC0 Retrain.Active; SPEC §3.3.4")
-    w(f"  parameter P_LTB_TYPE_RLTB_CONFIRM   = {P_LTB_TYPE_RLTB_CONFIRM},    // 0xC1 Retrain.Confirm; SPEC §3.3.4")
-    w(f"  parameter P_LTB_TYPE_RLTB_LP1       = {P_LTB_TYPE_RLTB_LP1},    // 0xC2 Retrain.LP1_PHY_Up; SPEC §3.3.4")
-    w(f"  parameter P_LTB_TYPE_RLTB_EQ_INIT   = {P_LTB_TYPE_RLTB_EQ_INIT},    // 0xC3 Retrain.EQ_Initial; SPEC §3.3.4")
-    w(f"  parameter P_LTB_TYPE_ELTB           = {P_LTB_TYPE_ELTB},    // 0xD0 Equalization; SPEC §3.3.4")
-    w(f"  parameter P_LANE_ID_NULL            = {P_LANE_ID_NULL},   // 8'hFF LTB Lane_ID NULL; SPEC §3.3.4")
-    w(f"  parameter P_LINK_ID_NULL            = {P_LINK_ID_NULL},   // 8'hFF LTB Link_ID NULL; SPEC §3.3.4")
-    w(f"  parameter P_CHG_SPD_BIT             = {P_CHG_SPD_BIT}       // data_rate_support_2[7]; M1 drives 0; SPEC §3.3.4")
-    w(") (")
-    w("  input  wire                    core_clk,")
-    w("  input  wire                    rst_pyc,")
-    w("  input  wire                    port_rst,")
-    w()
-    w("  // CSR / App. D advertisement (SPEC §3.3.5). Level, no handshake.")
-    w("  // csr_lmsm_start = CTRL.LMSM_START (REGMAP 0x0000 bit1; SPEC §6.1).")
-    w("  input  wire                    csr_lmsm_start,")
-    w("  input  wire                    csr_bypass_probe,")
-    w("  input  wire                    cfg_fixed_rate_rxeq,")
-    w("  input  wire                    cfg_req_change_speed,")
-    w("  input  wire                    cfg_req_equalization,")
-    w("  input  wire                    cfg_null_need_rediscovery,")
-    w("  input  wire                    cfg_lane_reverse_tx,")
-    w("  input  wire                    cfg_lane_reverse_rx,")
-    w("  input  wire [NUM_LANES_RX-1:0] cfg_polarity_inv,")
-    w("  input  wire [7:0]              cfg_link_id,")
-    w("  input  wire [5:0]              cfg_tlw,")
-    w("  input  wire [5:0]              cfg_rlw,")
-    w("  input  wire [7:0]              cfg_data_rate_support_1,")
-    w("  input  wire [7:0]              cfg_data_rate_support_2,")
-    w("  input  wire [7:0]              cfg_fec_mode_support,")
-    w("  input  wire                    cfg_port_type,")
-    w("  input  wire [6:0]              cfg_portnego_random_value,")
-    w("  input  wire [3:0]              cfg_fec_interleave_support,")
-    w("  input  wire [2:0]              cfg_rx_lane0_id,")
-    w("  input  wire [2:0]              cfg_max_link_width,")
-    w("  input  wire [1:0]              cfg_eq_mode,")
-    w("  input  wire [2:0]              cfg_fec_mode_ctrl,")
-    w("  input  wire                    cfg_fec_interleave_ctrl,")
-    w("  input  wire [5:0]              cfg_eq_ctrl1,")
-    w("  input  wire [7:0]              cfg_eq_ctrl2,")
-    w("  input  wire [7:0]              cfg_eq_ctrl3,")
-    w("  input  wire [7:0]              cfg_eq_ctrl4,")
-    w("  input  wire                    cfg_fec_crc_mode_reject,")
-    w("  input  wire [1:0]              cfg_pre_fec_ber_meas_st,")
-    w("  input  wire                    cfg_fec_interleave_enable,")
-    w("  input  wire                    cfg_fec_interleave_ctrl_reject,")
-    w("  input  wire                    cfg_request_equalization,")
-    w("  input  wire [2:0]              cfg_crc_mode_ctrl,")
-    w("  input  wire [3:0]              cfg_local_tx_preset,")
-    w("  input  wire [5:0]              cfg_first_pre_cursor,")
-    w("  input  wire                    cfg_eq_reject,")
-    w("  input  wire [1:0]              cfg_current_eq_phase,")
-    w("  input  wire                    cfg_preset_mode_en,")
-    w("  input  wire [3:0]              cfg_tx_preset,")
-    w("  input  wire [7:0]              cfg_lane_id_base,")
-    w(f"  input  wire [{map_w}-1:0]            cfg_lane_id_map,")
-    w()
-    w("  // LMSM ↔ PMA training sideband (SPEC §3.2.5)")
-    w("  output wire [3:0]              pma_data_rate_sel,")
-    w("  output wire [3:0]              pma_tx_width,")
-    w("  output wire [3:0]              pma_rx_width,")
-    w("  output wire                    pma_lane_reverse_tx,")
-    w("  output wire                    pma_lane_reverse_rx,")
-    w("  output wire [NUM_LANES_RX-1:0] pma_polarity_inv,")
-    w("  output wire                    pma_probe_pulse_en,")
-    w("  input  wire [NUM_LANES_TX-1:0] pma_term_detect,")
-    w("  input  wire [NUM_LANES_RX-1:0] pma_rx_eidle_exit,")
-    w("  input  wire                    pma_phy_ready,")
-    w()
-    w("  // LMSM ↔ DLL (SPEC §3.3.3)")
-    w("  output wire                    link_up,")
-    w("  output wire                    link_ready,")
-    w("  input  wire                    dll_retrain_req,")
-    w("  output wire                    lmsm_retrain_ack,")
-    w()
-    w("  // LMSM ↔ PCS pattern / Lane_ID controls (SPEC §3.3.4)")
-    w("  output wire [1:0]              lmsm2pcs_pattern,")
-    w("  output wire                    lmsm2pcs_ltb_valid,")
-    w("  output wire [1:0]              lmsm2pcs_lane_id_mode,")
-    w("  output wire [7:0]              lmsm2pcs_lane_id_base,")
-    w(f"  output wire [{map_w}-1:0]            lmsm2pcs_lane_id_map,")
-    w()
-    w("  // LTB/CLTB TX field ports (SPEC §3.3.4). Unused-in-this-type = 0.")
-    w("  output wire [7:0]              lmsm2pcs_ltb_type,")
-    w("  output wire [7:0]              lmsm2pcs_link_id,")
-    w("  output wire [5:0]              lmsm2pcs_tlw,")
-    w("  output wire [5:0]              lmsm2pcs_rlw,")
-    w("  output wire [7:0]              lmsm2pcs_data_rate_support_1,")
-    w("  output wire [7:0]              lmsm2pcs_data_rate_support_2,")
-    w("  output wire [7:0]              lmsm2pcs_fec_mode_support,")
-    w("  output wire                    lmsm2pcs_port_type,")
-    w("  output wire [6:0]              lmsm2pcs_portnego_random_value,")
-    w("  output wire [3:0]              lmsm2pcs_fec_interleave_support,")
-    w("  output wire [2:0]              lmsm2pcs_rx_lane0_id,")
-    w("  output wire [2:0]              lmsm2pcs_max_link_width,")
-    w("  output wire [1:0]              lmsm2pcs_eq_mode,")
-    w("  output wire [2:0]              lmsm2pcs_fec_mode_ctrl,")
-    w("  output wire                    lmsm2pcs_fec_interleave_ctrl,")
-    w("  output wire [5:0]              lmsm2pcs_eq_ctrl1,")
-    w("  output wire [7:0]              lmsm2pcs_eq_ctrl2,")
-    w("  output wire [7:0]              lmsm2pcs_eq_ctrl3,")
-    w("  output wire [7:0]              lmsm2pcs_eq_ctrl4,")
-    w("  output wire                    lmsm2pcs_fec_crc_mode_reject,")
-    w("  output wire [1:0]              lmsm2pcs_pre_fec_ber_meas_st,")
-    w("  output wire                    lmsm2pcs_fec_interleave_enable,")
-    w("  output wire                    lmsm2pcs_fec_interleave_ctrl_reject,")
-    w("  output wire                    lmsm2pcs_request_equalization,")
-    w("  output wire [2:0]              lmsm2pcs_crc_mode_ctrl,")
-    w("  output wire [3:0]              lmsm2pcs_local_tx_preset,")
-    w("  output wire [5:0]              lmsm2pcs_first_pre_cursor,")
-    w("  output wire                    lmsm2pcs_eq_reject,")
-    w("  output wire [1:0]              lmsm2pcs_current_eq_phase,")
-    w("  output wire                    lmsm2pcs_preset_mode_en,")
-    w("  output wire [3:0]              lmsm2pcs_tx_preset,")
-    w()
-    w("  // LTB/CLTB RX field ports (SPEC §3.3.4). Sampled on ltb_valid.")
-    w("  input  wire                    pcs2lmsm_ltb_valid,")
-    w("  input  wire [7:0]              pcs2lmsm_ltb_type,")
-    w("  input  wire [7:0]              pcs2lmsm_link_id,")
-    w("  input  wire [7:0]              pcs2lmsm_lane_id,")
-    w("  input  wire [5:0]              pcs2lmsm_tlw,")
-    w("  input  wire [5:0]              pcs2lmsm_rlw,")
-    w("  input  wire [7:0]              pcs2lmsm_data_rate_support_1,")
-    w("  input  wire [7:0]              pcs2lmsm_data_rate_support_2,")
-    w("  input  wire [7:0]              pcs2lmsm_fec_mode_support,")
-    w("  input  wire                    pcs2lmsm_port_type,")
-    w("  input  wire [6:0]              pcs2lmsm_portnego_random_value,")
-    w("  input  wire [3:0]              pcs2lmsm_fec_interleave_support,")
-    w("  input  wire [2:0]              pcs2lmsm_rx_lane0_id,")
-    w("  input  wire [2:0]              pcs2lmsm_max_link_width,")
-    w("  input  wire [1:0]              pcs2lmsm_eq_mode,")
-    w("  input  wire [2:0]              pcs2lmsm_fec_mode_ctrl,")
-    w("  input  wire                    pcs2lmsm_fec_interleave_ctrl,")
-    w("  input  wire [5:0]              pcs2lmsm_eq_ctrl1,")
-    w("  input  wire [7:0]              pcs2lmsm_eq_ctrl2,")
-    w("  input  wire [7:0]              pcs2lmsm_eq_ctrl3,")
-    w("  input  wire [7:0]              pcs2lmsm_eq_ctrl4,")
-    w("  input  wire                    pcs2lmsm_fec_crc_mode_reject,")
-    w("  input  wire [1:0]              pcs2lmsm_pre_fec_ber_meas_st,")
-    w("  input  wire                    pcs2lmsm_fec_interleave_enable,")
-    w("  input  wire                    pcs2lmsm_fec_interleave_ctrl_reject,")
-    w("  input  wire                    pcs2lmsm_request_equalization,")
-    w("  input  wire [2:0]              pcs2lmsm_crc_mode_ctrl,")
-    w("  input  wire [3:0]              pcs2lmsm_local_tx_preset,")
-    w("  input  wire [5:0]              pcs2lmsm_first_pre_cursor,")
-    w("  input  wire                    pcs2lmsm_eq_reject,")
-    w("  input  wire [1:0]              pcs2lmsm_current_eq_phase,")
-    w("  input  wire                    pcs2lmsm_preset_mode_en,")
-    w("  input  wire [3:0]              pcs2lmsm_tx_preset,")
-    w("  input  wire [NUM_LANES_RX-1:0] pcs_am_locked,")
-    w("  input  wire                    pcs_lid_bad,")
-    w("  input  wire                    pcs_deskew_ok,")
-    w()
-    w("  // Status / IRQ events to ub_csr (REGMAP STATUS / IRQ / CNT)")
-    w("  output wire [4:0]              lmsm_st,")
-    w("  output wire                    train_fail,")
-    w("  output wire                    train_to_inc")
+    pcs2lmsm_ltb_valid = m.input("pcs2lmsm_ltb_valid", width=1)
+    pcs2lmsm_ltb_type = m.input("pcs2lmsm_ltb_type", width=8)
+    pcs2lmsm_link_id = m.input("pcs2lmsm_link_id", width=8)
+    pcs2lmsm_lane_id = m.input("pcs2lmsm_lane_id", width=8)
+    pcs2lmsm_tlw = m.input("pcs2lmsm_tlw", width=6)
+    pcs2lmsm_rlw = m.input("pcs2lmsm_rlw", width=6)
+    pcs2lmsm_data_rate_support_1 = m.input("pcs2lmsm_data_rate_support_1", width=8)
+    pcs2lmsm_data_rate_support_2 = m.input("pcs2lmsm_data_rate_support_2", width=8)
+    pcs2lmsm_fec_mode_support = m.input("pcs2lmsm_fec_mode_support", width=8)
+    pcs2lmsm_port_type = m.input("pcs2lmsm_port_type", width=1)
+    pcs2lmsm_portnego_random_value = m.input("pcs2lmsm_portnego_random_value", width=7)
+    pcs2lmsm_fec_interleave_support = m.input("pcs2lmsm_fec_interleave_support", width=4)
+    pcs2lmsm_rx_lane0_id = m.input("pcs2lmsm_rx_lane0_id", width=3)
+    pcs2lmsm_max_link_width = m.input("pcs2lmsm_max_link_width", width=3)
+    pcs2lmsm_eq_mode = m.input("pcs2lmsm_eq_mode", width=2)
+    pcs2lmsm_fec_mode_ctrl = m.input("pcs2lmsm_fec_mode_ctrl", width=3)
+    pcs2lmsm_fec_interleave_ctrl = m.input("pcs2lmsm_fec_interleave_ctrl", width=1)
+    pcs2lmsm_eq_ctrl1 = m.input("pcs2lmsm_eq_ctrl1", width=6)
+    pcs2lmsm_eq_ctrl2 = m.input("pcs2lmsm_eq_ctrl2", width=8)
+    pcs2lmsm_eq_ctrl3 = m.input("pcs2lmsm_eq_ctrl3", width=8)
+    pcs2lmsm_eq_ctrl4 = m.input("pcs2lmsm_eq_ctrl4", width=8)
+    pcs2lmsm_fec_crc_mode_reject = m.input("pcs2lmsm_fec_crc_mode_reject", width=1)
+    pcs2lmsm_pre_fec_ber_meas_st = m.input("pcs2lmsm_pre_fec_ber_meas_st", width=2)
+    pcs2lmsm_fec_interleave_enable = m.input("pcs2lmsm_fec_interleave_enable", width=1)
+    pcs2lmsm_fec_interleave_ctrl_reject = m.input("pcs2lmsm_fec_interleave_ctrl_reject", width=1)
+    pcs2lmsm_request_equalization = m.input("pcs2lmsm_request_equalization", width=1)
+    pcs2lmsm_crc_mode_ctrl = m.input("pcs2lmsm_crc_mode_ctrl", width=3)
+    pcs2lmsm_local_tx_preset = m.input("pcs2lmsm_local_tx_preset", width=4)
+    pcs2lmsm_first_pre_cursor = m.input("pcs2lmsm_first_pre_cursor", width=6)
+    pcs2lmsm_eq_reject = m.input("pcs2lmsm_eq_reject", width=1)
+    pcs2lmsm_current_eq_phase = m.input("pcs2lmsm_current_eq_phase", width=2)
+    pcs2lmsm_preset_mode_en = m.input("pcs2lmsm_preset_mode_en", width=1)
+    pcs2lmsm_tx_preset = m.input("pcs2lmsm_tx_preset", width=4)
+    pcs_am_locked = m.input("pcs_am_locked", width=nrx)
+    pcs_lid_bad = m.input("pcs_lid_bad", width=1)
+    pcs_deskew_ok = m.input("pcs_deskew_ok", width=1)
+    pcs2lmsm_null_blk = m.input("pcs2lmsm_null_blk", width=1)
+    pcs2lmsm_rx_nonnull_blk = m.input("pcs2lmsm_rx_nonnull_blk", width=1)
+    pcs2lmsm_tx_null_blk = m.input("pcs2lmsm_tx_null_blk", width=1)
+
+    # Simulation-only; no synthesis effect (pyc.assert).
+    m.assert_(~(pcs2lmsm_null_blk & pcs2lmsm_rx_nonnull_blk))
+
+    tb_test_mode = None
     if test_hooks:
-        w(",")
-        w()
-        w("  // TEST_HOOKS=1 only (SPEC §10.1 / §10.2). PRODUCT has no tb_* ports.")
-        w("  input  wire                    tb_test_mode,")
-        w("  input  wire [7:0]              csr_tmr_scale,")
-        w("  input  wire [NUM_LANES_RX-1:0] tb_inj_am_lock,")
-        w("  input  wire                    tb_inj_lid_bad,")
-        w("  output wire                    tb_obs_link_ready,")
-        w("  output wire                    tb_obs_link_up,")
-        w("  output wire [4:0]              tb_obs_lmsm_st")
-    w(");")
-    w()
-    w("  // ------------------------------------------------------------------")
-    w("  // Top-level state encoding = SPEC §10.3 (STATUS.LMSM_ST / hook observe)")
-    w("  // ------------------------------------------------------------------")
-    w(f"  localparam [4:0] ST_LINK_IDLE      = 5'd{ST_LINK_IDLE};")
-    w(f"  localparam [4:0] ST_PROBE          = 5'd{ST_PROBE};")
-    w(f"  localparam [4:0] ST_RXEQ_OPTIMIZE  = 5'd{ST_RXEQ_OPTIMIZE};")
-    w(f"  localparam [4:0] ST_DISCOVERY      = 5'd{ST_DISCOVERY};")
-    w(f"  localparam [4:0] ST_CONFIG         = 5'd{ST_CONFIG};")
-    w(f"  localparam [4:0] ST_SEND_NULLBLOCK = 5'd{ST_SEND_NULLBLOCK};")
-    w(f"  localparam [4:0] ST_LINK_ACTIVE    = 5'd{ST_LINK_ACTIVE};")
-    w(f"  localparam [4:0] ST_RETRAIN        = 5'd{ST_RETRAIN};")
-    w(f"  localparam [4:0] ST_CHANGE_SPEED   = 5'd{ST_CHANGE_SPEED};")
-    w(f"  localparam [4:0] ST_EQUALIZATION   = 5'd{ST_EQUALIZATION};")
-    w()
-    w("  localparam [1:0] SUB_0 = 2'd0;")
-    w("  localparam [1:0] SUB_1 = 2'd1;")
-    w("  localparam [1:0] SUB_2 = 2'd2;")
-    w()
-    w(f"  localparam [1:0] PAT_IDLE = 2'd{PAT_IDLE};")
-    w(f"  localparam [1:0] PAT_EEIB = 2'd{PAT_EEIB};")
-    w(f"  localparam [1:0] PAT_LTB  = 2'd{PAT_LTB};")
-    w(f"  localparam [1:0] PAT_DLL  = 2'd{PAT_DLL};")
-    w()
-    w("  // Lane_ID mode: 0=PHYS, 1=ASCEND, 2=NULL. 3=RESERVED — never driven.")
-    w(f"  localparam [1:0] LANE_ID_PHYS   = 2'd{LANE_ID_PHYS};")
-    w(f"  localparam [1:0] LANE_ID_ASCEND = 2'd{LANE_ID_ASCEND};")
-    w(f"  localparam [1:0] LANE_ID_NULL   = 2'd{LANE_ID_NULL};")
-    w()
-    w("  // Combined sync reset: rst_pyc (entity) or port_rst (CSR PORT_RST).")
-    w("  wire rst_eff = rst_pyc | port_rst;")
-    w()
-    w("  // ------------------------------------------------------------------")
-    w("  // Hook mux (SPEC §10.1). Python if TEST_HOOKS — no ifdef in Verilog.")
-    w("  // Inject muxes LMSM inputs only; does not write back into PCS.")
-    w("  // ------------------------------------------------------------------")
-    if test_hooks:
-        w("  wire                    hook_en     = tb_test_mode;")
-        w("  wire [NUM_LANES_RX-1:0] am_locked_u = hook_en ? tb_inj_am_lock : pcs_am_locked;")
-        w("  wire                    lid_bad_u   = hook_en ? tb_inj_lid_bad   : pcs_lid_bad;")
-        w("  // LMSM_TMR_SCALE (§10.4 / REGMAP): 0 = real-time (+1).")
-        w("  // Non-zero: add SCALE each beat (suggested encoding; SPEC §13.2 open).")
-        w("  wire [7:0] tmr_step_u = (hook_en && (csr_tmr_scale != 8'd0))")
-        w("                         ? csr_tmr_scale : 8'd1;")
+        tb_test_mode = m.input("tb_test_mode", width=1)
+        tb_inj_am_lock = m.input("tb_inj_am_lock", width=nrx)
+        tb_inj_lid_bad = m.input("tb_inj_lid_bad", width=1)
+        hook_en = tb_test_mode
+        am_locked_u = mux(hook_en, tb_inj_am_lock, pcs_am_locked)
+        lid_bad_u = mux(hook_en, tb_inj_lid_bad, pcs_lid_bad)
+        tmr_step = mux(hook_en & (csr_tmr_scale != 0), csr_tmr_scale, m.const(1, width=8))
     else:
-        w("  wire [NUM_LANES_RX-1:0] am_locked_u = pcs_am_locked;")
-        w("  wire                    lid_bad_u   = pcs_lid_bad;")
-        w("  wire [7:0]              tmr_step_u  = 8'd1;")
-    w()
-    w("  wire am_all   = &am_locked_u;")
-    w("  wire term_any = |pma_term_detect;")
-    w("  wire eidle_any = |pma_rx_eidle_exit;")
-    w()
-    w("  // pyc_reg: st, sub, tmr, probe_try, retrain_left, disc_short, rx holds,")
-    w("  //          saw_rx_ltb, train pulses.")
-    w("  reg [4:0]      st;")
-    w("  reg [1:0]      sub;")
-    w("  reg [TMR_W-1:0] tmr;")
-    w("  reg [7:0]      probe_try;")
-    w("  reg [7:0]      retrain_left;")
-    w("  reg            saw_rx_ltb;")
-    w("  reg            disc_short; // 1 if Discovery entered from Retrain/Config (§6.1 10 us)")
-    w("  reg            train_fail_q;")
-    w("  reg            train_to_q;")
-    w("  reg [7:0]      rx_type_q;")
-    w("  reg [7:0]      rx_link_q;")
-    w("  reg [7:0]      rx_lane_q;")
-    w("  reg [5:0]      rx_tlw_q;")
-    w("  reg [5:0]      rx_rlw_q;")
-    w("  reg [2:0]      rx_fec_ctrl_q;")
-    w("  reg            rx_req_eq_q;")
-    w("  reg [7:0]      rx_drs2_q;")
-    w()
-    w("  // Keep remaining RX LTB field ports in the cone (SPEC §3.3.4 completeness)")
-    w("  // without steering the M1 top-level SM. WAIVER_LMSM_RX_LTB_AUX.")
-    w("  wire unused_rx_aux = ^{pcs2lmsm_data_rate_support_1,")
-    w("                         pcs2lmsm_fec_mode_support,")
-    w("                         pcs2lmsm_port_type,")
-    w("                         pcs2lmsm_portnego_random_value,")
-    w("                         pcs2lmsm_fec_interleave_support,")
-    w("                         pcs2lmsm_rx_lane0_id,")
-    w("                         pcs2lmsm_max_link_width,")
-    w("                         pcs2lmsm_eq_mode,")
-    w("                         pcs2lmsm_fec_interleave_ctrl,")
-    w("                         pcs2lmsm_eq_ctrl1,")
-    w("                         pcs2lmsm_eq_ctrl2,")
-    w("                         pcs2lmsm_eq_ctrl3,")
-    w("                         pcs2lmsm_eq_ctrl4,")
-    w("                         pcs2lmsm_fec_crc_mode_reject,")
-    w("                         pcs2lmsm_pre_fec_ber_meas_st,")
-    w("                         pcs2lmsm_fec_interleave_enable,")
-    w("                         pcs2lmsm_fec_interleave_ctrl_reject,")
-    w("                         pcs2lmsm_crc_mode_ctrl,")
-    w("                         pcs2lmsm_local_tx_preset,")
-    w("                         pcs2lmsm_first_pre_cursor,")
-    w("                         pcs2lmsm_eq_reject,")
-    w("                         pcs2lmsm_current_eq_phase,")
-    w("                         pcs2lmsm_preset_mode_en,")
-    w("                         pcs2lmsm_tx_preset,")
-    w("                         eidle_any};")
-    w("  wire unused_tie = unused_rx_aux & 1'b0;")
-    w()
-    w("  // Handshake quality used by Discovery/Config/Retrain.")
-    w("  // Type families: SPEC §3.3.4 (PR #9 @1277cce0).")
-    w("  wire rx_type_dltb = (rx_type_q == P_LTB_TYPE_DLTB_ACTIVE[7:0])")
-    w("                   | (rx_type_q == P_LTB_TYPE_DLTB_CONFIRM[7:0]);")
-    w("  wire rx_type_cltb = (rx_type_q == P_LTB_TYPE_CLTB_ACTIVE[7:0])")
-    w("                   | (rx_type_q == P_LTB_TYPE_CLTB_CHECK[7:0])")
-    w("                   | (rx_type_q == P_LTB_TYPE_CLTB_CONFIRM[7:0]);")
-    w("  wire rx_type_rltb = (rx_type_q == P_LTB_TYPE_RLTB_ACTIVE[7:0])")
-    w("                   | (rx_type_q == P_LTB_TYPE_RLTB_CONFIRM[7:0])")
-    w("                   | (rx_type_q == P_LTB_TYPE_RLTB_LP1[7:0])")
-    w("                   | (rx_type_q == P_LTB_TYPE_RLTB_EQ_INIT[7:0]);")
-    w("  wire disc_ok = am_all & ~lid_bad_u & pcs_deskew_ok & saw_rx_ltb & rx_type_dltb;")
-    w("  wire cfg_ok  = am_all & ~lid_bad_u & saw_rx_ltb & rx_type_cltb;")
-    w("  wire rtr_ok  = am_all & ~lid_bad_u & (saw_rx_ltb ? rx_type_rltb : 1'b1);")
-    w()
-    w("  wire rx_chg_spd = rx_drs2_q[P_CHG_SPD_BIT] | cfg_req_change_speed;")
-    w("  wire rx_want_eq = rx_req_eq_q | cfg_req_equalization | cfg_request_equalization;")
-    w()
-    w("  // Timer compare. Official limits SPEC §6.1 (PR #9 @1277cce0); Probe still §13.")
-    w("  reg [TMR_W-1:0] tmr_lim;")
-    w("  always @* begin")
-    w("    tmr_lim = {TMR_W{1'b1}};")
-    w("    case (st)")
-    w("      ST_PROBE: tmr_lim = (sub == SUB_0)")
-    w("                         ? P_TMR_PROBE_WAIT[TMR_W-1:0]")
-    w("                         : P_TMR_PROBE_CONFIRM[TMR_W-1:0];")
-    w("      ST_RXEQ_OPTIMIZE: tmr_lim = P_TMR_RXEQ[TMR_W-1:0];")
-    w("      ST_DISCOVERY: tmr_lim = (sub == SUB_0)")
-    w("                            ? (disc_short")
-    w("                               ? P_TMR_DISC_ACTIVE_RTR_CFG[TMR_W-1:0]")
-    w("                               : P_TMR_DISC_ACTIVE[TMR_W-1:0])")
-    w("                            : P_TMR_DISC_CONFIRM[TMR_W-1:0];")
-    w("      ST_CONFIG: tmr_lim = P_TMR_CFG[TMR_W-1:0];")
-    w("      ST_SEND_NULLBLOCK: tmr_lim = P_TMR_NULL[TMR_W-1:0];")
-    w("      ST_RETRAIN: tmr_lim = (sub == SUB_0)")
-    w("                           ? P_TMR_RETRAIN_ACTIVE[TMR_W-1:0]")
-    w("                           : P_TMR_RETRAIN_CONFIRM[TMR_W-1:0];")
-    w("      ST_CHANGE_SPEED: tmr_lim = P_TMR_CHG_SPD[TMR_W-1:0];")
-    w("      ST_EQUALIZATION: tmr_lim = (sub == SUB_0)")
-    w("                               ? P_TMR_EQ_PASSIVE[TMR_W-1:0]")
-    w("                               : P_TMR_EQ_ACTIVE[TMR_W-1:0];")
-    w("      ST_LINK_IDLE,")
-    w("      ST_LINK_ACTIVE: tmr_lim = {TMR_W{1'b1}};")
-    w("      default: tmr_lim = {TMR_W{1'b1}}; // WAIVER_LMSM_FSM_DEFAULT")
-    w("    endcase")
-    w("  end")
-    w()
-    w("  wire [TMR_W-1:0] tmr_step_ext = {{(TMR_W-8){1'b0}}, tmr_step_u};")
-    w("  wire             tmr_to       = (tmr >= tmr_lim);")
-    w("  wire             tmr_sat      = &tmr;")
-    w("  wire [TMR_W-1:0] tmr_inc      = tmr_sat ? tmr : (tmr + tmr_step_ext);")
-    w()
-    w("  // ------------------------------------------------------------------")
-    w("  // Next-state (SPEC §6.1 mermaid). Default → Link_Idle.")
-    w("  // WAIVER_LMSM_FSM_DEFAULT: illegal/unreachable st/sub → Link_Idle.")
-    w("  // Do not force illegal states from the TB (CODING_STYLE §4 / SPEC §10.5).")
-    w("  // ------------------------------------------------------------------")
-    w("  reg [4:0] st_n;")
-    w("  reg [1:0] sub_n;")
-    w("  reg       to_idle_fail;")
-    w("  reg       to_idle_timeout;")
-    w()
-    w("  always @* begin")
-    w("    st_n            = st;")
-    w("    sub_n           = sub;")
-    w("    to_idle_fail    = 1'b0;")
-    w("    to_idle_timeout = 1'b0;")
-    w("    case (st)")
-    w("      ST_LINK_IDLE: begin")
-    w("        // SPEC §6.1 mermaid + CTRL.LMSM_START (0x0000 bit1):")
-    w("        //   !bypass & phy_ready & start → Probe")
-    w("        //   bypass & fixed-rate & start → RXEQ_Optimize")
-    w("        //   bypass & !fixed-rate & start → Discovery")
-    w("        sub_n = SUB_0;")
-    w("        if (csr_lmsm_start & pma_phy_ready) begin")
-    w("          if (!csr_bypass_probe) begin")
-    w("            st_n  = ST_PROBE;")
-    w("            sub_n = SUB_0;")
-    w("          end else if (cfg_fixed_rate_rxeq) begin")
-    w("            st_n  = ST_RXEQ_OPTIMIZE;")
-    w("            sub_n = SUB_0;")
-    w("          end else begin")
-    w("            st_n  = ST_DISCOVERY;")
-    w("            sub_n = SUB_0;")
-    w("          end")
-    w("        end")
-    w("      end")
-    w()
-    w("      ST_PROBE: begin")
-    w("        if (sub == SUB_0) begin")
-    w("          if (term_any | unused_tie | unused_hold_tie) begin")
-    w("            sub_n = SUB_1;")
-    w("          end else if (tmr_to) begin")
-    w("            if (probe_try >= P_PROBE_MAX_RETRY[7:0]) begin")
-    w("              st_n            = ST_LINK_IDLE;")
-    w("              sub_n           = SUB_0;")
-    w("              to_idle_fail    = 1'b1;")
-    w("              to_idle_timeout = 1'b1;")
-    w("            end else begin")
-    w("              st_n  = ST_PROBE;")
-    w("              sub_n = SUB_0;")
-    w("            end")
-    w("          end")
-    w("        end else begin")
-    w("          if (tmr_to) begin")
-    w("            st_n  = ST_DISCOVERY;")
-    w("            sub_n = SUB_0;")
-    w("          end")
-    w("        end")
-    w("      end")
-    w()
-    w("      ST_RXEQ_OPTIMIZE: begin")
-    w("        // Official 48 ms then Discovery.Active (SPEC §6.1 / §3.4.3.3).")
-    w("        if (tmr_to) begin")
-    w("          st_n  = ST_DISCOVERY;")
-    w("          sub_n = SUB_0;")
-    w("        end")
-    w("      end")
-    w()
-    w("      ST_DISCOVERY: begin")
-    w("        if (lid_bad_u) begin")
-    w("          st_n         = ST_LINK_IDLE;")
-    w("          sub_n        = SUB_0;")
-    w("          to_idle_fail = 1'b1;")
-    w("        end else if (sub == SUB_0) begin")
-    w("          if (am_all) begin")
-    w("            sub_n = SUB_1;")
-    w("          end else if (tmr_to) begin")
-    w("            st_n            = ST_LINK_IDLE;")
-    w("            sub_n           = SUB_0;")
-    w("            to_idle_fail    = 1'b1;")
-    w("            to_idle_timeout = 1'b1;")
-    w("          end")
-    w("        end else begin")
-    w("          if (disc_ok) begin")
-    w("            st_n  = ST_CONFIG;")
-    w("            sub_n = SUB_0;")
-    w("          end else if (tmr_to) begin")
-    w("            st_n            = ST_LINK_IDLE;")
-    w("            sub_n           = SUB_0;")
-    w("            to_idle_fail    = 1'b1;")
-    w("            to_idle_timeout = 1'b1;")
-    w("          end")
-    w("        end")
-    w("      end")
-    w()
-    w("      ST_CONFIG: begin")
-    w("        if (lid_bad_u) begin")
-    w("          st_n         = ST_LINK_IDLE;")
-    w("          sub_n        = SUB_0;")
-    w("          to_idle_fail = 1'b1;")
-    w("        end else if (sub == SUB_0) begin")
-    w("          if (am_all) begin")
-    w("            sub_n = SUB_1;")
-    w("          end else if (tmr_to) begin")
-    w("            st_n            = ST_LINK_IDLE;")
-    w("            sub_n           = SUB_0;")
-    w("            to_idle_fail    = 1'b1;")
-    w("            to_idle_timeout = 1'b1;")
-    w("          end")
-    w("        end else if (sub == SUB_1) begin")
-    w("          if (tmr_to || cfg_ok) begin")
-    w("            sub_n = SUB_2;")
-    w("          end")
-    w("        end else begin")
-    w("          if (cfg_ok) begin")
-    w("            st_n  = ST_SEND_NULLBLOCK;")
-    w("            sub_n = SUB_0;")
-    w("          end else if (tmr_to) begin")
-    w("            st_n            = ST_LINK_IDLE;")
-    w("            sub_n           = SUB_0;")
-    w("            to_idle_fail    = 1'b1;")
-    w("            to_idle_timeout = 1'b1;")
-    w("          end")
-    w("        end")
-    w("      end")
-    w()
-    w("      ST_SEND_NULLBLOCK: begin")
-    w("        // Official exit (SPEC §6.1 / §3.4.3.6): 8 consecutive RX Null")
-    w("        // Blocks on all configured lanes AND >=16 TX Null Blocks after")
-    w("        // first RX, after AMCTL with SDF, deskew done.")
-    w("        // OPEN (SPEC §13 @1277cce0): pcs2lmsm_null_blk is a recommendation,")
-    w("        // not a §3.3.4 port. Do not count core_clk beats as blocks.")
-    w("        // Active is unreachable until Xia adds the strobe.")
-    w("        if (1'b0 && pcs_deskew_ok")
-    w("            && (P_NULL_RX_NEED[7:0] == 8'd0)")
-    w("            && (P_NULL_TX_NEED[7:0] == 8'd0)) begin")
-    w("          st_n  = ST_LINK_ACTIVE;")
-    w("          sub_n = SUB_0;")
-    w("        end else if (cfg_null_need_rediscovery) begin")
-    w("          st_n  = ST_DISCOVERY;")
-    w("          sub_n = SUB_0;")
-    w("        end else if (tmr_to) begin")
-    w("          if (retrain_left != 8'd0) begin")
-    w("            st_n  = ST_RETRAIN;")
-    w("            sub_n = SUB_0;")
-    w("          end else begin")
-    w("            st_n            = ST_LINK_IDLE;")
-    w("            sub_n           = SUB_0;")
-    w("            to_idle_fail    = 1'b1;")
-    w("            to_idle_timeout = 1'b1;")
-    w("          end")
-    w("        end")
-    w("      end")
-    w()
-    w("      ST_LINK_ACTIVE: begin")
-    w("        if (dll_retrain_req | lid_bad_u) begin")
-    w("          st_n  = ST_RETRAIN;")
-    w("          sub_n = SUB_0;")
-    w("        end")
-    w("      end")
-    w()
-    w("      ST_RETRAIN: begin")
-    w("        if (sub == SUB_0) begin")
-    w("          if (am_all) begin")
-    w("            sub_n = SUB_1;")
-    w("          end else if (tmr_to) begin")
-    w("            st_n            = ST_LINK_IDLE;")
-    w("            sub_n           = SUB_0;")
-    w("            to_idle_fail    = 1'b1;")
-    w("            to_idle_timeout = 1'b1;")
-    w("          end")
-    w("        end else begin")
-    w("          if (tmr_to && !rtr_ok) begin")
-    w("            st_n            = ST_LINK_IDLE;")
-    w("            sub_n           = SUB_0;")
-    w("            to_idle_fail    = 1'b1;")
-    w("            to_idle_timeout = 1'b1;")
-    w("          end else if (rtr_ok || tmr_to) begin")
-    w("            if (rx_chg_spd) begin")
-    w("              st_n  = ST_CHANGE_SPEED;")
-    w("              sub_n = SUB_0;")
-    w("            end else if (rx_want_eq) begin")
-    w("              st_n  = ST_EQUALIZATION;")
-    w("              sub_n = SUB_0;")
-    w("            end else if (cfg_null_need_rediscovery) begin")
-    w("              st_n  = ST_DISCOVERY;")
-    w("              sub_n = SUB_0;")
-    w("            end else begin")
-    w("              st_n  = ST_SEND_NULLBLOCK;")
-    w("              sub_n = SUB_0;")
-    w("            end")
-    w("          end")
-    w("        end")
-    w("      end")
-    w()
-    w("      ST_CHANGE_SPEED: begin")
-    w("        // Official fail timeout 48 ms → Idle (SPEC §6.1 / §3.4.3.9).")
-    w("        // M1 does not change rate. Electrical-idle stay still §13-open.")
-    w("        if (tmr_to) begin")
-    w("          st_n            = ST_LINK_IDLE;")
-    w("          sub_n           = SUB_0;")
-    w("          to_idle_fail    = 1'b1;")
-    w("          to_idle_timeout = 1'b1;")
-    w("        end")
-    w("      end")
-    w()
-    w("      ST_EQUALIZATION: begin")
-    w("        // Official ≤DR4: EQ.Passive 32 ms then EQ.Active 24 ms → Retrain")
-    w("        // (SPEC §6.1 / §3.4.2.9 / §3.4.3.10; PR #9 @1277cce0).")
-    w("        if (sub == SUB_0) begin")
-    w("          if (tmr_to) begin")
-    w("            sub_n = SUB_1;")
-    w("          end")
-    w("        end else begin")
-    w("          if (tmr_to) begin")
-    w("            st_n  = ST_RETRAIN;")
-    w("            sub_n = SUB_0;")
-    w("          end")
-    w("        end")
-    w("      end")
-    w()
-    w("      default: begin")
-    w("        st_n  = ST_LINK_IDLE;")
-    w("        sub_n = SUB_0;")
-    w("      end")
-    w("    endcase")
-    w("  end")
-    w()
-    w("  wire st_enter = (st_n != st) || (sub_n != sub);")
-    w()
-    w("  // pyc_reg bank (sync; rst_eff = rst_pyc | port_rst).")
-    w("  always @(posedge core_clk) begin")
-    w("    if (rst_eff) begin")
-    w("      st            <= ST_LINK_IDLE;")
-    w("      sub           <= SUB_0;")
-    w("      tmr           <= {TMR_W{1'b0}};")
-    w("      probe_try     <= 8'd0;")
-    w("      retrain_left  <= P_MAX_RETRAIN[7:0];")
-    w("      saw_rx_ltb    <= 1'b0;")
-    w("      disc_short    <= 1'b0;")
-    w("      train_fail_q  <= 1'b0;")
-    w("      train_to_q    <= 1'b0;")
-    w("      rx_type_q     <= 8'd0;")
-    w("      rx_link_q     <= 8'd0;")
-    w("      rx_lane_q     <= 8'd0;")
-    w("      rx_tlw_q      <= 6'd0;")
-    w("      rx_rlw_q      <= 6'd0;")
-    w("      rx_fec_ctrl_q <= 3'd0;")
-    w("      rx_req_eq_q   <= 1'b0;")
-    w("      rx_drs2_q     <= 8'd0;")
-    w("    end else begin")
-    w("      st           <= st_n;")
-    w("      sub          <= sub_n;")
-    w("      train_fail_q <= to_idle_fail;")
-    w("      train_to_q   <= to_idle_timeout;")
-    w()
-    w("      if (st_enter) begin")
-    w("        tmr        <= {TMR_W{1'b0}};")
-    w("        saw_rx_ltb <= 1'b0;")
-    w("        if (st_n == ST_DISCOVERY)")
-    w("          disc_short <= (st == ST_RETRAIN) || (st == ST_CONFIG);")
-    w("        if (st_n == ST_PROBE && sub_n == SUB_0 && st == ST_PROBE)")
-    w("          probe_try <= (probe_try == 8'hFF) ? probe_try : (probe_try + 8'd1);")
-    w("        if (st_n == ST_PROBE && st == ST_LINK_IDLE)")
-    w("          probe_try <= 8'd0;")
-    w("        if (st_n == ST_RETRAIN && st == ST_LINK_ACTIVE) begin")
-    w("          if (retrain_left != 8'd0)")
-    w("            retrain_left <= retrain_left - 8'd1;")
-    w("        end")
-    w("        if (st_n == ST_LINK_IDLE)")
-    w("          retrain_left <= P_MAX_RETRAIN[7:0];")
-    w("      end else begin")
-    w("        tmr <= tmr_inc;")
-    w("      end")
-    w()
-    w("      if (pcs2lmsm_ltb_valid) begin")
-    w("        saw_rx_ltb    <= 1'b1;")
-    w("        rx_type_q     <= pcs2lmsm_ltb_type;")
-    w("        rx_link_q     <= pcs2lmsm_link_id;")
-    w("        rx_lane_q     <= pcs2lmsm_lane_id;")
-    w("        rx_tlw_q      <= pcs2lmsm_tlw;")
-    w("        rx_rlw_q      <= pcs2lmsm_rlw;")
-    w("        rx_fec_ctrl_q <= pcs2lmsm_fec_mode_ctrl;")
-    w("        rx_req_eq_q   <= pcs2lmsm_request_equalization;")
-    w("        rx_drs2_q     <= pcs2lmsm_data_rate_support_2;")
-    w("      end")
-    w("    end")
-    w("  end")
-    w()
-    w("  // Keep latched RX fields that do not steer the SM in the cone.")
-    w("  wire link_id_is_null = (rx_link_q == P_LINK_ID_NULL[7:0]);")
-    w("  wire unused_rx_hold = ^{rx_link_q, rx_lane_q, rx_tlw_q, rx_rlw_q, rx_fec_ctrl_q,")
-    w("                          link_id_is_null};")
-    w("  wire unused_hold_tie = unused_rx_hold & 1'b0;")
-    w()
-    w("  // ------------------------------------------------------------------")
-    w("  // Outputs")
-    w("  // ------------------------------------------------------------------")
-    w("  assign lmsm_st   = st;")
-    w("  // LinkUp/LinkReady assignment points SPEC §6.1 (PR #9 @1277cce0).")
-    w("  // Retrain-period LinkUp still §13-open: keep Null|Active (current).")
-    w("  assign link_up   = (st == ST_SEND_NULLBLOCK) | (st == ST_LINK_ACTIVE);")
-    w("  assign link_ready = (st == ST_LINK_ACTIVE);")
-    w("  assign lmsm_retrain_ack = (st == ST_RETRAIN);")
-    w("  assign train_fail   = train_fail_q;")
-    w("  assign train_to_inc = train_to_q;")
-    w()
-    w("  // PMA width encoding = PARAM_PHY.NUM_LANES_* binary 1/2/4/8")
-    w("  // (SPEC §13 / §9 per PR #9 @1277cce0). Never produce reserved values.")
-    w("  assign pma_data_rate_sel   = 4'd0; // SPEC §9 DATA_RATE = 0")
-    w("  assign pma_tx_width =")
-    w("      (NUM_LANES_TX == 8) ? 4'd8 :")
-    w("      (NUM_LANES_TX == 4) ? 4'd4 :")
-    w("      (NUM_LANES_TX == 2) ? 4'd2 : 4'd1;")
-    w("  assign pma_rx_width =")
-    w("      (NUM_LANES_RX == 8) ? 4'd8 :")
-    w("      (NUM_LANES_RX == 4) ? 4'd4 :")
-    w("      (NUM_LANES_RX == 2) ? 4'd2 : 4'd1;")
-    w("  assign pma_lane_reverse_tx = cfg_lane_reverse_tx;")
-    w("  assign pma_lane_reverse_rx = cfg_lane_reverse_rx;")
-    w("  assign pma_polarity_inv    = cfg_polarity_inv;")
-    w("  assign pma_probe_pulse_en  = (st == ST_PROBE) && (sub == SUB_0);")
-    w()
-    w("  // Pattern (SPEC §3.3.4). Send_NullBlock = DLL Null Blocks (pattern=3),")
-    w("  // not a Type=0 LTB (PR #9 @1277cce0). RXEQ uses LTB Type 0xE0.")
-    w("  assign lmsm2pcs_pattern =")
-    w("      (st == ST_LINK_IDLE)      ? PAT_IDLE :")
-    w("      (st == ST_PROBE)          ? PAT_EEIB :")
-    w("      ((st == ST_SEND_NULLBLOCK) || (st == ST_LINK_ACTIVE)) ? PAT_DLL :")
-    w("                                                    PAT_LTB;")
-    w()
-    w("  wire use_rxeq = (st == ST_RXEQ_OPTIMIZE);")
-    w("  wire use_dltb = (st == ST_DISCOVERY);")
-    w("  wire use_cltb = (st == ST_CONFIG);")
-    w("  wire use_rltb = (st == ST_RETRAIN) || (st == ST_CHANGE_SPEED);")
-    w("  wire use_eltb = (st == ST_EQUALIZATION);")
-    w("  assign lmsm2pcs_ltb_valid = use_rxeq | use_dltb | use_cltb | use_rltb | use_eltb;")
-    w()
-    w("  // Structural 3-way mux: only PHYS / ASCEND / NULL. Default NULL (2).")
-    w("  // Encoding 3 is RESERVED (SPEC §3.3.4). No path assigns 2'd3 / 2'b11.")
-    w("  wire sel_phys   = (st == ST_DISCOVERY);")
-    w("  wire sel_ascend = (st == ST_CONFIG) || (st == ST_LINK_ACTIVE);")
-    w("  assign lmsm2pcs_lane_id_mode = sel_phys   ? LANE_ID_PHYS :")
-    w("                                 sel_ascend ? LANE_ID_ASCEND :")
-    w("                                              LANE_ID_NULL;")
-    w()
-    w("  assign lmsm2pcs_lane_id_base = cfg_lane_id_base;")
-    w()
-    w("  // ASCEND map: cfg_lane_id_map if non-zero, else base+i per physical lane.")
-    w(f"  wire [{map_w}-1:0] auto_ascend;")
-    w(f"  wire [{map_w}-1:0] null_map;")
-    w("  genvar gi;")
-    w("  generate")
-    w("    for (gi = 0; gi < NUM_LANES_TX; gi = gi + 1) begin : g_ascend")
-    w("      assign auto_ascend[8*gi+7:8*gi] = cfg_lane_id_base + gi[7:0];")
-    w("      assign null_map[8*gi+7:8*gi]    = P_LANE_ID_NULL[7:0];")
-    w("    end")
-    w("  endgenerate")
-    w(f"  wire map_is_zero = (cfg_lane_id_map == {map_w}'d0);")
-    w("  // PHYS/NULL: PCS ignores map (SPEC §3.3.4). Drive Lane_ID NULL = 8'hFF.")
-    w("  assign lmsm2pcs_lane_id_map = sel_ascend")
-    w("      ? (map_is_zero ? auto_ascend : cfg_lane_id_map)")
-    w("      : null_map;")
-    w()
-    w("  // TX LTB Type per substate (SPEC §3.3.4). No NullBlock Type.")
-    w("  assign lmsm2pcs_ltb_type =")
-    w("      use_rxeq ? P_LTB_TYPE_RXEQ[7:0] :")
-    w("      use_dltb ? ((sub == SUB_0) ? P_LTB_TYPE_DLTB_ACTIVE[7:0]")
-    w("                                : P_LTB_TYPE_DLTB_CONFIRM[7:0]) :")
-    w("      use_cltb ? ((sub == SUB_0) ? P_LTB_TYPE_CLTB_ACTIVE[7:0] :")
-    w("                  (sub == SUB_1) ? P_LTB_TYPE_CLTB_CHECK[7:0] :")
-    w("                                  P_LTB_TYPE_CLTB_CONFIRM[7:0]) :")
-    w("      use_rltb ? ((sub == SUB_0) ? P_LTB_TYPE_RLTB_ACTIVE[7:0]")
-    w("                                : P_LTB_TYPE_RLTB_CONFIRM[7:0]) :")
-    w("      use_eltb ? P_LTB_TYPE_ELTB[7:0] : 8'd0;")
-    w()
-    w("  wire use_dltb_cltb = use_dltb | use_cltb;")
-    w("  assign lmsm2pcs_link_id = use_dltb_cltb ? cfg_link_id : 8'd0;")
-    w("  assign lmsm2pcs_tlw     = use_dltb_cltb ? cfg_tlw     : 6'd0;")
-    w("  assign lmsm2pcs_rlw     = use_dltb_cltb ? cfg_rlw     : 6'd0;")
-    w()
-    w("  wire use_dltb_rltb = use_dltb | use_rltb;")
-    w("  assign lmsm2pcs_data_rate_support_1 = use_dltb_rltb ? cfg_data_rate_support_1 : 8'd0;")
-    w("  // Change_Speed = data_rate_support_2[7]; M1 drives 0 (SPEC §3.3.4).")
-    w("  assign lmsm2pcs_data_rate_support_2 = use_dltb_rltb")
-    w("      ? (cfg_data_rate_support_2 & 8'h7F) : 8'd0;")
-    w()
-    w("  assign lmsm2pcs_fec_mode_support        = use_dltb ? cfg_fec_mode_support        : 8'd0;")
-    w("  assign lmsm2pcs_port_type               = use_dltb ? cfg_port_type               : 1'b0;")
-    w("  assign lmsm2pcs_portnego_random_value   = use_dltb ? cfg_portnego_random_value   : 7'd0;")
-    w("  assign lmsm2pcs_fec_interleave_support  = use_dltb ? cfg_fec_interleave_support  : 4'd0;")
-    w("  assign lmsm2pcs_rx_lane0_id             = use_dltb ? cfg_rx_lane0_id             : 3'd0;")
-    w("  assign lmsm2pcs_max_link_width          = use_dltb ? cfg_max_link_width          : 3'd0;")
-    w()
-    w("  assign lmsm2pcs_eq_mode              = use_cltb ? cfg_eq_mode              : 2'd0;")
-    w("  assign lmsm2pcs_fec_interleave_ctrl  = use_cltb ? cfg_fec_interleave_ctrl  : 1'b0;")
-    w()
-    w("  wire use_cltb_rltb = use_cltb | use_rltb;")
-    w("  assign lmsm2pcs_fec_mode_ctrl = use_cltb_rltb ? cfg_fec_mode_ctrl : 3'd0;")
-    w()
-    w("  wire use_rltb_eltb = use_rltb | use_eltb;")
-    w("  assign lmsm2pcs_eq_ctrl1          = use_rltb_eltb ? cfg_eq_ctrl1          : 6'd0;")
-    w("  assign lmsm2pcs_eq_ctrl2          = use_rltb_eltb ? cfg_eq_ctrl2          : 8'd0;")
-    w("  assign lmsm2pcs_eq_ctrl3          = use_rltb_eltb ? cfg_eq_ctrl3          : 8'd0;")
-    w("  assign lmsm2pcs_first_pre_cursor  = use_rltb_eltb ? cfg_first_pre_cursor  : 6'd0;")
-    w()
-    w("  assign lmsm2pcs_eq_ctrl4          = use_eltb ? cfg_eq_ctrl4          : 8'd0;")
-    w("  assign lmsm2pcs_eq_reject         = use_eltb ? cfg_eq_reject         : 1'b0;")
-    w("  assign lmsm2pcs_current_eq_phase  = use_eltb ? cfg_current_eq_phase  : 2'd0;")
-    w("  assign lmsm2pcs_preset_mode_en    = use_eltb ? cfg_preset_mode_en    : 1'b0;")
-    w("  assign lmsm2pcs_tx_preset         = use_eltb ? cfg_tx_preset         : 4'd0;")
-    w()
-    w("  assign lmsm2pcs_fec_crc_mode_reject        = use_rltb ? cfg_fec_crc_mode_reject        : 1'b0;")
-    w("  assign lmsm2pcs_pre_fec_ber_meas_st        = use_rltb ? cfg_pre_fec_ber_meas_st        : 2'd0;")
-    w("  assign lmsm2pcs_fec_interleave_enable      = use_rltb ? cfg_fec_interleave_enable      : 1'b0;")
-    w("  assign lmsm2pcs_fec_interleave_ctrl_reject = use_rltb ? cfg_fec_interleave_ctrl_reject : 1'b0;")
-    w("  assign lmsm2pcs_request_equalization       = use_rltb ? cfg_request_equalization       : 1'b0;")
-    w("  assign lmsm2pcs_crc_mode_ctrl              = use_rltb ? cfg_crc_mode_ctrl              : 3'd0;")
-    w("  assign lmsm2pcs_local_tx_preset            = use_rltb ? cfg_local_tx_preset            : 4'd0;")
-    w()
-    if test_hooks:
-        w("  // SPEC §10.1: tb_test_mode=0 → observe ports hold 0; inject does not intervene.")
-        w("  assign tb_obs_link_ready = hook_en ? link_ready : 1'b0;")
-        w("  assign tb_obs_link_up    = hook_en ? link_up    : 1'b0;")
-        w("  assign tb_obs_lmsm_st    = hook_en ? st         : 5'd0;")
-        w()
-    w("endmodule")
-    w()
-    return "\n".join(lines) + "\n"
+        am_locked_u = pcs_am_locked
+        lid_bad_u = pcs_lid_bad
+        tmr_step = m.const(1, width=8)
 
+    am_all = _red_and(am_locked_u)
+    term_any = _red_or(pma_term_detect)
+    eidle_any = _red_or(pma_rx_eidle_exit)
 
-def _check_lane_id_mode(verilog: str) -> None:
-    """Refuse to emit a netlist that can drive reserved encoding 3."""
-    forbidden = (
-        "lmsm2pcs_lane_id_mode = 2'd3",
-        "lmsm2pcs_lane_id_mode = 2'b11",
-        "LANE_ID_RESERVED",
-        "2'd3;",  # too broad — check assignments near mode only
+    st = m.out("st", clk=clk, rst=rst, width=5, init=u(5, ST_LINK_IDLE))
+    sub = m.out("sub", clk=clk, rst=rst, width=2, init=u(2, SUB_0))
+    tmr = m.out("tmr", clk=clk, rst=rst, width=TMR_W, init=u(TMR_W, 0))
+    probe_try = m.out("probe_try", clk=clk, rst=rst, width=8, init=u(8, 0))
+    retrain_left = m.out(
+        "retrain_left", clk=clk, rst=rst, width=8, init=u(8, P_MAX_RETRAIN)
     )
-    # Structural guarantee: the only assignments to lane_id_mode use PHYS/ASCEND/NULL.
-    for line in verilog.splitlines():
-        if "lmsm2pcs_lane_id_mode" in line and ("2'd3" in line or "2'b11" in line):
-            raise RuntimeError(f"lane_id_mode must never be 3: {line}")
-        if "LANE_ID_" in line and ("2'd3" in line or "2'b11" in line):
-            raise RuntimeError(f"reserved mode encoding leaked: {line}")
-    if "LANE_ID_PHYS" not in verilog or "LANE_ID_NULL" not in verilog:
-        raise RuntimeError("lane_id_mode mux constants missing")
-    del forbidden
+    saw_rx_ltb = m.out("saw_rx_ltb", clk=clk, rst=rst, width=1, init=u(1, 0))
+    disc_short = m.out("disc_short", clk=clk, rst=rst, width=1, init=u(1, 0))
+    train_fail_q = m.out("train_fail_q", clk=clk, rst=rst, width=1, init=u(1, 0))
+    train_to_q = m.out("train_to_q", clk=clk, rst=rst, width=1, init=u(1, 0))
+    rx_type_q = m.out("rx_type_q", clk=clk, rst=rst, width=8, init=u(8, 0))
+    rx_link_q = m.out("rx_link_q", clk=clk, rst=rst, width=8, init=u(8, 0))
+    rx_lane_q = m.out("rx_lane_q", clk=clk, rst=rst, width=8, init=u(8, 0))
+    rx_tlw_q = m.out("rx_tlw_q", clk=clk, rst=rst, width=6, init=u(6, 0))
+    rx_rlw_q = m.out("rx_rlw_q", clk=clk, rst=rst, width=6, init=u(6, 0))
+    rx_fec_ctrl_q = m.out("rx_fec_ctrl_q", clk=clk, rst=rst, width=3, init=u(3, 0))
+    rx_req_eq_q = m.out("rx_req_eq_q", clk=clk, rst=rst, width=1, init=u(1, 0))
+    rx_drs2_q = m.out("rx_drs2_q", clk=clk, rst=rst, width=8, init=u(8, 0))
+    null_seen = m.out("null_seen", clk=clk, rst=rst, width=1, init=u(1, 0))
+    rx_cnt = m.out("rx_cnt", clk=clk, rst=rst, width=RX_CNT_W, init=u(RX_CNT_W, 0))
+    tx_cnt = m.out("tx_cnt", clk=clk, rst=rst, width=TX_CNT_W, init=u(TX_CNT_W, 0))
+    first_rx = m.out("first_rx", clk=clk, rst=rst, width=1, init=u(1, 0))
+    probe_tmr = m.out("probe_tmr", clk=clk, rst=rst, width=PROBE_W, init=u(PROBE_W, 0))
+    probe_lim = m.out(
+        "probe_lim", clk=clk, rst=rst, width=PROBE_W, init=u(PROBE_W, probe_wait_def)
+    )
+
+    unused_aux = _red_xor(
+        [
+            _red_or(pcs2lmsm_data_rate_support_1),
+            _red_or(pcs2lmsm_fec_mode_support),
+            pcs2lmsm_port_type,
+            _red_or(pcs2lmsm_portnego_random_value),
+            _red_or(pcs2lmsm_fec_interleave_support),
+            _red_or(pcs2lmsm_rx_lane0_id),
+            _red_or(pcs2lmsm_max_link_width),
+            _red_or(pcs2lmsm_eq_mode),
+            pcs2lmsm_fec_interleave_ctrl,
+            _red_or(pcs2lmsm_eq_ctrl1),
+            _red_or(pcs2lmsm_eq_ctrl2),
+            _red_or(pcs2lmsm_eq_ctrl3),
+            _red_or(pcs2lmsm_eq_ctrl4),
+            pcs2lmsm_fec_crc_mode_reject,
+            _red_or(pcs2lmsm_pre_fec_ber_meas_st),
+            pcs2lmsm_fec_interleave_enable,
+            pcs2lmsm_fec_interleave_ctrl_reject,
+            _red_or(pcs2lmsm_crc_mode_ctrl),
+            _red_or(pcs2lmsm_local_tx_preset),
+            _red_or(pcs2lmsm_first_pre_cursor),
+            pcs2lmsm_eq_reject,
+            _red_or(pcs2lmsm_current_eq_phase),
+            pcs2lmsm_preset_mode_en,
+            _red_or(pcs2lmsm_tx_preset),
+            eidle_any,
+            _red_or(csr_tmr_scale),
+        ]
+    )
+
+    st_q = st.out()
+    sub_q = sub.out()
+    tmr_q = tmr.out()
+    probe_try_q = probe_try.out()
+    retrain_left_q = retrain_left.out()
+    saw_q = saw_rx_ltb.out()
+    disc_short_q = disc_short.out()
+    rx_type = rx_type_q.out()
+    rx_req_eq = rx_req_eq_q.out()
+    rx_drs2 = rx_drs2_q.out()
+    null_seen_q = null_seen.out()
+    rx_cnt_q = rx_cnt.out()
+    tx_cnt_q = tx_cnt.out()
+    first_rx_q = first_rx.out()
+    probe_tmr_q = probe_tmr.out()
+    probe_lim_q = probe_lim.out()
+
+    # Keep RX-aux / eidle / PRODUCT csr_tmr_scale / shadow-Q in the cone
+    # (BCRC crc_recv[31] pattern): AND with a live flop bit that is
+    # architecturally 0 (retrain_left max is 4). pycc cannot DCE
+    # `x & reg`. The AND is only in a synth-off assert.
+    keep0 = retrain_left_q.slice(lsb=7, width=1)
+    unused_hold = _red_xor(
+        [
+            _red_or(rx_link_q.out()),
+            _red_or(rx_lane_q.out()),
+            _red_or(rx_tlw_q.out()),
+            _red_or(rx_rlw_q.out()),
+            _red_or(rx_fec_ctrl_q.out()),
+            rx_link_q.out() == P_LINK_ID_NULL,
+        ]
+    )
+    # Keep RX-aux in the emit cone via a synth-off assert (BCRC keep
+    # pattern). Do not OR into term_u — that poisoned PRODUCT≡HOOKS.
+    m.assert_(~((unused_aux ^ unused_hold) & keep0))
+    term_u = term_any
+
+    in_idle = st_q == ST_LINK_IDLE
+    in_probe = st_q == ST_PROBE
+    in_rxeq = st_q == ST_RXEQ_OPTIMIZE
+    in_disc = st_q == ST_DISCOVERY
+    in_cfg = st_q == ST_CONFIG
+    in_null = st_q == ST_SEND_NULLBLOCK
+    in_active = st_q == ST_LINK_ACTIVE
+    in_retrain = st_q == ST_RETRAIN
+    in_chg = st_q == ST_CHANGE_SPEED
+    in_eq = st_q == ST_EQUALIZATION
+    sub0 = sub_q == SUB_0
+    sub1 = sub_q == SUB_1
+
+    legal_st = (
+        in_idle
+        | in_probe
+        | in_rxeq
+        | in_disc
+        | in_cfg
+        | in_null
+        | in_active
+        | in_retrain
+        | in_chg
+        | in_eq
+    )
+
+    tmr_lim = u(TMR_W, (1 << TMR_W) - 1)
+    tmr_lim = mux(in_rxeq, u(TMR_W, P_TMR_RXEQ), tmr_lim)
+    tmr_lim = mux(
+        in_disc & sub0 & disc_short_q, u(TMR_W, P_TMR_DISC_ACTIVE_RTR_CFG), tmr_lim
+    )
+    tmr_lim = mux(
+        in_disc & sub0 & ~disc_short_q, u(TMR_W, P_TMR_DISC_ACTIVE), tmr_lim
+    )
+    tmr_lim = mux(in_disc & ~sub0, u(TMR_W, P_TMR_DISC_CONFIRM), tmr_lim)
+    tmr_lim = mux(in_cfg, u(TMR_W, P_TMR_CFG), tmr_lim)
+    tmr_lim = mux(in_null, u(TMR_W, P_TMR_NULL), tmr_lim)
+    tmr_lim = mux(in_retrain & sub0, u(TMR_W, P_TMR_RETRAIN_ACTIVE), tmr_lim)
+    tmr_lim = mux(in_retrain & ~sub0, u(TMR_W, P_TMR_RETRAIN_CONFIRM), tmr_lim)
+    tmr_lim = mux(in_chg, u(TMR_W, P_TMR_CHG_SPD), tmr_lim)
+    tmr_lim = mux(in_eq & sub0, u(TMR_W, P_TMR_EQ_PASSIVE), tmr_lim)
+    tmr_lim = mux(in_eq & ~sub0, u(TMR_W, P_TMR_EQ_ACTIVE), tmr_lim)
+
+    tmr_to_main = tmr_q >= tmr_lim
+    tmr_to_probe = probe_tmr_q >= probe_lim_q
+    tmr_to = mux(in_probe, tmr_to_probe, tmr_to_main)
+
+    rx_type_dltb = (rx_type == P_LTB_TYPE_DLTB_ACTIVE) | (
+        rx_type == P_LTB_TYPE_DLTB_CONFIRM
+    )
+    rx_type_cltb = (
+        (rx_type == P_LTB_TYPE_CLTB_ACTIVE)
+        | (rx_type == P_LTB_TYPE_CLTB_CHECK)
+        | (rx_type == P_LTB_TYPE_CLTB_CONFIRM)
+    )
+    rx_type_rltb = (
+        (rx_type == P_LTB_TYPE_RLTB_ACTIVE)
+        | (rx_type == P_LTB_TYPE_RLTB_CONFIRM)
+        | (rx_type == P_LTB_TYPE_RLTB_LP1)
+        | (rx_type == P_LTB_TYPE_RLTB_EQ_INIT)
+    )
+    disc_ok = am_all & ~lid_bad_u & pcs_deskew_ok & saw_q & rx_type_dltb
+    cfg_ok = am_all & ~lid_bad_u & saw_q & rx_type_cltb
+    rtr_ok = am_all & ~lid_bad_u & mux(saw_q, rx_type_rltb, u(1, 1))
+    rx_chg_spd = rx_drs2.slice(lsb=P_CHG_SPD_BIT, width=1) | cfg_req_change_speed
+    rx_want_eq = rx_req_eq | cfg_req_equalization | cfg_request_equalization
+
+    # Null-block counts: first in-state cycle holds 0; pulses that cycle
+    # do not count. Condition uses next-count so same-cycle fill is seen.
+    count_en = in_null & null_seen_q
+    rx_inc = mux(rx_cnt_q == P_NULL_RX_NEED, rx_cnt_q, rx_cnt_q + 1)
+    rx_n = mux(
+        ~in_null | ~count_en | pcs2lmsm_rx_nonnull_blk,
+        u(RX_CNT_W, 0),
+        mux(pcs2lmsm_null_blk, rx_inc, rx_cnt_q),
+    )
+    first_rx_n = mux(~in_null | ~count_en, u(1, 0), first_rx_q | pcs2lmsm_null_blk)
+    tx_gate = count_en & (first_rx_q | pcs2lmsm_null_blk)
+    tx_inc = mux(tx_cnt_q == P_NULL_TX_NEED, tx_cnt_q, tx_cnt_q + 1)
+    tx_n = mux(
+        ~in_null | ~count_en,
+        u(TX_CNT_W, 0),
+        mux(tx_gate & pcs2lmsm_tx_null_blk, tx_inc, tx_cnt_q),
+    )
+    null_fill = (rx_n == P_NULL_RX_NEED) & (tx_n >= P_NULL_TX_NEED)
+
+    # ---- next-state (SPEC §6.1). Discovery / 2 ms timeout beat fill. ----
+    idle_go = csr_lmsm_start & pma_phy_ready
+    idle_st = mux(
+        ~idle_go,
+        u(5, ST_LINK_IDLE),
+        mux(
+            ~csr_bypass_probe,
+            u(5, ST_PROBE),
+            mux(cfg_fixed_rate_rxeq, u(5, ST_RXEQ_OPTIMIZE), u(5, ST_DISCOVERY)),
+        ),
+    )
+
+    probe_wait = in_probe & sub0
+    probe_max = probe_try_q >= P_PROBE_MAX_RETRY
+    wait_retry = probe_wait & tmr_to & ~term_u & ~probe_max
+    wait_fail = probe_wait & tmr_to & ~term_u & probe_max
+    wait_confirm = probe_wait & term_u
+    probe_st = mux(wait_fail, u(5, ST_LINK_IDLE), u(5, ST_PROBE))
+    probe_st = mux(in_probe & ~sub0 & tmr_to, u(5, ST_DISCOVERY), probe_st)
+    probe_sub = mux(wait_confirm, u(2, SUB_1), u(2, SUB_0))
+    probe_fail = wait_fail
+    probe_totime = wait_fail
+
+    rxeq_st = mux(tmr_to, u(5, ST_DISCOVERY), u(5, ST_RXEQ_OPTIMIZE))
+
+    disc_fail = lid_bad_u | (sub0 & ~am_all & tmr_to) | (~sub0 & ~disc_ok & tmr_to)
+    disc_to_cfg = ~lid_bad_u & ~sub0 & disc_ok
+    disc_st = mux(disc_fail, u(5, ST_LINK_IDLE), mux(disc_to_cfg, u(5, ST_CONFIG), u(5, ST_DISCOVERY)))
+    disc_sub = mux(sub0 & am_all & ~lid_bad_u, u(2, SUB_1), u(2, SUB_0))
+    disc_fail_p = disc_fail
+    disc_to_p = lid_bad_u.eq(0) & (
+        (sub0 & ~am_all & tmr_to) | (~sub0 & ~disc_ok & tmr_to)
+    )
+    # lid_bad is fail but not a timeout pulse
+    disc_to_p = (sub0 & ~am_all & tmr_to) | (~sub0 & ~disc_ok & tmr_to)
+
+    cfg_fail = lid_bad_u | (sub0 & ~am_all & tmr_to) | ((sub_q == SUB_2) & ~cfg_ok & tmr_to)
+    cfg_to_null = ~lid_bad_u & (sub_q == SUB_2) & cfg_ok
+    cfg_st = mux(cfg_fail, u(5, ST_LINK_IDLE), mux(cfg_to_null, u(5, ST_SEND_NULLBLOCK), u(5, ST_CONFIG)))
+    cfg_sub = mux(sub0 & am_all & ~lid_bad_u, u(2, SUB_1), sub_q)
+    cfg_sub = mux((sub_q == SUB_1) & (tmr_to | cfg_ok), u(2, SUB_2), cfg_sub)
+    cfg_sub = mux(cfg_fail | cfg_to_null, u(2, SUB_0), cfg_sub)
+    cfg_to_p = (sub0 & ~am_all & tmr_to) | ((sub_q == SUB_2) & ~cfg_ok & tmr_to)
+
+    null_to_disc = cfg_null_need_rediscovery
+    null_to_rtr = ~null_to_disc & tmr_to & (retrain_left_q != 0)
+    null_to_idle = ~null_to_disc & tmr_to & (retrain_left_q == 0)
+    null_to_act = ~null_to_disc & ~tmr_to & null_fill
+    null_st = mux(
+        null_to_disc,
+        u(5, ST_DISCOVERY),
+        mux(
+            null_to_rtr,
+            u(5, ST_RETRAIN),
+            mux(null_to_idle, u(5, ST_LINK_IDLE), mux(null_to_act, u(5, ST_LINK_ACTIVE), u(5, ST_SEND_NULLBLOCK))),
+        ),
+    )
+
+    act_st = mux(dll_retrain_req | lid_bad_u, u(5, ST_RETRAIN), u(5, ST_LINK_ACTIVE))
+
+    rtr_fail = (sub0 & ~am_all & tmr_to) | (~sub0 & tmr_to & ~rtr_ok)
+    rtr_advance = ~sub0 & (rtr_ok | tmr_to) & ~rtr_fail
+    rtr_st = mux(rtr_fail, u(5, ST_LINK_IDLE), u(5, ST_RETRAIN))
+    rtr_st = mux(
+        rtr_advance,
+        mux(
+            rx_chg_spd,
+            u(5, ST_CHANGE_SPEED),
+            mux(
+                rx_want_eq,
+                u(5, ST_EQUALIZATION),
+                mux(cfg_null_need_rediscovery, u(5, ST_DISCOVERY), u(5, ST_SEND_NULLBLOCK)),
+            ),
+        ),
+        rtr_st,
+    )
+    rtr_sub = mux(sub0 & am_all, u(2, SUB_1), u(2, SUB_0))
+    rtr_sub = mux(rtr_fail | rtr_advance, u(2, SUB_0), rtr_sub)
+
+    chg_st = mux(tmr_to, u(5, ST_LINK_IDLE), u(5, ST_CHANGE_SPEED))
+    eq_st = mux(sub0, u(5, ST_EQUALIZATION), mux(tmr_to, u(5, ST_RETRAIN), u(5, ST_EQUALIZATION)))
+    eq_sub = mux(sub0 & tmr_to, u(2, SUB_1), mux(sub0, u(2, SUB_0), u(2, SUB_0)))
+
+    st_n = u(5, ST_LINK_IDLE)
+    st_n = mux(in_eq, eq_st, st_n)
+    st_n = mux(in_chg, chg_st, st_n)
+    st_n = mux(in_retrain, rtr_st, st_n)
+    st_n = mux(in_active, act_st, st_n)
+    st_n = mux(in_null, null_st, st_n)
+    st_n = mux(in_cfg, cfg_st, st_n)
+    st_n = mux(in_disc, disc_st, st_n)
+    st_n = mux(in_rxeq, rxeq_st, st_n)
+    st_n = mux(in_probe, probe_st, st_n)
+    st_n = mux(in_idle, idle_st, st_n)
+    st_n = mux(legal_st, st_n, u(5, ST_LINK_IDLE))
+
+    sub_n = u(2, SUB_0)
+    sub_n = mux(in_eq, eq_sub, sub_n)
+    sub_n = mux(in_retrain, rtr_sub, sub_n)
+    sub_n = mux(in_cfg, cfg_sub, sub_n)
+    sub_n = mux(in_disc, disc_sub, sub_n)
+    sub_n = mux(in_probe, probe_sub, sub_n)
+    sub_n = mux(legal_st, sub_n, u(2, SUB_0))
+
+    to_idle_fail = mux(in_probe, probe_fail, u(1, 0))
+    to_idle_fail = mux(in_disc, disc_fail_p, to_idle_fail)
+    to_idle_fail = mux(in_cfg, cfg_fail, to_idle_fail)
+    to_idle_fail = mux(in_null, null_to_idle, to_idle_fail)
+    to_idle_fail = mux(in_retrain, rtr_fail, to_idle_fail)
+    to_idle_fail = mux(in_chg, tmr_to, to_idle_fail)
+
+    to_idle_timeout = mux(in_probe, probe_totime, u(1, 0))
+    to_idle_timeout = mux(in_disc, disc_to_p, to_idle_timeout)
+    to_idle_timeout = mux(in_cfg, cfg_to_p, to_idle_timeout)
+    to_idle_timeout = mux(in_null, null_to_idle, to_idle_timeout)
+    to_idle_timeout = mux(in_retrain, rtr_fail, to_idle_timeout)
+    to_idle_timeout = mux(in_chg, tmr_to, to_idle_timeout)
+
+    st_enter = (st_n != st_q) | (sub_n != sub_q)
+    enter_probe_from_idle = (st_n == ST_PROBE) & in_idle
+    entering_probe_wait = (st_n == ST_PROBE) & (sub_n == SUB_0) & ~(in_probe & sub0)
+    entering_confirm = wait_confirm
+    probe_wait_start = entering_probe_wait | wait_retry | entering_confirm
+
+    folded_wait = mux(probe_wait_cyc == 0, u(PROBE_W, probe_wait_def), probe_wait_cyc)
+    step16 = tmr_step.zext(width=PROBE_W)
+    step32 = tmr_step.zext(width=TMR_W)
+    tmr_inc = _sat_add(tmr_q, step32)
+    probe_inc = _sat_add(probe_tmr_q, step16)
+
+    st.set(mux(port_rst, u(5, ST_LINK_IDLE), st_n))
+    sub.set(mux(port_rst, u(2, SUB_0), sub_n))
+    tmr.set(mux(port_rst | st_enter, u(TMR_W, 0), tmr_inc))
+    probe_try_n = mux(enter_probe_from_idle, u(8, 0), probe_try_q)
+    probe_try_n = mux(
+        wait_retry,
+        mux(probe_try_q == 0xFF, probe_try_q, probe_try_q + 1),
+        probe_try_n,
+    )
+    probe_try.set(mux(port_rst, u(8, 0), probe_try_n))
+    retrain_n = mux(st_n == ST_LINK_IDLE, u(8, P_MAX_RETRAIN), retrain_left_q)
+    retrain_n = mux(
+        st_enter & (st_n == ST_RETRAIN) & in_active & (retrain_left_q != 0),
+        retrain_left_q - 1,
+        retrain_n,
+    )
+    retrain_left.set(mux(port_rst, u(8, P_MAX_RETRAIN), retrain_n))
+    saw_n = mux(st_enter, u(1, 0), saw_q)
+    saw_n = mux(pcs2lmsm_ltb_valid, u(1, 1), saw_n)
+    saw_rx_ltb.set(mux(port_rst, u(1, 0), saw_n))
+    disc_n = mux(
+        st_enter & (st_n == ST_DISCOVERY),
+        in_retrain | in_cfg,
+        disc_short_q,
+    )
+    disc_short.set(mux(port_rst, u(1, 0), disc_n))
+    train_fail_q.set(mux(port_rst, u(1, 0), to_idle_fail))
+    train_to_q.set(mux(port_rst, u(1, 0), to_idle_timeout))
+    rx_type_q.set(mux(port_rst, u(8, 0), mux(pcs2lmsm_ltb_valid, pcs2lmsm_ltb_type, rx_type)))
+    rx_link_q.set(mux(port_rst, u(8, 0), mux(pcs2lmsm_ltb_valid, pcs2lmsm_link_id, rx_link_q.out())))
+    rx_lane_q.set(mux(port_rst, u(8, 0), mux(pcs2lmsm_ltb_valid, pcs2lmsm_lane_id, rx_lane_q.out())))
+    rx_tlw_q.set(mux(port_rst, u(6, 0), mux(pcs2lmsm_ltb_valid, pcs2lmsm_tlw, rx_tlw_q.out())))
+    rx_rlw_q.set(mux(port_rst, u(6, 0), mux(pcs2lmsm_ltb_valid, pcs2lmsm_rlw, rx_rlw_q.out())))
+    rx_fec_ctrl_q.set(
+        mux(port_rst, u(3, 0), mux(pcs2lmsm_ltb_valid, pcs2lmsm_fec_mode_ctrl, rx_fec_ctrl_q.out()))
+    )
+    rx_req_eq_q.set(
+        mux(port_rst, u(1, 0), mux(pcs2lmsm_ltb_valid, pcs2lmsm_request_equalization, rx_req_eq))
+    )
+    rx_drs2_q.set(
+        mux(port_rst, u(8, 0), mux(pcs2lmsm_ltb_valid, pcs2lmsm_data_rate_support_2, rx_drs2))
+    )
+    null_seen.set(mux(port_rst | ~in_null, u(1, 0), u(1, 1)))
+    # Clear on the leave edge (st_n != Null). Fill still uses rx_n/tx_n.
+    leave_null = st_n != ST_SEND_NULLBLOCK
+    rx_cnt.set(mux(port_rst | leave_null, u(RX_CNT_W, 0), rx_n))
+    tx_cnt.set(mux(port_rst | leave_null, u(TX_CNT_W, 0), tx_n))
+    first_rx.set(mux(port_rst | leave_null, u(1, 0), first_rx_n))
+    probe_lim.set(
+        mux(
+            port_rst,
+            u(PROBE_W, probe_wait_def),
+            mux(probe_wait_start, folded_wait, probe_lim_q),
+        )
+    )
+    probe_tmr.set(
+        mux(port_rst | ~in_probe | probe_wait_start, u(PROBE_W, 0), probe_inc)
+    )
+
+    # A-22: LinkUp stays 1 in Retrain and clears on Idle. Obs port is
+    # still Null|Active (SPEC §10.2). Change_Speed / Equalization are
+    # not written; not guessed.
+    link_up = in_null | in_active | in_retrain
+    obs_link_up = in_null | in_active
+    link_ready = in_active
+    lmsm_retrain_ack = in_retrain
+
+    pma_tx_w = 1 if ntx not in (2, 4, 8) else ntx
+    pma_rx_w = 1 if nrx not in (2, 4, 8) else nrx
+
+    use_rxeq = in_rxeq
+    use_dltb = in_disc
+    use_cltb = in_cfg
+    use_rltb = in_retrain | in_chg
+    use_eltb = in_eq
+    use_dltb_cltb = use_dltb | use_cltb
+    use_dltb_rltb = use_dltb | use_rltb
+    use_cltb_rltb = use_cltb | use_rltb
+    use_rltb_eltb = use_rltb | use_eltb
+
+    pattern = mux(in_idle, u(2, PAT_IDLE), u(2, PAT_LTB))
+    pattern = mux(in_probe, u(2, PAT_EEIB), pattern)
+    pattern = mux(in_null | in_active, u(2, PAT_DLL), pattern)
+
+    sel_phys = in_disc
+    sel_ascend = in_cfg | in_active
+    lane_mode = mux(sel_phys, u(2, LANE_ID_PHYS), mux(sel_ascend, u(2, LANE_ID_ASCEND), u(2, LANE_ID_NULL)))
+
+    auto_ascend = _auto_ascend(cfg_lane_id_base, ntx)
+    null_map = _null_map(m, ntx)
+    map_is_zero = cfg_lane_id_map == 0
+    lane_map = mux(sel_ascend, mux(map_is_zero, auto_ascend, cfg_lane_id_map), null_map)
+
+    ltb_type = u(8, 0)
+    ltb_type = mux(use_eltb, u(8, P_LTB_TYPE_ELTB), ltb_type)
+    ltb_type = mux(
+        use_rltb,
+        mux(sub0, u(8, P_LTB_TYPE_RLTB_ACTIVE), u(8, P_LTB_TYPE_RLTB_CONFIRM)),
+        ltb_type,
+    )
+    ltb_type = mux(
+        use_cltb,
+        mux(
+            sub0,
+            u(8, P_LTB_TYPE_CLTB_ACTIVE),
+            mux(sub1, u(8, P_LTB_TYPE_CLTB_CHECK), u(8, P_LTB_TYPE_CLTB_CONFIRM)),
+        ),
+        ltb_type,
+    )
+    ltb_type = mux(
+        use_dltb,
+        mux(sub0, u(8, P_LTB_TYPE_DLTB_ACTIVE), u(8, P_LTB_TYPE_DLTB_CONFIRM)),
+        ltb_type,
+    )
+    ltb_type = mux(use_rxeq, u(8, P_LTB_TYPE_RXEQ), ltb_type)
+
+    m.output("pma_data_rate_sel", u(4, 0))
+    m.output("pma_tx_width", u(4, pma_tx_w))
+    m.output("pma_rx_width", u(4, pma_rx_w))
+    m.output("pma_lane_reverse_tx", cfg_lane_reverse_tx)
+    m.output("pma_lane_reverse_rx", cfg_lane_reverse_rx)
+    m.output("pma_polarity_inv", cfg_polarity_inv)
+    m.output("pma_probe_pulse_en", in_probe & sub0)
+    m.output("link_up", link_up)
+    m.output("link_ready", link_ready)
+    m.output("lmsm_retrain_ack", lmsm_retrain_ack)
+    m.output("lmsm2pcs_pattern", pattern)
+    m.output("lmsm2pcs_ltb_valid", use_rxeq | use_dltb | use_cltb | use_rltb | use_eltb)
+    m.output("lmsm2pcs_lane_id_mode", lane_mode)
+    m.output("lmsm2pcs_lane_id_base", cfg_lane_id_base)
+    m.output("lmsm2pcs_lane_id_map", lane_map)
+    m.output("lmsm2pcs_ltb_type", ltb_type)
+    m.output("lmsm2pcs_link_id", mux(use_dltb_cltb, cfg_link_id, u(8, 0)))
+    m.output("lmsm2pcs_tlw", mux(use_dltb_cltb, cfg_tlw, u(6, 0)))
+    m.output("lmsm2pcs_rlw", mux(use_dltb_cltb, cfg_rlw, u(6, 0)))
+    m.output("lmsm2pcs_data_rate_support_1", mux(use_dltb_rltb, cfg_data_rate_support_1, u(8, 0)))
+    m.output(
+        "lmsm2pcs_data_rate_support_2",
+        mux(use_dltb_rltb, cfg_data_rate_support_2 & u(8, 0x7F), u(8, 0)),
+    )
+    m.output("lmsm2pcs_fec_mode_support", mux(use_dltb, cfg_fec_mode_support, u(8, 0)))
+    m.output("lmsm2pcs_port_type", mux(use_dltb, cfg_port_type, u(1, 0)))
+    m.output(
+        "lmsm2pcs_portnego_random_value",
+        mux(use_dltb, cfg_portnego_random_value, u(7, 0)),
+    )
+    m.output(
+        "lmsm2pcs_fec_interleave_support",
+        mux(use_dltb, cfg_fec_interleave_support, u(4, 0)),
+    )
+    m.output("lmsm2pcs_rx_lane0_id", mux(use_dltb, cfg_rx_lane0_id, u(3, 0)))
+    m.output("lmsm2pcs_max_link_width", mux(use_dltb, cfg_max_link_width, u(3, 0)))
+    m.output("lmsm2pcs_eq_mode", mux(use_cltb, cfg_eq_mode, u(2, 0)))
+    m.output("lmsm2pcs_fec_mode_ctrl", mux(use_cltb_rltb, cfg_fec_mode_ctrl, u(3, 0)))
+    m.output("lmsm2pcs_fec_interleave_ctrl", mux(use_cltb, cfg_fec_interleave_ctrl, u(1, 0)))
+    m.output("lmsm2pcs_eq_ctrl1", mux(use_rltb_eltb, cfg_eq_ctrl1, u(6, 0)))
+    m.output("lmsm2pcs_eq_ctrl2", mux(use_rltb_eltb, cfg_eq_ctrl2, u(8, 0)))
+    m.output("lmsm2pcs_eq_ctrl3", mux(use_rltb_eltb, cfg_eq_ctrl3, u(8, 0)))
+    m.output("lmsm2pcs_eq_ctrl4", mux(use_eltb, cfg_eq_ctrl4, u(8, 0)))
+    m.output(
+        "lmsm2pcs_fec_crc_mode_reject",
+        mux(use_rltb, cfg_fec_crc_mode_reject, u(1, 0)),
+    )
+    m.output(
+        "lmsm2pcs_pre_fec_ber_meas_st",
+        mux(use_rltb, cfg_pre_fec_ber_meas_st, u(2, 0)),
+    )
+    m.output(
+        "lmsm2pcs_fec_interleave_enable",
+        mux(use_rltb, cfg_fec_interleave_enable, u(1, 0)),
+    )
+    m.output(
+        "lmsm2pcs_fec_interleave_ctrl_reject",
+        mux(use_rltb, cfg_fec_interleave_ctrl_reject, u(1, 0)),
+    )
+    m.output(
+        "lmsm2pcs_request_equalization",
+        mux(use_rltb, cfg_request_equalization, u(1, 0)),
+    )
+    m.output("lmsm2pcs_crc_mode_ctrl", mux(use_rltb, cfg_crc_mode_ctrl, u(3, 0)))
+    m.output("lmsm2pcs_local_tx_preset", mux(use_rltb, cfg_local_tx_preset, u(4, 0)))
+    m.output("lmsm2pcs_first_pre_cursor", mux(use_rltb_eltb, cfg_first_pre_cursor, u(6, 0)))
+    m.output("lmsm2pcs_eq_reject", mux(use_eltb, cfg_eq_reject, u(1, 0)))
+    m.output("lmsm2pcs_current_eq_phase", mux(use_eltb, cfg_current_eq_phase, u(2, 0)))
+    m.output("lmsm2pcs_preset_mode_en", mux(use_eltb, cfg_preset_mode_en, u(1, 0)))
+    m.output("lmsm2pcs_tx_preset", mux(use_eltb, cfg_tx_preset, u(4, 0)))
+    m.output("lmsm_st", st_q)
+    m.output("train_fail", train_fail_q.out())
+    m.output("train_to_inc", train_to_q.out())
+
+    if test_hooks:
+        hook_en = tb_test_mode
+        m.output("tb_obs_link_ready", mux(hook_en, link_ready, u(1, 0)))
+        m.output("tb_obs_link_up", mux(hook_en, obs_link_up, u(1, 0)))
+        m.output("tb_obs_lmsm_st", mux(hook_en, st_q, u(5, 0)))
 
 
-def generate() -> tuple[Path, Path]:
-    product = emit_verilog(False)
-    hooks = emit_verilog(True)
-    _check_lane_id_mode(product)
-    _check_lane_id_mode(hooks)
-    for token in ("tb_test_mode", "tb_obs_link_ready", "tb_obs_link_up",
-                  "tb_obs_lmsm_st", "tb_inj_am_lock", "tb_inj_lid_bad",
-                  "csr_tmr_scale"):
-        if any(line.lstrip().startswith(("input", "output", "assign", "wire"))
-               and token in line
-               for line in product.splitlines()):
-            raise RuntimeError(f"PRODUCT netlist must not contain {token}")
-    if "`ifdef" in product or "`ifdef" in hooks:
-        raise RuntimeError("generated Verilog must not use ifdef TEST_HOOKS")
-    PRODUCT_V.parent.mkdir(parents=True, exist_ok=True)
-    HOOKS_V.parent.mkdir(parents=True, exist_ok=True)
-    PRODUCT_V.write_text(product)
-    HOOKS_V.write_text(hooks)
-    return PRODUCT_V, HOOKS_V
+@module(name="ub_lmsm")
+def build(
+    m: Circuit,
+    test_hooks: int = 0,
+    NUM_LANES_TX: int = NUM_LANES_TX,
+    NUM_LANES_RX: int = NUM_LANES_RX,
+    PROBE_WAIT_CYC: int = P_PROBE_WAIT_CYC,
+) -> None:
+    _ports(
+        m,
+        test_hooks=int(test_hooks),
+        ntx=int(NUM_LANES_TX),
+        nrx=int(NUM_LANES_RX),
+        probe_wait_def=int(PROBE_WAIT_CYC),
+    )
 
 
-# Optional pyc4.0 frontend entry (port/clock/reset declaration).
-# Full FSM is emitted as Verilog above; pycc/LLVM 19 is not required to regenerate.
-try:
-    from pycircuit import Circuit, module, u  # type: ignore
-
-    @module(name="ub_lmsm")
-    def build(m: Circuit) -> None:
-        """pyc4.0 module boundary for ub_lmsm.
-
-        Clock ``core_clk``, reset ``rst`` (maps to ``rst_pyc``). The product
-        netlist is the generated Verilog from ``emit_verilog``; this build
-        keeps the leaf importable as a pyc4.0 ``@module`` without depending
-        on batch-1 cells.
-        """
-        clk = m.clock("core_clk")
-        rst = m.reset("rst")
-        _ = (clk, rst)
-        st = m.out("st", clk=clk, rst=rst, width=5, init=u(5, ST_LINK_IDLE))
-        st.set(st.out())
-        m.output("lmsm_st", st.out())
-        m.output("link_up", u(1, 0))
-        m.output("link_ready", u(1, 0))
-
-    build.__pycircuit_name__ = "ub_lmsm"
-except ImportError:
-    build = None  # type: ignore
-
-
-if __name__ == "__main__":
-    p, h = generate()
-    print(f"wrote {p}")
-    print(f"wrote {h}")
+build.__pycircuit_name__ = "ub_lmsm"

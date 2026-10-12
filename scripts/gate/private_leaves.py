@@ -883,18 +883,33 @@ def read_contract_hash_header(text: str) -> str | None:
     return m.group(1) if m else None
 
 
-def script_on_origin_main() -> bool:
+def script_on_origin_main(
+    root: Path | None = None, *, present: bool | None = None
+) -> bool:
+    """True when gen_private_stub.py exists on origin/main.
+
+    `present` overrides the git probe so selftests do not depend on the
+    live origin/main tree. The probe runs in `root` (or REPO_ROOT).
+    """
+    if present is not None:
+        return bool(present)
     proc = run_cmd(
-        ["git", "cat-file", "-e", "origin/main:scripts/gate/gen_private_stub.py"]
+        ["git", "cat-file", "-e", "origin/main:scripts/gate/gen_private_stub.py"],
+        cwd=root,
     )
     return proc.returncode == 0
 
 
-def check_stubs(root: Path, contracts: list[dict[str, Any]]) -> list[Finding]:
+def check_stubs(
+    root: Path,
+    contracts: list[dict[str, Any]],
+    *,
+    script_on_base: bool | None = None,
+) -> list[Finding]:
     findings: list[Finding] = []
     registered = load_private_names(root)
     by_leaf = {str(c.get("leaf")): c for c in contracts if c.get("leaf")}
-    enforce = script_on_origin_main()
+    enforce = script_on_origin_main(root, present=script_on_base)
     for name in sorted(registered):
         data = by_leaf.get(name)
         layer = str(data.get("_layer") if data else layer_from_leaf(name))

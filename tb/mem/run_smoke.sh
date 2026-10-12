@@ -42,3 +42,6 @@ verilator --binary --timing --top-module ub_mem_tlb_inv_smoke_tb \
 
 "$WORK/obj/smoke"
 echo "SMOKE DONE"
+
+echo "=== ptw smoke ==="
+bash "$ROOT/tb/mem/run_ptw_smoke.sh"

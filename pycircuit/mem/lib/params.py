@@ -36,3 +36,56 @@ INV_ST_ALL = 1
 INV_ST_SCAN = 2
 INV_ST_SYNC = 3
 INV_ST_DONE = 4
+
+# Walker / decoder (UARCH §4 / §5.6; contracts/ub_mem_ptw_desc_dec.md).
+PA_W = 48
+UBA_W = 64
+MATT_BA_W = 44
+IA_W = 6
+RAW_W = 64
+RD_DATA_W = 512
+DESC_ADDR_W = 36
+DESC_KIND_W = 2
+DESC_LVL_W = 2
+ATTR_IDX_W = 3
+ILL_CAUSE_W = 4
+MATTR_W = 32
+
+LVL_L0 = 0
+LVL_L1 = 1
+LVL_L2 = 2
+LVL_L3 = 3
+
+# desc_kind — contract YAML / README §4 item 4.
+KIND_INVALID = 0
+KIND_TABLE = 1
+KIND_BLOCK = 2
+KIND_PAGE = 3
+
+# ill_cause — contracts/README.md §3.
+ILL_NONE = 0
+ILL_MAP_2MB = 1
+ILL_HW_AD = 2
+ILL_RSVD = 3
+ILL_PTR_OOB = 4
+ILL_STALL = 5
+ILL_ENDIAN = 6
+ILL_MAC = 7
+ILL_MAPT_MULTI_BLK = 8
+ILL_MAPT_OTHER_BLK = 9
+ILL_S2 = 10
+ILL_UNSUP = 11
+
+# 4 KB granule walk index in the request address (UARCH §4).
+VA_IDX_W = 9
+VA_L0_LSB = 39
+VA_L1_LSB = 30
+VA_L2_LSB = 21
+VA_L3_LSB = 12
+PAGE_LSB = 12
+L1_BLK_OFF_W = 30
+L2_BLK_OFF_W = 21
+L1_BLK_PAGE_W = L1_BLK_OFF_W - PAGE_LSB  # 18
+L2_BLK_PAGE_W = L2_BLK_OFF_W - PAGE_LSB  # 9
+DESC_OFF_W = 3
+MATT_BA_PAD_W = 4

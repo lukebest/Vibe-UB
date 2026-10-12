@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Self-check for C-line ub_mem_tlb / ub_mem_inv:
+# Self-check for C-line ub_mem_tlb / ub_mem_inv / ub_mem_ptw:
 #   * every leaf has PRODUCT + HOOKS
 #   * PRODUCT has no tb_* ports
 #   * tlb HOOKS has §10 obs + mem_tlb_wN backdoors; inv HOOKS has no tb_*
@@ -43,7 +43,7 @@ if [[ ! -f "$PYC_REG" ]]; then
 fi
 
 echo "=== ports ==="
-for leaf in ub_mem_tlb ub_mem_inv; do
+for leaf in ub_mem_tlb ub_mem_inv ub_mem_ptw; do
   if [[ ! -f "$RTL/$leaf.v" ]]; then
     echo "FAIL: PRODUCT missing $RTL/$leaf.v"
     exit 1
@@ -53,12 +53,20 @@ for leaf in ub_mem_tlb ub_mem_inv; do
     exit 1
   fi
 done
-if grep -E '^\s*(input|output).*tb_' "$RTL/ub_mem_tlb.v" "$RTL/ub_mem_inv.v"; then
+if [[ ! -f "$RTL/stub/ub_mem_ptw_desc_dec.v" ]]; then
+  echo "FAIL: placeholder stub missing $RTL/stub/ub_mem_ptw_desc_dec.v"
+  exit 1
+fi
+if ! grep -q 'contract_sha256: HANDWRITTEN' "$RTL/stub/ub_mem_ptw_desc_dec.v"; then
+  echo "FAIL: stub header missing contract_sha256: HANDWRITTEN"
+  exit 1
+fi
+if grep -E '^\s*(input|output).*tb_' "$RTL/ub_mem_tlb.v" "$RTL/ub_mem_inv.v" "$RTL/ub_mem_ptw.v"; then
   echo "FAIL: PRODUCT must not have tb_* ports"
   exit 1
 fi
-if grep -E '^\s*(input|output).*tb_' "$HOOKS/ub_mem_inv.v"; then
-  echo "FAIL: ub_mem_inv HOOKS must not have tb_* (SPEC §10 lists none)"
+if grep -E '^\s*(input|output).*tb_' "$HOOKS/ub_mem_inv.v" "$HOOKS/ub_mem_ptw.v"; then
+  echo "FAIL: inv/ptw HOOKS must not have tb_* (SPEC §10 lists none)"
   exit 1
 fi
 python3 - "$RTL/ub_mem_inv.v" "$HOOKS/ub_mem_inv.v" <<'PY'
@@ -79,6 +87,20 @@ if a != b:
         print(f"  len PRODUCT={len(a)} HOOKS={len(b)}")
     sys.exit(1)
 print("ub_mem_inv HOOKS ports == PRODUCT (%d ports)" % len(a))
+PY
+python3 - "$RTL/ub_mem_ptw.v" "$HOOKS/ub_mem_ptw.v" <<'PY'
+import re, sys
+def ports(path):
+    text = open(path, encoding="utf-8").read()
+    m = re.search(r"module\s+ub_mem_ptw\s*\((.*?)\);", text, re.S)
+    if not m:
+        raise SystemExit(f"no ub_mem_ptw port list in {path}")
+    return [re.sub(r"\s+", " ", p).strip() for p in m.group(1).split(",") if p.strip()]
+a, b = ports(sys.argv[1]), ports(sys.argv[2])
+if a != b:
+    print("FAIL: ub_mem_ptw HOOKS ports != PRODUCT")
+    sys.exit(1)
+print("ub_mem_ptw HOOKS ports == PRODUCT (%d ports)" % len(a))
 PY
 if find "$RTL" -name 'pyc_*.v' | grep -q .; then
   echo "FAIL: pyc_* runtime must live in rtl/pyc_lib/ (#21), not rtl/mem/"
@@ -105,7 +127,8 @@ do
     exit 1
   fi
 done
-if grep -q 'keep' "$RTL/ub_mem_tlb.v" "$HOOKS/ub_mem_tlb.v" "$RTL/ub_mem_inv.v" "$HOOKS/ub_mem_inv.v"; then
+if grep -q 'keep' "$RTL/ub_mem_tlb.v" "$HOOKS/ub_mem_tlb.v" "$RTL/ub_mem_inv.v" "$HOOKS/ub_mem_inv.v" \
+  "$RTL/ub_mem_ptw.v" "$HOOKS/ub_mem_ptw.v" "$RTL/stub/ub_mem_ptw_desc_dec.v"; then
   echo "FAIL: keep attribute present"
   exit 1
 fi
@@ -117,7 +140,8 @@ if [[ ! -x "$PY" ]]; then
   PY=python3
 fi
 "$PY" "$ROOT/scripts/emit_rtl.py" --out "$WORK/rtl"
-for f in mem/ub_mem_tlb.v mem/hooks/ub_mem_tlb.v mem/ub_mem_inv.v mem/hooks/ub_mem_inv.v; do
+for f in mem/ub_mem_tlb.v mem/hooks/ub_mem_tlb.v mem/ub_mem_inv.v mem/hooks/ub_mem_inv.v \
+  mem/ub_mem_ptw.v mem/hooks/ub_mem_ptw.v mem/stub/ub_mem_ptw_desc_dec.v; do
   if ! diff -q "$ROOT/rtl/$f" "$WORK/rtl/$f"; then
     echo "FAIL: regen mismatch $f"
     diff -u "$ROOT/rtl/$f" "$WORK/rtl/$f" | head -n 80
@@ -135,6 +159,12 @@ verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
 verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
   -I"$PYC_INC" \
   "$RTL/ub_mem_inv.v"
+verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
+  -I"$PYC_INC" \
+  "$RTL/ub_mem_ptw.v"
+verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
+  -I"$PYC_INC" \
+  "$RTL/stub/ub_mem_ptw_desc_dec.v"
 echo "=== verilator lint HOOKS ==="
 verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
   -Wno-PINCONNECTEMPTY \
@@ -144,11 +174,15 @@ verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
 verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
   -I"$PYC_INC" \
   "$HOOKS/ub_mem_inv.v"
+verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
+  -I"$PYC_INC" \
+  "$HOOKS/ub_mem_ptw.v"
 echo "lint ok"
 
 echo "=== yosys synth PRODUCT (primitive black-box) ==="
 strip_include "$RTL/ub_mem_tlb.v" "$WORK/tlb_prod.v"
 strip_include "$RTL/ub_mem_inv.v" "$WORK/inv_prod.v"
+strip_include "$RTL/ub_mem_ptw.v" "$WORK/ptw_prod.v"
 cat > "$WORK/synth.ys" <<'YS'
 read_verilog -lib ph.v
 read_verilog pyc_reg.v
@@ -176,6 +210,17 @@ stat
 select -assert-none t:$dlatch t:$adff
 YS
 ( cd "$WORK" && yosys -q -s synth_inv.ys )
+cat > "$WORK/synth_ptw.ys" <<'YS'
+read_verilog pyc_reg.v
+read_verilog ptw_prod.v
+hierarchy -check -top ub_mem_ptw
+proc
+opt
+check -assert
+stat
+select -assert-none t:$dlatch t:$adff
+YS
+( cd "$WORK" && yosys -q -s synth_ptw.ys )
 echo "synth ok"
 
 echo "=== yosys equiv PRODUCT ports only ==="
@@ -382,5 +427,36 @@ equiv_status -assert
 YS
 ( cd "$WORK" && yosys -q -s equiv_inv.ys )
 echo "equiv ok (ub_mem_inv PRODUCT ≡ HOOKS)"
+
+echo "=== yosys equiv ub_mem_ptw PRODUCT vs HOOKS (no tb_*) ==="
+strip_include "$HOOKS/ub_mem_ptw.v" "$WORK/ptw_hooks.v"
+cat > "$WORK/equiv_ptw.ys" <<'YS'
+read_verilog pyc_reg.v
+read_verilog ptw_prod.v
+hierarchy -check -top ub_mem_ptw
+proc
+flatten
+opt -purge
+opt
+design -stash gold
+read_verilog pyc_reg.v
+read_verilog ptw_hooks.v
+hierarchy -check -top ub_mem_ptw
+proc
+flatten
+opt -purge
+opt
+design -stash gate
+design -copy-from gold -as gold ub_mem_ptw
+design -copy-from gate -as gate ub_mem_ptw
+equiv_make gold gate equiv
+hierarchy -top equiv
+equiv_struct
+equiv_simple -seq 16
+equiv_induct -seq 16
+equiv_status -assert
+YS
+( cd "$WORK" && yosys -q -s equiv_ptw.ys )
+echo "equiv ok (ub_mem_ptw PRODUCT ≡ HOOKS)"
 
 echo "ALL CHECKS PASSED"

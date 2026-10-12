@@ -29,6 +29,7 @@
 ### Changed
 
 - 门禁 hooks：`HOOKS-UB-MEM-PTW` 登记 `tb_mem_ptw_obs_st` / `tb_mem_ptw_obs_rd_pend`（只读、不受 `tb_test_mode`；批准人验证）。
+- 门禁 regpair：同一 FF Q 上架构 `_q` 名与 PRODUCT 输出口同时出现时按 `_q` 配对；多个 `_q` 或同名落到不同 cell 仍 `FAIL(pairing)`。
 - 门禁 formal：`GATE-FORMAL-DEPTH` (4)：PRODUCT prove 仅在同次 CI equiv 对该叶子真实 PASS 时可继承 HOOKS prove；否则回退 (2)。report-only `FORMAL_INHERIT_NO_EQUIV`。继承还要求该模块实例化的每个私有叶子都有 `EQUIV_BLACKBOX`。
 - 门禁 equiv：blackbox 集合 = `blackbox.yml` ∪ 契约叶子；PRODUCT≡HOOKS / regpair / emit flatten 前都 `blackbox`。flatten 则 `EQUIV_PRIVATE_FLATTENED`（#47 进 main 前 report-only）。
 - 门禁 lint：`GATE-ONE-MODULE-PER-FILE`。`MULTI_MODULE` 先 report-only；`PRIVATE_IN_PARENT` 在 #47 进 main 后拦。

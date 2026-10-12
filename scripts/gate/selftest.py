@@ -1563,6 +1563,125 @@ def _shuffle_bcrc_ports(src: Path, dest: Path) -> None:
     dest.write_text(new, encoding="utf-8")
 
 
+def _regpair_flop(cell: str, cands: tuple[str, ...], width: int = 8) -> object:
+    from equiv_regpair import Flop
+
+    return Flop(
+        cell=cell,
+        ftype="$dff",
+        width=width,
+        q_name=cands[0],
+        d_name=f"{cands[0]}_d",
+        key="",
+        kind="sync",
+        polarity=1,
+        value=0,
+        q_aliases=cands,
+        key_candidates=tuple(sorted(cands)),
+    )
+
+
+def test_regpair_prefer_q_alias() -> None:
+    """Architectural _q + PRODUCT output on the same Q bits pair by _q."""
+    from equiv_regpair import (
+        assign_pairing_keys,
+        extract_flops,
+        group_by_key,
+        pick_shared_pairing_key,
+    )
+
+    if pick_shared_pairing_key(["pfn_q", "fill_pfn"]) != "pfn_q":
+        _fail("regpair-prefer-q-pick", "expected pfn_q among fill_pfn/pfn_q")
+    if pick_shared_pairing_key(["foo_q", "bar_q"]) is not None:
+        _fail("regpair-prefer-q-two-q", "two _q names must not pick")
+    if pick_shared_pairing_key(["fill_pfn", "pfn"]) is not None:
+        _fail("regpair-prefer-q-no-q", "no _q among aliases must not pick")
+    if pick_shared_pairing_key(["uba_q"]) != "uba_q":
+        _fail("regpair-prefer-q-unique", "single common name must pair")
+
+    gold = [
+        _regpair_flop("g_pfn", ("pfn_q", "fill_pfn"), 36),
+        _regpair_flop("g_uba", ("uba_q",), 36),
+        _regpair_flop("g_evt", ("evt_code", "evt_code_q"), 4),
+    ]
+    gate = [
+        _regpair_flop("t_pfn", ("pfn_q", "fill_pfn"), 36),
+        _regpair_flop("t_uba", ("uba_q",), 36),
+        _regpair_flop("t_evt", ("evt_code", "evt_code_q"), 4),
+    ]
+    err = assign_pairing_keys(gold, gate)
+    if err:
+        _fail("regpair-prefer-q-assign", f"unexpected pairing errors: {err}")
+    got = {ff.key for ff in gold + gate}
+    if got != {"pfn_q", "uba_q", "evt_code_q"}:
+        _fail("regpair-prefer-q-assign", f"keys={got}")
+    gmap, gamb = group_by_key(gold)
+    tmap, tamb = group_by_key(gate)
+    if gamb or tamb or set(gmap) != {"pfn_q", "uba_q", "evt_code_q"}:
+        _fail("regpair-prefer-q-group", f"g={list(gmap)} amb={gamb}+{tamb}")
+    print("SELFTEST PASS regpair-prefer-q-ok: _q wins over PRODUCT output alias")
+
+    two_q_g = [_regpair_flop("g", ("foo_q", "bar_q"), 8)]
+    two_q_t = [_regpair_flop("t", ("foo_q", "bar_q"), 8)]
+    if not assign_pairing_keys(two_q_g, two_q_t):
+        _fail("regpair-prefer-q-two-q-assign", "two shared _q names must FAIL(pairing)")
+    print("SELFTEST PASS regpair-prefer-q-two-q: multiple _q names rejected")
+
+    dup_g = [_regpair_flop("g1", ("foo_q",), 1), _regpair_flop("g2", ("foo_q",), 1)]
+    dup_t = [_regpair_flop("t1", ("foo_q",), 1), _regpair_flop("t2", ("foo_q",), 1)]
+    _ = assign_pairing_keys(dup_g, dup_t)
+    _, amb = group_by_key(dup_g)
+    if not amb:
+        _fail("regpair-prefer-q-dup-cell", "same _q on two cells must be ambiguous")
+    print("SELFTEST PASS regpair-prefer-q-dup-cell: shared name on two cells rejected")
+
+    # Flatten extract: assign fill_pfn = pfn_q on both sides.
+    rtl = (
+        "module leaf(input clk, input rst, input [3:0] d, output [3:0] fill_pfn);\n"
+        "  reg [3:0] pfn_q;\n"
+        "  always @(posedge clk) begin\n"
+        "    if (rst) pfn_q <= 4'b0;\n"
+        "    else pfn_q <= d;\n"
+        "  end\n"
+        "  assign fill_pfn = pfn_q;\n"
+        "endmodule\n"
+    )
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / "leaf.v"
+        js = Path(td) / "leaf.json"
+        src.write_text(rtl, encoding="utf-8")
+        ys = run_cmd(
+            [
+                "yosys",
+                "-q",
+                "-p",
+                f"read_verilog {src}; hierarchy -check -top leaf; "
+                f"rename -top gold; proc; flatten; write_json {js}",
+            ],
+            timeout=30,
+        )
+        if ys.returncode != 0 or not js.is_file():
+            _fail("regpair-prefer-q-extract", (ys.stdout or "")[-300:])
+        import json
+
+        mod = json.loads(js.read_text(encoding="utf-8"))["modules"]["gold"]
+        flops = extract_flops(mod)
+        if len(flops) != 1:
+            _fail("regpair-prefer-q-extract", f"expected 1 flop, got {len(flops)}")
+        cands = set(flops[0].key_candidates)
+        if "pfn_q" not in cands or "fill_pfn" not in cands:
+            _fail("regpair-prefer-q-extract", f"candidates={sorted(cands)}")
+        clone = [
+            _regpair_flop("g", tuple(flops[0].key_candidates), flops[0].width),
+            _regpair_flop("t", tuple(flops[0].key_candidates), flops[0].width),
+        ]
+        # assign_pairing_keys needs two lists
+        g_one, t_one = [clone[0]], [clone[1]]
+        if assign_pairing_keys(g_one, t_one) or g_one[0].key != "pfn_q":
+            _fail("regpair-prefer-q-extract", f"picked={g_one[0].key}")
+    print("SELFTEST PASS regpair-prefer-q-extract: flatten aliases pair on pfn_q")
+
+
 def test_equiv_ref_regpair() -> None:
     """GATE-EQY-004 (4): gold-vs-gold (+ shuffled ports) PASS; fakes and omitted rp_d FAIL."""
     root = Path(__file__).resolve().parents[2]
@@ -1862,6 +1981,7 @@ def main() -> int:
         test_equiv_wide_bus_and_flip,
         test_equiv_real_csr_tlb,
         test_deadreg_extra,
+        test_regpair_prefer_q_alias,
         test_equiv_ref_regpair,
         test_equiv_ref_affine,
         test_equiv_ref_real_compare,

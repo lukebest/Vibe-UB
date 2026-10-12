@@ -24,8 +24,8 @@
 //
 // Decoder: after hierarchy the .sby reads cut/ub_mem_ptw_desc_dec.sv
 // ($anyseq on every output). Block-fill covers and a_l1_blk_pfn /
-// a_l2_blk_pfn compare fill_pfn to the harness-computed expected
-// PFN (ub_mem_ptw_blk_exp; one §8 mapping).
+// a_l2_blk_pfn compare fill_pfn to the harness §8 expected PFN
+// (desc_addr + fill_page / latched VA). One mapping in blk_exp.
 
 module ub_mem_ptw_if_props (
   input  wire        core_clk,

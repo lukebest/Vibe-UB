@@ -82,6 +82,30 @@ module ub_mem_ptw_hooks_inv (
       a_obs_rsp_rd: assert (
         !mem2host_rd_rsp_ready || (tb_mem_ptw_obs_st == ST_RD)
       );
+      // FILL is entered only from DEC (to_fill) or stays in FILL.
+      // Makes a_l*_blk_pfn inductive: IDLE*/RD* cannot step into a
+      // mismatched fill with stale harness latches.
+      a_fill_pred: assert (
+        (tb_mem_ptw_obs_st != ST_FILL) || f_was_dec || f_was_fill
+      );
+    end
+  end
+
+  reg f_was_dec;
+  reg f_was_fill;
+
+  initial begin
+    f_was_dec  = 1'b0;
+    f_was_fill = 1'b0;
+  end
+
+  always @(posedge core_clk) begin
+    if (rst_pyc) begin
+      f_was_dec  <= 1'b0;
+      f_was_fill <= 1'b0;
+    end else begin
+      f_was_dec  <= (tb_mem_ptw_obs_st == ST_DEC);
+      f_was_fill <= (tb_mem_ptw_obs_st == ST_FILL);
     end
   end
 

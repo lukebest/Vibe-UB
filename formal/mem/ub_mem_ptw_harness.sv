@@ -119,12 +119,10 @@ module ub_mem_ptw_harness (
   ub_mem_ptw_blk_exp u_blk_exp (
     .core_clk(core_clk),
     .rst_pyc(rst_pyc),
-    .req_valid(req_valid),
-    .req_ready(req_ready),
-    .req_uba(req_uba),
     .fill_valid(fill_valid),
     .fill_ready(fill_ready),
     .fill_pfn(fill_pfn),
+    .fill_page(fill_page),
     .out_valid(1'b0),
     .desc_addr(36'b0),
     .desc_kind(2'b0),

@@ -178,7 +178,7 @@ def _ptw_body(m: Circuit, test_hooks: int = 0) -> None:
     lvl_l3 = lvl_q.out() == u(DESC_LVL_W, LVL_L3)
     nxt_lvl = lvl_q.out() + u(DESC_LVL_W, 1)
     uba_page = uba_q.out()
-    uba_ext = m.cat(u(UBA_W - PAGE_W - PAGE_LSB, 0), uba_page, u(PAGE_LSB, 0))
+    uba_ext = m.cat(uba_page, u(PAGE_LSB, 0))
     naddr = next_walk_addr(m, dec["desc_addr"], uba_ext, nxt_lvl)
 
     to_flt_ill = dec_fire & dec["desc_illegal"]

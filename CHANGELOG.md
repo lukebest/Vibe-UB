@@ -4,6 +4,7 @@
 
 ### Added
 
+- `docs/SPEC.md` §14：线 C 第 9 章（UMMU / 译码器）首轮裁定写入 MEM 章（船长 2026-10-12 09:05 / D20；S-01 落地见同日 09:20）。每条引用规范节与决策 ID。§10.5 按 C-D1 撤 `mem_dec_b0`…`mem_dec_b7`。docs-only。
 - `docs/arch/mem/contracts/`：C 线私有解码叶子公开信号契约（D20 S-01 (b)；docs-only）。
 - `tb/models/ub_pcs_fec.py`：RS(128,120) FEC 编解码黄金模型（UB-PHY §3.2.2.1 / §3.2.3.5，SPEC §2.4 `ub_pcs_fec_enc` / `ub_pcs_fec_dec`；T=4 / T=2 / bypass）。
 - `scripts/impl/buffer_fanout.py`：Yosys JSON 上确定性 `buf_4`/`buf_8` 扇出树（quick-synth 默认在 abc 之后调用）。

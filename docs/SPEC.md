@@ -3,9 +3,9 @@
 | 项 | 值 |
 | --- | --- |
 | 文档状态 | 草案 |
-| 适用范围 | M1：开源 UnifiedBus（UB，灵衢）控制器的 PHY/PCS/PMA 模型边界 / LMSM / DLL |
+| 适用范围 | M1：开源 UnifiedBus（UB，灵衢）控制器的 PHY/PCS/PMA 模型边界 / LMSM / DLL；线 C 第 9 章首轮见 §14 |
 | 规范基线 | UB Base Specification Rev 2.0（2025-12-31），见 [DECISIONS.md](DECISIONS.md) D1。Rev 2.1 待船长确认 |
-| 阶段范围 | [SPEC_INDEX.md](SPEC_INDEX.md) phase 1：第 3 章 PHY/PCS/PMA/LMSM，第 4 章 DLL，附录 D 寄存器子集 |
+| 阶段范围 | [SPEC_INDEX.md](SPEC_INDEX.md) phase 1：第 3 章 PHY/PCS/PMA/LMSM，第 4 章 DLL，附录 D 寄存器子集。线 C 第 9 章首轮裁定见 §14 |
 | 实现语言 | 产品 RTL 一律由 pyCircuit（pyc4.0）生成，见 [CODING_STYLE.md](CODING_STYLE.md)、D5/D6 |
 | 配套寄存器 | [REGMAP.md](REGMAP.md) |
 
@@ -13,7 +13,7 @@
 
 **引用约定：** 本仓库不收录规范正文、表格、图或寄存器字段说明。行为以节号引用（例如「见 UB-PHY §3.2.2.3」）；需要落到设计时，只用自己的短句转述。完整规范须从 [unifiedbus.com](https://www.unifiedbus.com) 取得，并遵守 UB Specification License Agreement。
 
-**未知 / 待定 / 草案：** 未决事项写清状态，不编造。§9 的 M1 默认参数已由船长确认。船长 2026-10-12 裁定见 [DECISIONS.md](DECISIONS.md) D20 与 §13：每行标 **已定** / **占位** / **暂缓** / **实现后回填**。工艺先用 Sky130 开源 PDK 代理值估算。
+**未知 / 待定 / 草案：** 未决事项写清状态，不编造。§9 的 M1 默认参数已由船长确认。船长 2026-10-12 裁定见 [DECISIONS.md](DECISIONS.md) D20、§13（A 线）与 §14（C 线）：每行标 **已定** / **占位** / **暂缓** / **实现后回填**。工艺先用 Sky130 开源 PDK 代理值估算。
 
 **现有 `rtl/`：** 仅作参考，将按 D10 迁入 `legacy/` 后重写。本规格与现网 RTL 的已知冲突见 §12。
 
@@ -71,6 +71,7 @@ M1 默认参数（船长已确认，出处见 §9）：
 - M1 对上只提供 **flit + 链路状态**，不解析 Network Header。
 - 附录 D 的 CFG0_BASIC 设备级字段、CFG1_*、CFG0_ROUTE_TABLE：M1 **不实现**；软件若需要完整配置空间，属后续阶段。
 - 测试钩子端口与门控见 §10；验证名 `vibe_lmsm` / `vibe_dll_credit` / `vibe_pcs_tx_pack` 分别对应本规格的 `ub_lmsm`、`ub_dll_credit`、`ub_pcs` TX。
+- 线 C 第 9 章（UMMU / 译码器）首轮裁定见 §14（船长 2026-10-12 09:05 / D20）。M1 数据通路仍不解析 Network Header。
 
 ---
 
@@ -830,7 +831,7 @@ ACK 态：只发应答集与标记重放块；收方向仍正常收。
 
 ## 9. 参数表
 
-M1 列中 Xia 提出的默认值已由船长确认。2026-10-12 裁定见 D20 / §13。工艺先用 Sky130 代理；`F_CORE` 已定。
+M1 列中 Xia 提出的默认值已由船长确认。2026-10-12 裁定见 D20 / §13。工艺先用 Sky130 代理；`F_CORE` 已定。线 C 第 9 章参数见 §14.9。
 
 | 参数 | 标识符 | M1 | spec-max | 出处 / 备注 |
 | --- | --- | --- | --- | --- |
@@ -992,8 +993,7 @@ Retry 深度下界公式见 UB-DL §4.7.3.2（含 FEC 120/128 与 RTT）。M1 25
 | RTP 重排缓冲 | B | `tp_rtp_reorder` | 表格式未关 |
 | TA 未决表 | B | `ta_outstanding` | 表格式未关 |
 | UMMU TLB way 0–3 | C | `mem_tlb_w0`…`mem_tlb_w3` | 页表与 MAPT 在系统内存，不列；PLB 为 FF，不列 |
-| decoder bank 0–7 | C | `mem_dec_b0`…`mem_dec_b7` | 格式未关 |
-| decoder TLB | C | `mem_dec_tlb` | 格式未关 |
+| decoder TLB | C | `mem_dec_tlb` | C-D1：L0 在系统内存，经 `ub_mem_dec_walk` 读；`mem_dec_b0`…`mem_dec_b7` 已撤，不列 |
 
 | 端口 | 方向 | 时钟域 | 接入 | 含义 |
 | --- | --- | --- | --- | --- |
@@ -1065,7 +1065,7 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 
 ## 13. 开放问题汇总
 
-船长 2026-10-12 09:05 裁定：A 线各行按 Xia 建议（覆盖说明见 [DECISIONS.md](DECISIONS.md) D20）。规范版本先按 **Rev 2.0**；Rev 2.1 待船长确认。每行状态为 **已定** / **占位** / **暂缓** / **实现后回填** 之一。本 PR 吸收并收口 PR #9 的 §13 表与对应正文。
+船长 2026-10-12 09:05 裁定：A 线各行按 Xia 建议（覆盖说明见 [DECISIONS.md](DECISIONS.md) D20）。规范版本先按 **Rev 2.0**；Rev 2.1 待船长确认。每行状态为 **已定** / **占位** / **暂缓** / **实现后回填** 之一。本表只列 A 线。线 C 第 9 章裁定见 §14，不在本表重复。
 
 | ID | 事项 | 状态 | 定值 / 口径 | 落到 |
 | --- | --- | --- | --- | --- |
@@ -1117,3 +1117,161 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 | `WAIVER_CRD_UF_IRQ` | `IRQ_STATUS.CRD_UF` 置位与 `irq` 合成 | 同上 |
 
 禁止用 force 制造下溢来「打满」覆盖率。TB 可对下溢做 assertion（见 §7）。
+
+---
+
+## 14. 内存管理（第 9 章，线 C）
+
+线 C 第一波实现 UB-MEM Home 侧 UMMU（§9.4）与 User 侧 UB 译码器（§9.5）。船长 2026-10-12 09:05 裁定本条各行（[DECISIONS.md](DECISIONS.md) D20）；未另注的条目取建议的选项 (a)。S-01 落地细则见船长同日 09:20 补裁。规范基线 Rev 2.0。微架构见 [arch/mem/UARCH.md](arch/mem/UARCH.md)；私有解码叶子的公开信号契约见 [arch/mem/contracts/README.md](arch/mem/contracts/README.md)。本仓库不收录表项位布局。
+
+### 14.1 公开边界（S-01）
+
+表项位布局私有。公开仓库为每个私有叶子提交 **只含端口的桩** 与 `private-leaf-attest`；公开信号契约在 `docs/arch/*/contracts/`。结构叶子、微架构、接口断言公开。位布局、生成器、参考拆包和字段级向量放在独立私有仓库。本仓库对私有侧一律称「独立私有仓库」。
+
+船长 2026-10-12 09:05 / D20：S-01 选 (b)。同日 09:20 补裁上述落地方式。
+
+### 14.2 Entity、TECT 与 EID
+
+**Q-A02 / UB-MEM §9.4.2.1。** 本机 Entity 用 `ENT_IDX` 下标（`ENT_IDX_W=4`，16 项）。TECT 直接下标。EID→`ENT_IDX` 映射属于 RSC。UMMU 只收 `ENT_IDX` 与映射命中位。
+
+**Q-C01 / UB-MEM §9.4.2.1。** TECT 用片上触发器，`TECT_DEPTH=16`，由 CSR 写入。
+
+**C-D2 / UB-MEM §9.5。** 第一波 `EID_W=20`。`_eid128` 变体以后再出。
+
+### 14.3 首轮范围与非法路径
+
+**Q-A03 / UB-MEM §9.4.3。** 第一波只做 Stage 1。Stage 2 与安全态放可选轮。遍历器与 TLB 标签保留扩展参数，供后续轮接上。
+
+**Q-A04 / UB-MEM §9.4.2。** 凡「不支持 → 非法」的编码走 **同一条** 路径：回错误，并记一条「配置非法」事件。
+
+**C-F3。** 暂缓，并入 Stage 2 轮。
+
+### 14.4 地址翻译（MATT / TLB）
+
+**Q-A08 / UB-MEM §9.4.2.2.2。** `MATT_WD=1` 时绕过遍历器：不走页表、不报翻译故障。TLB 缺失记一条翻译事件、不填充，请求经事件路径结束。第一波不提供软件 TLB 预装口。
+
+**Q-A10 / UB-MEM §9.4.3。** `PA_W=48`。指针高位非 0、以及 GPAS 保留编码，记配置非法。TLB PFN 宽 36 bit。
+
+**Q-A11 / UB-MEM §9.4.3。** MATT 格式取 Arm VMSAv8-64 Stage 1、4 KB 粒度、最多 4 级、48 bit 入/出，并做 5 处适配：
+
+1. 单一表基址。
+2. 原子许可按写许可判断。
+3. 特权 / 指令属性取 TECTE 覆盖，或 Home 默认。
+4. 表遍历属性用项目固定默认。
+5. ASID = `{ENT_IDX, TokenID}`，按非 global 缓存。
+
+各级合法描述符类型见 [arch/mem/contracts/README.md](arch/mem/contracts/README.md)（L0 只 table；L1 为 table 或 1 GB 块；L2 为 table 或 2 MB 块；L3 为 page）。遍历器把块描述符拆成 4 KB TLB 项。公开面按编码类交叉，不写描述符内部切分。
+
+**Q-A18 / UB-MEM §9.4.3。** 第一波不做硬件 A/D 写回。`{HDF,HAF}≠0` 记配置非法（`ILL_HW_AD`）。描述符 `AF=0`：`AFFD=0` 时报 Access Flag 故障、不填充，后续按 TCTE.`FBS` / `FBR` 处理；`AFFD=1` 时不报该故障，正常填充。Stage 2 落地后 `S2_AFFD` 同一规则。
+
+### 14.5 MAPT 与 UBA
+
+**Q-A14 / UB-MEM §9.4.4.2。** MAPTE Base / Limit 是本级区域内的字节偏移，闭区间，只比本级有效位。
+
+**Q-A15 / UB-MEM §9.4。** `SZ` 合法 16..39，其余记配置非法。UBA 高出 `64−SZ` 的位记翻译事件并终止。
+
+**Q-A17 / UB-MEM §9.4.4.2。** 第一波 MAPT 只用 4 KB。选 2 MB 记配置非法（`ILL_MAP_2MB`），延后。
+
+### 14.6 错误、事件与属性
+
+**Q-A19 / UB-MEM §9.4。** Stall 模式不支持；其使能记配置非法。故障 = 终止，并按 `FBR` 记录。规范要求必须记录的情形一律记录。
+
+**Q-A20 / UB-MEM §9.4。** 接受 `EM_EN=1`，第一波不合并事件。以后合并时只与最新 1 条比较。
+
+**Q-A21 / UB-MEM §9.4。** 按 `TCT_MTM_EN` 选来源。`MTM_ID` / `MTM_GP`（合计 24 bit）在输出边带透传。不读 `MTMC_PTR`，不做计数。
+
+**Q-A22 / UB-MEM §9.4、§9.2。** UMMU 输入保留 4 组属性。TA 目标侧填 Home 默认（非安全、非特权、数据、属性取自表）。`EE_bits` 关系交给 Q-E03。
+
+### 14.7 译码器
+
+**Q-B02 / UB-MEM §9.5。** 译码空间固定 44 bit。下标字段宽度固定，不随窗口缩小而改。`mmio_size` 回报最大编码。
+
+**Q-B07 / UB-MEM §9.5。** 按总线控制器实现。译码器页表在主机内存（`DECODER_MATT_BA`）。
+
+**Q-B08 / App. D.4.1。** 译码器 CMDQ 命令 16 B（全部失效、按范围失效、SYNC），EVENTQ 事件 32 B，项目自定且公开。`cmdq` / `eventq` 的 `size_use` 与 `depth_use` 按同一字段处理。
+
+**Q-B11 / Q-C06 → C-D1 / UB-MEM §9.5。** Q-B11 与 Q-C06 由 C-D1 取代：译码器 L0 表在系统内存，经 `ub_mem_dec_walk` 走表读口取出。译码翻译缓存 `DEC_TLB_DEPTH=32`。片上 `mem_dec_b0`…`mem_dec_b7` 已撤。
+
+**C-F1 / UB-MEM §9.5。** 译码器 L0 PTE / L0 PTRE / L1 PTE 格式由项目自定。公开面只点名字段：type、Mem_Base / Mem_Limit、L1 表基址、目标 EID、TokenID、TokenValue、`UBA_BASE`、最后一级位、L1 PTE 大小。格式：私有，见契约。位布局由 Xia 另稿，不进本仓库。
+
+**C-F2 / UB-MEM §9.5。** PTRE 带最后一级位。范围命中且为最后一级则直接输出；否则查 L1。
+
+### 14.8 片上结构、表读口与原语
+
+**Q-C02 / UB-MEM §9.4.2.2。** `TCT_CACHE_DEPTH=64`，直接映射，1R1W。L1 描述符缓存 8 项，放触发器。
+
+**Q-C03 / UB-MEM §9.4.3。** TLB 64 组 × 4 路 = 256 项。4 路分 4 个 1R1W 块同拍并读。valid 与伪 LRU 放触发器。
+
+**Q-C04 / UB-MEM §9.4.4。** `PLB_DEPTH=4`（0 关闭），触发器加范围比较。TokenValue 不符则作废该项并重走 MAPT。
+
+**Q-C05 / UB-MEM §9.4.4。** 第一波不做 MAPT 遍历缓存。
+
+**Q-C07。** UMMU 与译码器各有一个 valid/ready 表读口：地址 48 bit，长度 8 / 32 / 64 B，带 tag；响应 512 bit 加错误。只支持小端；`ENDI=1` 记配置非法。第一波遍历器 1 个未决、读 8 B（长度恒驱 8 B，tag 为 0），按地址低位从 512 bit 响应取出对应 8 B；口宽保持满宽。
+
+**Q-C08。** SRAM 桩：读 1 拍寄存、1R1W、同拍同址读返回旧值；阵列不复位；valid 在叶子触发器；写后读旁路在叶子。
+
+**Q-C09 / UB-MEM §11.4.4。** valid 全在触发器。全部失效 1 拍清。条件失效按组扫描（64 拍），扫描期间查找暂停。SYNC 完成前全部生效。CSR 改 TECT 须软件发失效。
+
+**Q-C10 / 本规格 §10。** 存储后门例外只覆盖 §10 逐条点名的阵列。第一批：`mem_tlb_w0`…`mem_tlb_w3`、`mem_dec_tlb`。C-D1 已撤 `mem_dec_b0`…`mem_dec_b7`。口名 `tb_<inst>_bd_*` 与 `tb_<inst>_bd_vld_*`。仅 HOOKS 网表，受 `tb_test_mode` 门控；eqy 时输入接低。
+
+**Q-C11 / [CODING_STYLE.md](CODING_STYLE.md) §10。** 共用原语 `ub_cmn_mem_1r1w`（`pycircuit/cmn` → `rtl/cmn`，时钟口 `core_clk`）。线 C 实例 `ASSERT_NO_UNINIT_READ=0`。综合门禁作黑盒。
+
+### 14.9 参数
+
+| 参数 | 标识符 | 第一波 | 出处 |
+| --- | --- | --- | --- |
+| Entity 下标宽 | `ENT_IDX_W` | 4（16 项） | Q-A02；UB-MEM §9.4.2.1 |
+| TECT 深度 | `TECT_DEPTH` | 16（片上触发器） | Q-C01；UB-MEM §9.4.2.1 |
+| 物理地址宽 | `PA_W` | 48 | Q-A10；UB-MEM §9.4.3 |
+| TLB PFN 宽 | — | 36 | Q-A10 |
+| 输入地址大小 | `SZ` | 合法 16..39 | Q-A15；UB-MEM §9.4 |
+| TCT 缓存深度 | `TCT_CACHE_DEPTH` | 64，直接映射 | Q-C02；UB-MEM §9.4.2.2 |
+| L1 描述符缓存 | — | 8（触发器） | Q-C02 |
+| TLB | `TLB_SETS` / `TLB_WAYS` | 64 × 4 = 256 | Q-C03；UB-MEM §9.4.3 |
+| PLB 深度 | `PLB_DEPTH` | 4（0 关闭） | Q-C04；UB-MEM §9.4.4 |
+| 译码空间 | — | 44 bit，下标宽度固定 | Q-B02；UB-MEM §9.5 |
+| 译码翻译缓存 | `DEC_TLB_DEPTH` | 32 | C-D1；UB-MEM §9.5 |
+| 目标 EID 宽 | `EID_W` | 20；`_eid128` 以后 | C-D2；UB-MEM §9.5 |
+| CMDQ / EVENTQ | — | 命令 16 B、事件 32 B | Q-B08；App. D.4.1 |
+
+### 14.10 裁定一览
+
+船长 2026-10-12 09:05 / D20。S-01 落地见同日 09:20 补裁。每行状态为 **已定** / **暂缓** 之一。
+
+| ID | 规范节 | 事项 | 状态 | 定值 / 口径 |
+| --- | --- | --- | --- | --- |
+| S-01 | 项目边界 | 表项位布局 | **已定** | 私有。公开：端口桩 + `private-leaf-attest` + `docs/arch/*/contracts/`。结构叶子 / 微架构 / 断言公开。09:05 选 (b)；09:20 补裁落地 |
+| Q-A02 | UB-MEM §9.4.2.1 | Entity 下标 | **已定** | 本机 `ENT_IDX`（`ENT_IDX_W=4`，16 项）；TECT 直接下标；EID→`ENT_IDX` 在 RSC；UMMU 收 `ENT_IDX` + 命中 |
+| Q-A03 | UB-MEM §9.4.3 | Stage 范围 | **已定** | 第一波只 Stage 1；Stage 2 与安全态放可选轮；遍历器 / TLB 标签保留扩展参数 |
+| Q-A04 | UB-MEM §9.4.2 | 不支持 → 非法 | **已定** | 回错误并记「配置非法」事件，单一路径 |
+| Q-A08 | UB-MEM §9.4.2.2.2 | `MATT_WD` | **已定** | =1 时绕过遍历器：不走页表、不报翻译故障；TLB 缺失记一条翻译事件、不填充，经事件路径结束；无软件 TLB 预装口 |
+| Q-A10 | UB-MEM §9.4.3 | 地址宽度 | **已定** | `PA_W=48`；指针高位非 0 与 GPAS 保留编码记配置非法；TLB PFN 36 bit |
+| Q-A11 | UB-MEM §9.4.3 | MATT 格式 | **已定** | VMSAv8-64 Stage 1、4 KB、最多 4 级、48 bit 入/出，5 处适配见 §14.4；各级合法类型见契约 README；块拆成 4 KB TLB 项 |
+| Q-A14 | UB-MEM §9.4.4.2 | MAPTE 范围 | **已定** | Base / Limit = 本级区域内字节偏移，闭区间，只比本级有效位 |
+| Q-A15 | UB-MEM §9.4 | `SZ` / UBA | **已定** | `SZ` 合法 16..39，否则配置非法；UBA 高出 `64−SZ` 的位记翻译事件并终止 |
+| Q-A17 | UB-MEM §9.4.4.2 | MAPT 粒度 | **已定** | 第一波只 4 KB；2 MB → `ILL_MAP_2MB`，延后 |
+| Q-A18 | UB-MEM §9.4.3 | A/D 与 AF | **已定** | 无硬件 A/D 写回；`{HDF,HAF}≠0` → `ILL_HW_AD`；`AF=0` 且 `AFFD=0` 报 AF 故障、不填充，随后按 `FBS`/`FBR`；`AFFD=1` 不报、正常填充；`S2_AFFD` 同规则（Stage 2 落地后） |
+| Q-A19 | UB-MEM §9.4 | Stall / 记录 | **已定** | Stall 及其使能 → 配置非法；故障 = 终止 + 按 `FBR` 记录；规范要求记录的情形一律记录 |
+| Q-A20 | UB-MEM §9.4 | 事件合并 | **已定** | 接受 `EM_EN=1`，第一波不合并；以后只与最新 1 条比较 |
+| Q-A21 | UB-MEM §9.4 | 流量监测 | **已定** | 按 `TCT_MTM_EN` 选源；`MTM_ID`/`MTM_GP`（24 bit）输出边带透传；不读 `MTMC_PTR`、不做计数 |
+| Q-A22 | UB-MEM §9.4、§9.2 | 属性组 | **已定** | UMMU 输入保留 4 组；TA 目标侧填 Home 默认（非安全、非特权、数据、属性取自表）；`EE_bits` 交给 Q-E03 |
+| Q-B02 | UB-MEM §9.5 | 译码空间 | **已定** | 固定 44 bit；下标字段宽度固定；`mmio_size` 回报最大编码 |
+| Q-B07 | UB-MEM §9.5 | 译码器角色 | **已定** | 按总线控制器实现；页表在主机内存（`DECODER_MATT_BA`） |
+| Q-B08 | App. D.4.1 | CMDQ / EVENTQ | **已定** | 命令 16 B（全部失效 / 按范围失效 / SYNC）、事件 32 B，项目自定且公开；`size_use` 与 `depth_use` 同一字段 |
+| Q-B11 | UB-MEM §9.5 | 译码 L0 放置 | **已定** | 由 C-D1 取代 |
+| Q-C01 | UB-MEM §9.4.2.1 | TECT 实现 | **已定** | 片上触发器，`TECT_DEPTH=16`，CSR 写入 |
+| Q-C02 | UB-MEM §9.4.2.2 | TCT 缓存 | **已定** | `TCT_CACHE_DEPTH=64` 直接映射 1R1W；L1 描述符缓存 8 项触发器 |
+| Q-C03 | UB-MEM §9.4.3 | TLB | **已定** | 64 组 × 4 路 = 256；4 个 1R1W 块同拍并读；valid + 伪 LRU 在触发器 |
+| Q-C04 | UB-MEM §9.4.4 | PLB | **已定** | `PLB_DEPTH=4`（0 关闭），触发器 + 范围比较；TokenValue 不符则作废并重走 MAPT |
+| Q-C05 | UB-MEM §9.4.4 | MAPT 遍历缓存 | **已定** | 第一波不做 |
+| Q-C06 | UB-MEM §9.5 | 译码 L0 缓存 | **已定** | 由 C-D1 取代 |
+| Q-C07 | 实现口 | 表读口 | **已定** | UMMU / 译码器各一口 valid/ready（地址 48 bit，长度 8/32/64 B，tag；响应 512 bit + 错）；只小端，`ENDI=1` → 配置非法；第一波 1 未决、恒读 8 B、tag 0，按地址低位取 8 B，口宽满宽 |
+| Q-C08 | 实现 | SRAM 桩 | **已定** | 读 1 拍寄存、1R1W、同拍同址读旧值；阵列不复位；valid 在叶子触发器；写后读旁路在叶子 |
+| Q-C09 | UB-MEM §11.4.4 | 失效 | **已定** | valid 全在触发器；全部失效 1 拍；条件失效按组扫 64 拍，期间暂停查找；SYNC 完成前全部生效；改 TECT 须软件失效 |
+| Q-C10 | 本规格 §10 | 存储后门 | **已定** | 只覆盖 §10 点名阵列；第一批 `mem_tlb_w0`…`w3`、`mem_dec_tlb`；`mem_dec_b0`…`b7` 已随 C-D1 撤；`tb_<inst>_bd_*` / `tb_<inst>_bd_vld_*`；仅 HOOKS，`tb_test_mode` 门控，eqy 接低 |
+| Q-C11 | CODING_STYLE §10 | 存储原语 | **已定** | `ub_cmn_mem_1r1w`（`pycircuit/cmn` → `rtl/cmn`，`core_clk`）；线 C `ASSERT_NO_UNINIT_READ=0`；综合门禁黑盒 |
+| C-D1 | UB-MEM §9.5 | 译码 L0 | **已定** | L0 在系统内存，经 `ub_mem_dec_walk` 走表读口；`DEC_TLB_DEPTH=32` |
+| C-D2 | UB-MEM §9.5 | `EID_W` | **已定** | 第一波 20；`_eid128` 以后 |
+| C-F1 | UB-MEM §9.5 | 译码表项格式 | **已定** | 项目自定。点名：type、Mem_Base/Mem_Limit、L1 表基址、目标 EID、TokenID、TokenValue、`UBA_BASE`、最后一级位、L1 PTE 大小。格式：私有，见契约 |
+| C-F2 | UB-MEM §9.5 | PTRE 最后一级 | **已定** | 带最后一级位；范围命中且最后一级则直接输出，否则查 L1 |
+| C-F3 | UB-MEM §9.4.3 | Stage 2 相关 | **暂缓** | 并入 Stage 2 轮 |

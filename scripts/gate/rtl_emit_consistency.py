@@ -58,6 +58,7 @@ from gatelib import (
 )
 from hooks_port_consistency import compare_ports
 from large_mem_manifest import check_large_mem_manifest
+from private_leaves import is_private_leaf, private_skip_finding
 from pyc_lib_check import check_pyc_lib
 
 # Call only this script. Do not add pycc flags here.
@@ -843,6 +844,11 @@ def main() -> int:
         product = REPO_ROOT / leaf["product"]
         hooks = REPO_ROOT / leaf["hooks"]
         module = leaf["module"]
+        if is_private_leaf(module):
+            findings.append(
+                private_skip_finding("equiv" if args.equiv_only else "emit", module, leaf["product"])
+            )
+            continue
         if leaf.get("placeholder") or is_placeholder_module(module):
             print(f"placeholder skip {module}: lint/TB only (not PRODUCT, no equiv)")
             continue

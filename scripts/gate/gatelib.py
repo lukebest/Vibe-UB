@@ -57,6 +57,7 @@ LAYER_SKIP = {
     "include",
     "__pycache__",
     "lib",
+    "stub",
     "tests",
     "out",
     "filelists",

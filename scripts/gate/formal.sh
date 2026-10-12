@@ -9,7 +9,8 @@ source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
 python3 -P "$GATE_DIR/formal_bind.py"
 
-mapfile -t SBY_FILES < <(find "$REPO_ROOT/formal" -type f -name '*.sby' 2>/dev/null | sort || true)
+# stdout = runnable .sby paths; PRIVATE_SKIP lines go to stderr (job log).
+mapfile -t SBY_FILES < <(python3 -P "$GATE_DIR/private_leaves.py" --list-sby)
 
 if [[ ${#SBY_FILES[@]} -eq 0 ]]; then
   echo "no assertions yet"

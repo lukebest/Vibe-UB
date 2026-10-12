@@ -29,6 +29,7 @@ from hooks_port_consistency import compare_ports
 from large_mem_manifest import check_large_mem_manifest
 from pyc_lib_check import check_pyc_lib
 from pycircuit_provenance import static_splice_check
+from private_selftest import run_all as run_private_selftests
 from rtl_emit_consistency import (
     compare_emitted_rtl,
     emit_unavailable_findings,
@@ -853,6 +854,7 @@ def main() -> int:
         test_hooks_wrong_width,
         test_equiv_wide_bus_and_flip,
         test_equiv_real_csr_tlb,
+        run_private_selftests,
     ]
     for fn in tests:
         fn()

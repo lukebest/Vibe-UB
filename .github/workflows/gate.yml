@@ -52,6 +52,24 @@ jobs:
       - name: spec-leak
         run: scripts/gate/spec_leak.sh
 
+  contract-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch origin/main for role-dir scan
+        run: git fetch origin main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install gate Python
+        run: pip install -r scripts/gate/requirements.txt
+      - name: contract-check
+        env:
+          GATE_PR_TITLE: ${{ github.event.pull_request.title }}
+        run: scripts/gate/contract_check.sh
+
   rtl-emit-consistency:
     runs-on: ubuntu-24.04
     steps:

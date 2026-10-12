@@ -4,8 +4,8 @@
 | --- | --- |
 | 分册 | `docs/rules/verif_gate.md` |
 | 所有者 | 工具守门（验证负责人兼任，见 [TEAM.md](../TEAM.md) §4） |
-| 版本 | v0.6 (2026-10-10) |
-| 类别 | 每次提交的 lint / CDC / formal / 综合 / regmap / TB / emit / 端口 / 来源 / 等价 / spec-leak |
+| 版本 | v0.7 (2026-10-12) |
+| 类别 | 每次提交的 lint / CDC / formal / 综合 / regmap / TB / emit / 端口 / 来源 / 等价 / spec-leak / contract-check |
 | 配套 | [verification.md](verification.md)、[PROCESS.md](../PROCESS.md)、[CODING_STYLE.md](../CODING_STYLE.md) §7、[DECISIONS.md](../DECISIONS.md) D6 / D7 / D10 / D17 |
 
 规则条目格式：ID / 规则 / 来源 / 日期。本分册额外写清失败判据与豁免流程。
@@ -393,6 +393,31 @@ D10 leftover **不要**靠豁免放行：用 `scripts/gate/legacy.txt` 做报告
 | VER-GATE-015 | 公式参考等价（`formal/<层>/ref/`）：Yosys `equiv_*` 全证或 `miter`+`sat -tempinduct` 其一通过，报告写明路径；每个参考须有假网表且必须失败 | PM | 2026-10-10 |
 | VER-GATE-016 | 大网表走 `rtl/<层>/manifest.yml`；超阈值 `.v` / 清单生成不出拦截；`rtl/pyc_lib/` 缺了跳过、有了逐字节；`tb_<inst>_obs_*` 只出；sby bind 信号必须存在；D10/迁移名册缺文件标已删除并扣总数；COMBO_DEPTH 只数逻辑门 | 本分册 v0.5 | 2026-10-10 |
 | VER-GATE-017 | 导入根 `<repo>/pycircuit` 置 `PYTHONPATH` 最前；仓库根不进 `sys.path`；叶子不含 `lib/`；`lib/` 只做拼接扫描 | SPEC §2.2 | 2026-10-10 |
+| VER-GATE-018 | S-01(b) 契约 / 桩 hash / `reports/private/<layer>/<leaf>.yml` / 角色目录；见 §12 | D20 S-01 (b) | 2026-10-12 |
+
+---
+
+## 12. 私有叶子与契约（S-01(b)）
+
+船长 2026-10-12：S-01 = (b)。位布局只在私有仓库。公开树放接口契约、pyCircuit 桩和 attest 副本。
+
+扫描 `docs/arch/*/contracts/*.md`（含 pcs；跳过 README）。契约文件开头是 YAML 段（`---` … `---`；兼容开头 ` ```yaml ` 围栏）。
+
+| ID | 规则 | 来源 | 日期 |
+| --- | --- | --- | --- |
+| GATE-CONTRACT-001 | `scripts/gate/contract_hash.py`：`yaml.safe_load` 后 `json.dumps(obj, sort_keys=True, separators=(',',':'), ensure_ascii=False)` 的 UTF-8 再 sha256。全部字段参与（含 `assertions`）。列表顺序保留。缩进 / 注释 / 正文不改变 digest | 本分册 | 2026-10-12 |
+| GATE-CONTRACT-002 | 字段缺失或类型不符 → FAIL。`parent` 必须在该层 `UARCH.md` 叶子表或 `MODULE_INVENTORY` | README §8 | 2026-10-12 |
+| GATE-CONTRACT-003 | `comb_budget_ns`：组合 / 0 拍叶子缺 → FAIL；寄存叶子带了 → FAIL | Xia | 2026-10-12 |
+| GATE-CONTRACT-004 | 正文出现 YAML `assertions` 未收录的 `` `AP_*` `` → `CONTRACT_ASSERT_UNLISTED`（warn / report-only） | 本分册 | 2026-10-12 |
+| GATE-PRIV-001 | `scripts/gate/private_leaves.yml` 登记私有叶子 | D20 | 2026-10-12 |
+| GATE-PRIV-002 | `gen_private_stub.py` 写 `pycircuit/<layer>/stub/<leaf>.py`，经 pycc 生成 `rtl/<layer>/stub/<leaf>.v`（D5，不手写拼 Verilog）。`.py` 与 `.v` 头两行：`contract_sha256: <hex>`、`generated-by: scripts/gate/gen_private_stub.py`。门禁核 `.v` 头 hash == 当前契约 | D5 | 2026-10-12 |
+| GATE-PRIV-003 | 手写占位桩同路径、头写 `contract_sha256: HANDWRITTEN`。脚本进 main 前 report-only，之后 FAIL | PM | 2026-10-12 |
+| GATE-PRIV-004 | 登记叶子在 lint / synth / formal / equiv 报 `PRIVATE_SKIP`（report-only，不跑实现检查） | 本分册 | 2026-10-12 |
+| GATE-PRIV-005 | 公开门禁读 `reports/private/<layer>/<leaf>.yml`（私有 CI 产出 `attest/<layer>/<leaf>.yml`，拷入公开仓库时放这里）。缺文件 → FAIL | PM | 2026-10-12 |
+| GATE-PRIV-006 | attest 字段：`leaf`、`contract_sha256`、`netlist_sha256`、`toolchain_sha256`、`clock{name,period_ns}`、`cells`、`area_um2`、`regs`、`logic_depth`、`depth_incl_buf`、`wns_ns`、`crit_path`（`public` / `私有叶子内部`）、`status`（PASS/FAIL）。`contract_sha256` 必须等于当前契约；`clock` 与契约 YAML 一致；`status==PASS`；`wns_ns>=0`。任一不符 FAIL | 实现 / PM | 2026-10-12 |
+| GATE-PRIV-007 | 私有仓库角色目录（report 先行）：PR 改动只落在一个 `design/` `model/` `verif/` `impl/`（`public/` 视为共享）。跨角色 → `ROLE_CROSS` FAIL。标题须带 `[角色]` | PM | 2026-10-12 |
+
+CLI：`python3 -P scripts/gate/contract_hash.py <contract.md>` 打印 hex。
 
 ---
 

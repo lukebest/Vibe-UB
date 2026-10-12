@@ -22,6 +22,7 @@ from gatelib import (
     verilator_inc_args,
     module_closure,
 )
+from private_leaves import is_private_leaf, private_skip_finding
 
 WARN_RE = re.compile(
     r"^%(Error|Warning)(?:-([A-Z0-9_]+))?:(?:\s+(\S+):(\d+):)?"
@@ -129,6 +130,9 @@ def main() -> int:
     # when they appear under rtl/. Handwritten whitelist and registered
     # blackbox.yml stubs still lint. ub_cmn_mem_1r1w is a normal cmn leaf.
     for unit in modules:
+        if is_private_leaf(unit.module):
+            findings.append(private_skip_finding("lint", unit.module, rel(unit.file)))
+            continue
         needed = module_closure(unit.module, disc) or [unit.file]
         findings.extend(lint_module(unit.module, unit.file, needed, incdirs))
     return emit_report("lint", findings)

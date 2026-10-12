@@ -26,10 +26,10 @@ module ub_mem_ptw_hooks_inv (
 
   wire chk = !rst_pyc;
 
-  // BMC of a_st_legal FAILS at step 10 (obs_st=0) under the $anyseq
-  // desc_dec cut: desc_v=1 with kind not TABLE/BLOCK/PAGE matches no
-  // next-state arm. Not assumed away; not weakened. Classified as an
-  // RTL missing-default next-state (free decode), not a property error.
+  // Unconstrained BMC of a_st_legal FAILS at step 9 (obs_st=0):
+  // cut fires desc_v=1, desc_kind=KIND_INVALID, !illegal — no
+  // next-state arm. Not assumed away; not weakened. See
+  // ub_mem_ptw_desc_dec_cut_contract.sv (bmc_contract).
 
   always @(posedge core_clk) begin
     if (chk) begin

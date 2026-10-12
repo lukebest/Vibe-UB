@@ -63,3 +63,17 @@ D19 三线并行与新增角色（见 docs/TEAM.md、docs/PROCESS.md）：
 3. 可选功能：各层先实现 mandatory 功能，optional 功能集中在最后一轮。本条把 D4 扩展到全部层级。
 4. 附录功能（Ethernet interworking、device hot-plug、network management over UB links）放入 M10 全栈集成之后的扩展里程碑。
 5. D1（规格 Rev 2.0）与 D3（PMA 行为模型）继续有效。
+
+# 2026-10-12 decisions — Luke Liu, 09:05 (Asia/Shanghai)
+
+D20 船长裁定待决表 104 条，全部按 Xia 建议（A 线逐行见 SPEC §13）：
+
+1. S-01 选 (b)：表项位布局由本机私有文件生成，生成物不入库；C 线结构部分照常公开。长期 (a)/(c) 以后再定。
+2. 扰码抽头与 `AMCTL.LID`→种子跟规范勘误；期间 scrambler 只出 `_placeholder` 变体。
+3. Probe 等待与 RETRY WAIT 超时默认 4 µs（按 `F_CORE` 换算周期）。CSR 字段 `PROBE_WAIT_CYC` / `RETRY_WAIT_CYC`、`pcs2lmsm_rx_nonnull_blk` 与 `Send_NullBlock` 计数细则见 SPEC §6.1 / §6.3 / §13 A-08 / A-10 / A-23（Xia 裁定 2026-10-12）。
+4. 工艺先用 Sky130 开源 PDK 代理值估算。
+5. 译码器 L0 表第一波放内存。
+6. 2 MB 映射粒度与硬件写回 Access/Dirty 首轮暂缓；遇到时报配置非法。
+7. 8 条规范勘误按项目理解实现；原子操作留参数开关。
+8. 译码器表项格式由项目自定义。
+9. 规范先按 Rev 2.0；Rev 2.1 待船长确认。

@@ -437,6 +437,7 @@ LMB 为 16 个 8-bit 符号（见 UB-PHY §3.4.1）。种类：LTB、EEIB（§3.
 | `pcs_lid_bad` | in | 1 | 训练所见 Link_ID 非法/不一致。可被 `tb_inj_lid_bad` 旁路，不回灌 PCS |
 | `pcs_deskew_ok` | in | 1 | deskew 完成 |
 | `pcs2lmsm_null_blk` | in | 1 | `core_clk`。PCS→LMSM。**1 拍脉冲**，复位 0。deskew 完成且 AMCTL+SDF 之后，全部已配置 RX lane 对齐的一个 Null Block 给一拍。见 §6.1（§13 A-23） |
+| `pcs2lmsm_rx_nonnull_blk` | in | 1 | `core_clk`。PCS→LMSM。**1 拍脉冲**，复位 0。与 `pcs2lmsm_null_blk` 同一对齐点与门控：deskew 完成且 AMCTL+SDF 之后，全部已配置 RX lane 对齐的 flit 为非 Null Block 时给一拍。与 `pcs2lmsm_null_blk` 同拍互斥（接口断言）。见 §6.1（§13 A-23；Xia 裁定 2026-10-12 / D20） |
 | `pcs2lmsm_tx_null_blk` | in | 1 | `core_clk`。PCS→LMSM。**1 拍脉冲**，复位 0。全部已配置 TX lane 发出一个 Null Block 时给一拍。见 §6.1（§13 A-23） |
 
 `ASCEND`：PCS 把物理 lane i 的 Lane_ID 取自 `lmsm2pcs_lane_id_map` 对应字节；`lmsm2pcs_lane_id_base` 等于逻辑 Tx_0 那一字节，供对照。`PHYS`：PCS 写物理 lane 号，不用 map/base。`NULL`（mode=2 或 3）：各激活 lane 的 Lane_ID 均为 §3.4.1.1 的空值。
@@ -632,15 +633,16 @@ M1 bring-up 裁剪（默认参数已确认）：
 | 信号 | 方向（相对 LMSM） | 宽 | 脉冲/电平 | 谁计数 |
 | --- | --- | --- | --- | --- |
 | `pcs2lmsm_null_blk` | in | 1 | **1 拍脉冲**，复位 0 | **LMSM** 累加 RX 连续个数（满 8） |
+| `pcs2lmsm_rx_nonnull_blk` | in | 1 | **1 拍脉冲**，复位 0 | **LMSM** 清 RX 连续计数 |
 | `pcs2lmsm_tx_null_blk` | in | 1 | **1 拍脉冲**，复位 0 | **LMSM** 在收到第一个 RX 脉冲之后累加 TX（满 16） |
 
-PCS 职责：deskew 完成且 AMCTL+SDF 之后，对全部已配置 RX lane 对齐的一个 Null Block 给一拍 `pcs2lmsm_null_blk`；全部已配置 TX lane 发出一个 Null Block 时给一拍 `pcs2lmsm_tx_null_blk`。PCS **不**保持 8/16 计数。8/16 的单位是 Null Block。
+PCS 职责：deskew 完成且 AMCTL+SDF 之后，对全部已配置 RX lane 对齐的一个 Null Block 给一拍 `pcs2lmsm_null_blk`；同一对齐点与门控下，对齐 flit 为非 Null Block 时给一拍 `pcs2lmsm_rx_nonnull_blk`；全部已配置 TX lane 发出一个 Null Block 时给一拍 `pcs2lmsm_tx_null_blk`。`pcs2lmsm_null_blk` 与 `pcs2lmsm_rx_nonnull_blk` 同拍互斥（接口断言）。PCS **不**保持 8/16 计数。8/16 的单位是 Null Block。
 
 **计数细则（Xia 裁定 2026-10-12 / D20）：**
 
 - **进入拍：** 状态寄存器首次等于 `Send_NullBlock` 的那一拍。该拍 `rx_cnt`、`tx_cnt` 与「已收到第一个 RX Null Block」标志保持 0，到达的脉冲不计入；从下一拍开始计数。进入前到达的脉冲忽略。
 - 离开本态（到 Discovery、Retrain、`Link_Idle`、超时）再进入时，两计数与标志从 0 重开。
-- RX「连续」：已配置 lane 上收到非 Null Block 的 flit 时清 `rx_cnt`。现有 PCS→LMSM 口表给出 `pcs2lmsm_null_blk` 作为 Null 脉冲；非 Null 收包指示口待 Xia 补定（本 SPEC 不新开端口）。
+- RX「连续」：`pcs2lmsm_rx_nonnull_blk` 脉冲清 `rx_cnt`。
 - RX 因非 Null 清零时，`tx_cnt` 保持现值，标志保持置位（规范只要求收到一个 RX Null Block 之后 TX ≥16）。只有离开 `Send_NullBlock` 才清 TX 计数与该标志。
 - TX 计数从与第一个 RX 脉冲同一拍的 TX 脉冲起算（该拍 TX 脉冲计入）。
 - 计数饱和：RX 到 8，TX 到 16。
@@ -1089,7 +1091,7 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 | A-20 | 工艺节点 | **已定** | 先用 Sky130 开源 PDK 代理值估算 | §4.1、§8、§9 |
 | A-21 | Probe 端接检测算法 | **已定** | 数字侧只看 `pma_probe_pulse_en` / `pma_term_detect`；算法细节列为非目标 | §1.2、§2.3、§3.2.5 |
 | A-22 | Retrain 期间 `LinkUp` | **已定** | 保持 1，回到 Idle 再清 0；§10.2 观察口保持原定义 | §6.1 |
-| A-23 | `pcs2lmsm_null_blk` / `pcs2lmsm_tx_null_blk` | **已定** | 各 1 bit、1 拍脉冲、复位 0；8/16 计数在 LMSM（规范派生 UB-PHY §3.4.3.6；细则 Xia 裁定 2026-10-12 / D20）。RX 连续清零所需的非 Null 收包口待 Xia 补定 | §3.3.4、§6.1 |
+| A-23 | `pcs2lmsm_null_blk` / `pcs2lmsm_rx_nonnull_blk` / `pcs2lmsm_tx_null_blk` | **已定** | 各 1 bit、1 拍脉冲、复位 0；`null_blk` 与 `rx_nonnull_blk` 同拍互斥（接口断言）。8/16 计数在 LMSM（规范派生 UB-PHY §3.4.3.6；细则 Xia 裁定 2026-10-12 / D20）。RX 连续清零看 `pcs2lmsm_rx_nonnull_blk` | §3.3.4、§6.1 |
 | A-24 | `cfg_*` LTB 通告针脚 CSR 来源 | **已定** | 端口保留；M1 用参数或绑死默认通告 DR0 | §6.1 |
 | A-VL | VL 规划与 SL→VL 映射 | **已定** | 第一波 VL0=请求、VL1=响应，Writeback 时加 VL2；DLL 按 `NUM_VL` 参数化；NW SL→VL 做成 CSR，复位 SL0→VL0、SL1→VL1 | §9 |
 | A-BF-1 | FEC 编解码拍数 / 并行度 | **实现后回填** | 实现后回填 §5 | §5 |
@@ -1105,7 +1107,7 @@ pyCircuit 在 **Python 生成期** 展开 `TEST_HOOKS`，产出 **两套** Veril
 | A-CL-5 | DR0 下 EQ / `RXEQ_Optimize` | **已定** | 按官方超时实现，见 §6.1 | §6.1 |
 | A-CL-6 | `tb_obs_dll_sm_st` 项目编码 | **已定** | 见 §10.3 | §10.3 |
 
-`tb_obs_dll_sm_st` 与 LMSM 顶层编码已在 §10.3 关闭。A-23 的 RX 连续清零仍缺 PCS→LMSM 非 Null 收包指示口，待 Xia 补定；其余行已标状态。
+`tb_obs_dll_sm_st` 与 LMSM 顶层编码已在 §10.3 关闭。无未标状态的待定行。
 
 ### 13.1 具名覆盖率 waiver（已定需要，实现时落文件）
 

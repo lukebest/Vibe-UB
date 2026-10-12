@@ -25,6 +25,7 @@
 
 ### Changed
 
+- SPEC §3.3.4 / §6.1 / §13 A-23：新增 PCS→LMSM `pcs2lmsm_rx_nonnull_blk`（1 bit、`core_clk`、1 拍脉冲、复位 0；与 `pcs2lmsm_null_blk` 同一对齐点与门控，同拍互斥，接口断言）。LMSM `Send_NullBlock` RX 连续计数在该脉冲清零。Xia 裁定 2026-10-12 / D20。
 - SPEC §6.1 / §4.1 / §9 / §13 A-08 / A-23 + D20：`PROBE_WAIT_CYC` 与 `RETRY_WAIT_CYC` 同规则（16 bit CSR、复位 323、合法 1..65535、0→323、进入等待当拍采样）；叶子口 `probe_wait_cyc[15:0]`。`Send_NullBlock` 计数：规范派生 UB-PHY §3.4.3.6（RX 连续 8、TX 在首个 RX 之后 ≥16）；Xia 裁定 2026-10-12 / D20（进入拍保持 0 且该拍脉冲不计入、离态重开、RX 清零时 TX/标志保持、饱和、当拍条件成立下一沿进 Active、2 ms / Discovery 优先）。本 PR 不改 `regmap.yaml`。
 - SPEC §13 / §2.4 / §3 / §6.1 / §6.3 / §9 + DECISIONS D20：船长 2026-10-12 09:05 裁定 104 条待决表，全部按建议。A 线 A-01~A-24 / A-VL 逐行关闭（占位 / 已定 / 实现后回填）；Probe 与 RETRY_WAIT 默认 4 µs（ceil → 323 拍）；`NUM_RETRY_THRESHOLD`/`NUM_PHY_REINIT_THRESHOLD`=15/4；`LFSR_INIT` 全 0 且 `en=0`；工艺 Sky130 代理；scrambler 只出 `_placeholder`。本 PR 吸收并收口 PR #9。
 - SPEC §4.1 / §6.3 / §6.4 / §9：`RETRY_WAIT_CYC` 16 bit CSR、单位拍、复位 323、合法 1..65535、0 硬件当 323 / 固件拒；进入 WAIT 当拍采样，到达当拍超时；叶子口 `retry_wait_cyc[15:0]` 接 `ub_csr`。固件从 `ub_regs.h` 取 `F_CORE`（后续 REGMAP PR 发出；本 PR 不改 `regmap.yaml`）。`pcs2lmsm_null_blk` 已在 §3.3.4 / §6.1。

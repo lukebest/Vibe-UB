@@ -70,7 +70,7 @@ D20 船长裁定待决表 104 条，全部按 Xia 建议（A 线逐行见 SPEC �
 
 1. S-01 选 (b)：表项位布局由本机私有文件生成，生成物不入库；C 线结构部分照常公开。长期 (a)/(c) 以后再定。
 2. 扰码抽头与 `AMCTL.LID`→种子跟规范勘误；期间 scrambler 只出 `_placeholder` 变体。
-3. Probe 等待与 RETRY WAIT 超时默认 4 µs（按 `F_CORE` 换算周期）。CSR 字段 `PROBE_WAIT_CYC` / `RETRY_WAIT_CYC` 与 `Send_NullBlock` 计数细则见 SPEC §6.1 / §6.3 / §13 A-08 / A-10 / A-23（Xia 裁定 2026-10-12）。
+3. Probe 等待与 RETRY WAIT 超时默认 4 µs（按 `F_CORE` 换算周期）。CSR 字段 `PROBE_WAIT_CYC` / `RETRY_WAIT_CYC`、`pcs2lmsm_rx_nonnull_blk` 与 `Send_NullBlock` 计数细则见 SPEC §6.1 / §6.3 / §13 A-08 / A-10 / A-23（Xia 裁定 2026-10-12）。
 4. 工艺先用 Sky130 开源 PDK 代理值估算。
 5. 译码器 L0 表第一波放内存。
 6. 2 MB 映射粒度与硬件写回 Access/Dirty 首轮暂缓；遇到时报配置非法。

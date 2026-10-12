@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import random
 from pathlib import Path
 
 import pytest
+import yaml
 
+from tb.mem.stub_models.contract_hash import contract_sha256
 from tb.mem.stub_models.contract_encodings import (
     ENC_BLOCK,
     ENC_CLASSES,
@@ -103,10 +107,38 @@ def test_derived_yaml_matches_43_head():
     live = collect_live()
     assert recorded.get("final") is True
     assert recorded.get("source_head") == SOURCE_HEAD == "3d08513a7e334d7deb3b3279b203b05277faf713"
+    assert set(live["yaml_digests"]) == {f"{name}.md" for name in LEAF_NAMES}
+    assert "README.md" not in live["yaml_digests"]
     assert set(live["ptw_enc_classes"]) == set(ENC_CLASSES)
     assert len(live["ptw_enc_cross"]) == 4
     for level in live["ptw_enc_cross"].values():
         assert set(level) == set(ENC_CLASSES)
+
+
+def test_contract_sha256_is_canonical_json_not_raw_text(tmp_path: Path):
+    path = _contracts() / f"{PTW}.md"
+    digest = contract_sha256(path)
+    raw = extract_yaml_header(path.read_text(encoding="utf-8"))
+    assert raw is not None
+    raw_hash = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    obj = yaml.safe_load(raw)
+    expected = hashlib.sha256(
+        json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    assert digest == expected
+    assert digest != raw_hash
+    assert digest == contract_sha256(path)
+    assert digest == load_contract_document(path).yaml_digest
+    assert digest == collect_live()["ptw_yaml_digest"]
+
+    variant = tmp_path / "ub_mem_ptw_desc_dec.md"
+    variant.write_text(
+        "```yaml\n# comment and extra blank lines do not affect the digest\n\n"
+        + raw
+        + "\n```\n# trailing prose\n",
+        encoding="utf-8",
+    )
+    assert contract_sha256(variant) == digest
 
 
 def test_loader_assertions_field_one_per_line():

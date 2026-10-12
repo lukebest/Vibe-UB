@@ -22,11 +22,12 @@ This file does not parse field bit positions out of ``raw``.
 
 from __future__ import annotations
 
-import hashlib
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from .contract_hash import contract_sha256
 
 try:
     import yaml
@@ -390,19 +391,6 @@ def parse_contract_yaml(text: str, *, source: str = "") -> ContractHeader:
     return header
 
 
-def yaml_header_digest(text: str) -> str | None:
-    """SHA-256 of the extracted YAML header. None when the file has no header."""
-    raw = extract_yaml_header(text)
-    if raw is None:
-        return None
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
-def file_digest(path: Path | str) -> str:
-    data = Path(path).read_bytes()
-    return hashlib.sha256(data).hexdigest()
-
-
 def load_contract_file(path: Path | str) -> ContractHeader:
     dest = Path(path)
     text = dest.read_text(encoding="utf-8")
@@ -430,7 +418,7 @@ def load_contract_document(path: Path | str) -> ContractDocument:
     return ContractDocument(
         header=header,
         body=text,
-        yaml_digest=hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+        yaml_digest=contract_sha256(dest),
         path=dest,
     )
 

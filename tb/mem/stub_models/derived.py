@@ -2,7 +2,8 @@
 
 When a new contract head lands the YAML SHA-256 changes. Rewrite
 ``_derived/yaml_digests.json`` from the live headers and the parsed
-PTW ``desc_lvl`` × ENC_* cross (no raw-bit encodings).
+PTW ``desc_lvl`` × ENC_* cross (no raw-bit encodings). Digests use
+``contract_sha256`` (canonical JSON of the YAML object, all fields).
 """
 
 from __future__ import annotations
@@ -12,13 +13,12 @@ from pathlib import Path
 from typing import Any
 
 from .contract_encodings import load_enc_class_table
+from .contract_hash import contract_sha256
 from .contract_yaml import (
     extract_yaml_header,
-    file_digest,
     find_contracts_dir,
     list_leaf_contract_paths,
     load_contract_document,
-    yaml_header_digest,
 )
 
 DERIVED_DIR = Path(__file__).resolve().parent / "_derived"
@@ -37,12 +37,7 @@ def collect_live() -> dict[str, Any]:
     root = find_contracts_dir()
     yaml_digests: dict[str, str] = {}
     for path in list_leaf_contract_paths(root):
-        digest = yaml_header_digest(path.read_text(encoding="utf-8"))
-        if digest is None:
-            raise FileNotFoundError(f"{path.name} has no YAML header")
-        yaml_digests[path.name] = digest
-    readme = root / "README.md"
-    yaml_digests[readme.name] = file_digest(readme)
+        yaml_digests[path.name] = contract_sha256(path)
 
     ptw = load_contract_document(root / "ub_mem_ptw_desc_dec.md")
     table = load_enc_class_table(ptw.header, body=ptw.body, yaml_digest=ptw.yaml_digest)

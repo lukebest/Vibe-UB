@@ -24,6 +24,20 @@ ports:
   - {name: l1tct_l2_ptr, dir: out, width: 36, desc: L2 TCT 基址（4 KB 对齐）}
 params: []
 ill_cause_width: 4
+assertions:
+  - AP_L1TCT_CLK
+  - AP_L1TCT_HS_IN
+  - AP_L1TCT_HS_OUT
+  - AP_L1TCT_ILL_2MB
+  - AP_L1TCT_ILL_AD
+  - AP_L1TCT_ILL_EQ
+  - AP_L1TCT_ILL_PRI
+  - AP_L1TCT_ILL_ZERO
+  - AP_L1TCT_IN_RDY_RST
+  - AP_L1TCT_LAT1
+  - AP_L1TCT_OUT_HOLD
+  - AP_L1TCT_RDY
+  - AP_L1TCT_RST
 status: draft
 ```
 

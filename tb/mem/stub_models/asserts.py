@@ -73,6 +73,8 @@ FALLBACK_SUFFIXES: tuple[str, ...] = (
 )
 
 # Observable only with a raw-field decode or a nanosecond timing check.
+# COMB_BUDGET is withdrawn for dent (L0 is registered 1). AF / SEL
+# still need a raw-field decode.
 NOT_AT_STUB: frozenset[str] = frozenset({"SEL", "AF", "COMB_BUDGET"})
 
 

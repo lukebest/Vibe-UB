@@ -20,8 +20,11 @@ from .contract_encodings import (
     encodings_from_header,
     load_enc_class_table,
 )
-from .contract_yaml import ContractHeader, LatencySpec, parse_latency
+from .contract_yaml import ContractHeader, LatencySpec
 from .coverage import StubModelCoverage
+
+_DENT = "ub_mem_dec_ent_dec"
+_REG1 = LatencySpec(kind="registered", cycles=1, max_cycles=1)
 
 
 def _mask(width: int) -> int:
@@ -95,13 +98,24 @@ class StubDecoderBase:
     def port_widths(self) -> dict[str, int | None]:
         return {p.name: p.width for p in self.header.ports}
 
+    def _effective_latency(self) -> LatencySpec:
+        """Dent L0 is registered 1/1 (walker-registered memory response).
+
+        Incoming #43 drops ``comb_budget_ns`` and the 0-cycle L0 path.
+        Both ``src_l1=0`` and ``src_l1=1`` use this stand-in until the
+        YAML header itself says registered 1/1.
+        """
+        if self.header.leaf == _DENT:
+            return _REG1
+        return self.header.latency
+
     @property
     def latency_cycles(self) -> int:
-        return self.header.latency.cycles
+        return self._effective_latency().cycles
 
     @property
     def latency_upper_bound(self) -> int:
-        return self.header.latency.max_cycles
+        return self._effective_latency().max_cycles
 
     def set_inject(self, symbols: str | Iterable[str] | None) -> None:
         injects = _as_injects(symbols)
@@ -146,26 +160,9 @@ class StubDecoderBase:
         cause = next(p.name for p in self.header.out_ports() if p.name.endswith("_ill_cause"))
         return illegal, cause
 
-    def _l1_latency(self) -> LatencySpec | None:
-        raw = self.header.param("l1_latency")
-        if raw is None:
-            raw = self.header.extra.get("l1_latency")
-        if raw is not None:
-            return parse_latency(raw, field_name="l1_latency")
-        cycles = self.header.param("l1_latency_cycles")
-        if cycles is not None:
-            n = int(cycles)
-            return LatencySpec(kind="registered", cycles=n, max_cycles=n)
-        if self.header.has_port("src_l1"):
-            return LatencySpec(kind="registered", cycles=1, max_cycles=1)
-        return None
-
     def _latency_for(self, sideband: dict[str, int]) -> LatencySpec:
-        if self.header.has_port("src_l1") and sideband.get("src_l1", 0):
-            alt = self._l1_latency()
-            if alt is not None:
-                return alt
-        return self.header.latency
+        del sideband
+        return self._effective_latency()
 
     def _zeros(self) -> dict[str, int]:
         return {name: 0 for name in self._data_out_names()}

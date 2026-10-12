@@ -45,6 +45,8 @@ def collect_live() -> dict[str, Any]:
     if table is None:
         raise ValueError("ub_mem_ptw_desc_dec has no ENC_* cross to derive")
     return {
+        "final": False,
+        "waiting_for": "next #43 head after f2d12ee8",
         "yaml_digests": yaml_digests,
         "ptw_yaml_digest": ptw.yaml_digest,
         "ptw_enc_cross": table.as_nested(),

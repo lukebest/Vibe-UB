@@ -1,4 +1,5 @@
 {
+  "final": false,
   "ptw_enc_classes": [
     "ENC_INVALID",
     "ENC_TBL_PG",
@@ -76,6 +77,7 @@
   },
   "ptw_source": "markdown-cross",
   "ptw_yaml_digest": "68a4aca4455779b0792ac79b1e00b1f0021035af775761eeeb7b3fcadc2d36b2",
+  "waiting_for": "next #43 head after f2d12ee8",
   "yaml_digests": {
     "README.md": "121439714ca05efbb3785ec141ced398e93928c398a2b4616ca57b0e8acc86f2",
     "ub_mem_dec_ent_dec.md": "754871738104eaedce8829452156d3a10bd432ccfe2125af3d78e9dc5aebffd3",

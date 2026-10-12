@@ -6,12 +6,13 @@ the same block. This module is the only place that knows the header
 shape.
 
 Fixed keys: ``leaf``, ``parent``, ``clock`` (name, period_ns, reset,
-reset type), ``latency`` (kind, cycles, max_cycles), ``comb_budget_ns``,
+reset type), ``latency`` (kind, cycles, max_cycles),
 ``ports`` (name, dir, width, desc), ``params`` (list of name/default),
 ``ill_cause_width``, ``status``.
 
-Optional upcoming keys (parsed when present, ignored if absent):
+Optional keys (parsed when present, ignored if absent):
 
+- ``comb_budget_ns`` — withdrawn for ``ub_mem_dec_ent_dec`` (L0 is registered)
 - ``assertions`` — one assertion per line / list / mapping
 - encoding / policy maps (``ill_cause``, ``desc_kind``, ranges, …)
 

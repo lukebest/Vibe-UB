@@ -21,6 +21,11 @@ REPO = HERE.parent
 RTL = REPO / "rtl"
 
 STUB_MOD = "ub_cmn_mem_1r1w_d64w109"
+# Instantiated by name; body is not written into the parent netlist.
+STRIP_STUBS = (
+    STUB_MOD,
+    "ub_mem_ptw_desc_dec",
+)
 
 LEAVES: list[dict] = [
     {
@@ -192,7 +197,9 @@ def emit_one(
         )
         raw = raw_v.read_text(encoding="utf-8")
 
-    raw = _strip_stub_module(raw, STUB_MOD)
+    for name in STRIP_STUBS:
+        if name != module:
+            raw = _strip_stub_module(raw, name)
     include = '`include "pyc_reg.v"\n\n'
     text = _header(source.stem, test_hooks) + include + raw
     dest.write_text(text, encoding="utf-8")
@@ -204,11 +211,13 @@ def emit_all(out_root: Path = RTL) -> list[Path]:
     if str(HERE) not in os.sys.path:
         os.sys.path.insert(0, str(HERE))
     pycc = _find_pycc()
-    pyc_reg = _find_pyc_reg()
     written: list[Path] = []
-    pyc_copy = _write_pyc_reg(out_root, pyc_reg)
-    if pyc_copy is not None:
-        written.append(pyc_copy)
+    # pyc_reg.v is owned by PR #21. Copy it only into a temp --out tree;
+    # never write it into the repo rtl/.
+    if out_root.resolve() != RTL.resolve():
+        pyc_copy = _write_pyc_reg(out_root, _find_pyc_reg())
+        if pyc_copy is not None:
+            written.append(pyc_copy)
     for leaf in LEAVES:
         source = HERE / leaf["source"]
         for var in leaf["variants"]:

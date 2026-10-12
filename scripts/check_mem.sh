@@ -147,6 +147,10 @@ if grep -q 'keep' "$RTL/ub_mem_tlb.v" "$HOOKS/ub_mem_tlb.v" "$RTL/ub_mem_inv.v" 
   echo "FAIL: keep attribute present"
   exit 1
 fi
+if grep -n 'module ub_mem_ptw_desc_dec' "$RTL/ub_mem_ptw.v" "$HOOKS/ub_mem_ptw.v"; then
+  echo "FAIL: walker netlist must instantiate desc_dec, not define it"
+  exit 1
+fi
 echo "ports ok"
 
 echo "=== regen byte-identical ==="
@@ -172,6 +176,7 @@ verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
   "$RTL/ub_mem_inv.v"
 verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
   -I"$PYC_INC" \
+  "$STUB_V" \
   "$RTL/ub_mem_ptw.v"
 verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
   -I"$PYC_INC" \
@@ -187,6 +192,7 @@ verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
   "$HOOKS/ub_mem_inv.v"
 verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN \
   -I"$PYC_INC" \
+  "$STUB_V" \
   "$HOOKS/ub_mem_ptw.v"
 echo "lint ok"
 
@@ -222,6 +228,7 @@ select -assert-none t:$dlatch t:$adff
 YS
 ( cd "$WORK" && yosys -q -s synth_inv.ys )
 cat > "$WORK/synth_ptw.ys" <<'YS'
+read_verilog -lib stub_bb.v
 read_verilog pyc_reg.v
 read_verilog ptw_prod.v
 hierarchy -check -top ub_mem_ptw
@@ -231,6 +238,7 @@ check -assert
 stat
 select -assert-none t:$dlatch t:$adff
 YS
+strip_include "$STUB_V" "$WORK/stub_bb.v"
 ( cd "$WORK" && yosys -q -s synth_ptw.ys )
 echo "synth ok"
 
@@ -440,12 +448,14 @@ YS
 echo "equiv ok (ub_mem_inv PRODUCT ≡ HOOKS)"
 
 echo "=== yosys equiv ub_mem_ptw PRODUCT vs HOOKS (shared ports) ==="
+# After #47 merges, this block calls the gate PRODUCT≡HOOKS equiv
+# (scripts/gate/equiv.sh) instead of this local Yosys script.
 strip_include "$HOOKS/ub_mem_ptw.v" "$WORK/ptw_hooks.v"
-python3 - "$WORK/ptw_hooks.v" "$WORK/ptw_hooks_prodports.v" <<'PY'
+python3 - "$WORK/ptw_hooks.v" "$WORK/ptw_hooks_prodports.v" "$WORK/ptw_n_out.txt" <<'PY'
 import re
 import sys
 
-src, dst = sys.argv[1], sys.argv[2]
+src, dst, nout = sys.argv[1], sys.argv[2], sys.argv[3]
 text = open(src, encoding="utf-8").read()
 m = re.search(r"module\s+ub_mem_ptw\s*\((.*?)\);", text, re.S)
 if not m:
@@ -473,12 +483,19 @@ for p in ports:
             tied.append(f"  wire [{msb}:{lsb}] {name};")
     else:
         prod.append("  " + p)
+n_out = sum(1 for p in prod if p.strip().startswith("output"))
+open(nout, "w", encoding="utf-8").write(str(n_out))
 new_mod = "module ub_mem_ptw (\n" + ",\n".join(prod) + "\n);\n" + "\n".join(tied) + "\n"
 text = text[: m.start()] + new_mod + text[body_start:]
 open(dst, "w", encoding="utf-8").write(text)
 print("rewrote ptw HOOKS to PRODUCT ports:", dst)
+print("EQUIV_PTW_OUTPUTS", n_out)
 PY
+echo "EQUIV_BLACKBOX ub_mem_ptw_desc_dec in ub_mem_ptw"
+# Load stub as -lib blackbox BEFORE flatten so stub constants (desc_v=0)
+# do not const-propagate the table-read / fill cones away.
 cat > "$WORK/equiv_ptw.ys" <<'YS'
+read_verilog -lib stub_bb.v
 read_verilog pyc_reg.v
 read_verilog ptw_prod.v
 hierarchy -check -top ub_mem_ptw
@@ -487,6 +504,7 @@ flatten
 opt -purge
 opt
 design -stash gold
+read_verilog -lib stub_bb.v
 read_verilog pyc_reg.v
 read_verilog ptw_hooks_prodports.v
 hierarchy -check -top ub_mem_ptw
@@ -497,6 +515,7 @@ opt
 design -stash gate
 design -copy-from gold -as gold ub_mem_ptw
 design -copy-from gate -as gate ub_mem_ptw
+write_json equiv_sides.json
 equiv_make gold gate equiv
 hierarchy -top equiv
 equiv_struct
@@ -505,6 +524,33 @@ equiv_induct -seq 16
 equiv_status -assert
 YS
 ( cd "$WORK" && yosys -q -s equiv_ptw.ys )
+python3 - "$WORK/equiv_sides.json" <<'PY'
+import json, sys
+# Flattened pyc_reg → $sdff/$sdffe (sync reset). Count Q bits, same
+# scale as quick-synth-with-blackbox (~339). Far fewer means the stub
+# was flattened and const-propagated.
+FF_PFX = ("$dff", "$adff", "$dffe", "$adffe", "$sdff", "$sdffe")
+
+def ff_bits(mod):
+    total = 0
+    for info in (mod.get("cells") or {}).values():
+        t = info.get("type") or ""
+        if not any(t == p or t.startswith(p) for p in FF_PFX):
+            continue
+        con = info.get("connections") or {}
+        q = con.get("Q") or con.get("q") or []
+        total += len(q)
+    return total
+
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+mods = data.get("modules", {})
+gold = ff_bits(mods.get("gold") or {})
+gate = ff_bits(mods.get("gate") or {})
+if gold != gate or gold == 0:
+    print("FAIL: ptw regpair gold_bits=%d gate_bits=%d" % (gold, gate))
+    sys.exit(1)
+print("EQUIV_PTW_REGPAIRS", gold)
+PY
 echo "equiv ok (ub_mem_ptw PRODUCT ≡ HOOKS shared ports)"
 
 echo "ALL CHECKS PASSED"

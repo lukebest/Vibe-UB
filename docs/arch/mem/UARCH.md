@@ -131,7 +131,7 @@ EID→ENT_IDX 映射放在 RSC（Xia 答复 Q-A02），UMMU 只接 ENT_IDX 和�
 | `ub_mem_dec_ent_dec` | `ub_mem_dec_walk` 寄存后的 L0 / L1 原始数据 | §5.5 信号束 | L0 与 L1 均寄存 1 拍 |
 | `ub_mem_dec_uba` | UBA 基值、PA 低位 | UBA 64 bit | 64 bit 加法，进位丢弃（Xia 答复 D-L09） |
 
-`ub_mem_ptw` 经 `ub_mem_tbl_rd` 接主机表读口，前缀 `mem2host_rd_*`（SPEC §14 Q-C07，PR #50）。请求：`mem2host_rd_valid`、`mem2host_rd_ready`、`mem2host_rd_addr`（48 bit）、`mem2host_rd_len`（8 bit 字节数，合法 8 / 32 / 64，其余取值接口断言失败；第一波遍历器驱 8）、`mem2host_rd_tag`（4 bit；第一波遍历器驱 0，一个未决）。其中 `mem2host_rd_valid`、`mem2host_rd_addr`、`mem2host_rd_len`、`mem2host_rd_tag` 从寄存器送出；`mem2host_rd_valid && !mem2host_rd_ready` 期间请求束保持（断言 `AP_TBLRD_REQ_HOLD`，SPEC §14）。首次表读延迟以 PR #48 说明为准。响应：`mem2host_rd_rsp_valid`、`mem2host_rd_rsp_ready`、`mem2host_rd_rsp_data`（512 bit）、`mem2host_rd_rsp_tag`（4 bit）、`mem2host_rd_rsp_err`（1 bit）。
+`ub_mem_ptw` 经 `ub_mem_tbl_rd` 接主机表读口，前缀 `mem2host_rd_*`（SPEC §14 Q-C07，PR #50）。请求：`mem2host_rd_valid`、`mem2host_rd_ready`、`mem2host_rd_addr`（48 bit）、`mem2host_rd_len`（8 bit 字节数，合法 8 / 32 / 64，其余取值接口断言失败；第一波遍历器驱 8）、`mem2host_rd_tag`（4 bit；第一波遍历器驱 0，一个未决）。其中 `mem2host_rd_valid`、`mem2host_rd_addr`、`mem2host_rd_len`、`mem2host_rd_tag` 从寄存器送出；`mem2host_rd_valid && !mem2host_rd_ready` 期间请求束保持（断言 `AP_TBLRD_REQ_HOLD`，SPEC §14）。响应：`mem2host_rd_rsp_valid`、`mem2host_rd_rsp_ready`、`mem2host_rd_rsp_data`（512 bit）、`mem2host_rd_rsp_tag`（4 bit）、`mem2host_rd_rsp_err`（1 bit）。
 
 事件口（SPEC §14 Q-A08，PR #50）：`evt_valid`、`evt_ready`、`evt_code`（宽 `EVT_CODE_W`，参数默认 4）。码 0 保留。`ctx_matt_wd=1` 且 TLB 缺失时发出 `EVT_MATT_WD_MISS`（暂定取值 1），请求经事件路径结束。常量取值随 Q-E09，引用命名常量。
 

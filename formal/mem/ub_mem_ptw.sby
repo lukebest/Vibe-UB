@@ -2,10 +2,12 @@
 # Stacked on PR #48. Bind / harness uses PRODUCT netlist ports only
 # (rtl/mem/ub_mem_ptw.v). No internals, no tb_* observation ports.
 #
-# ub_mem_ptw_desc_dec is a private leaf. The PRODUCT file inlines the
-# public placeholder stub; this job blackboxes that module so its
-# outputs are unconstrained. Every property must hold for ANY decode
-# result. No private bit-layout is read or written.
+# ub_mem_ptw_desc_dec is a private leaf. The PRODUCT file inlines a
+# handwritten stub that always reports a translation fault. After
+# hierarchy this job deletes that module and splices
+# ub_mem_ptw_desc_dec_cut.sv ($anyseq on every decoder output) so
+# fill / block / page paths stay reachable. Properties must hold for
+# ANY decode result. No private bit-layout is read or written.
 #
 # pyc_reg.v lives in inc/ because #48 has no rtl/pyc_lib (same as
 # formal/mem/ub_mem_tlb.sby on the TLB formal branch).

@@ -53,6 +53,7 @@ module ub_mem_ptw_if_props (
   input  wire        mem2host_rd_rsp_err,
   input  wire        fill_valid,
   input  wire        fill_ready,
+  input  wire        flt_valid,
   input  wire        evt_valid,
   input  wire [3:0]  evt_code,
   input  wire        evt_ready
@@ -335,6 +336,27 @@ module ub_mem_ptw_if_props (
     // Backpressured request then accept (proves rd_ready is not stuck high).
     c_rd_bp_then_acc:  cover (chk && f_rd_req_hold &&
                               mem2host_rd_valid && mem2host_rd_ready);
+  end
+
+  // ------------------------------------------------------------------
+  // Induction auxiliaries (asserts only; never assumed).
+  // PRODUCT ports. Sound because RTL registers len/tag as constants
+  // and a live table-read request cannot overlap idle / fill / flt / evt
+  // (that start-state made AP_TBLRD_REQ_HOLD non-inductive).
+  // ------------------------------------------------------------------
+  wire [2:0] f_term_sum = {2'b0, req_ready} + {2'b0, fill_valid}
+                        + {2'b0, flt_valid} + {2'b0, evt_valid};
+
+  always @(posedge core_clk) begin
+    if (chk) begin
+      a_rd_len_const:  assert (mem2host_rd_len == RD_LEN_8B[RD_LEN_W-1:0]);
+      a_rd_tag_const:  assert (mem2host_rd_tag == RD_TAG_ZERO[RD_TAG_W-1:0]);
+      a_term_excl:     assert (f_term_sum <= 3'd1);
+      a_rd_valid_excl: assert (
+        !mem2host_rd_valid ||
+        (!req_ready && !fill_valid && !flt_valid && !evt_valid)
+      );
+    end
   end
 
 endmodule

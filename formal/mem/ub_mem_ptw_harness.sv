@@ -135,22 +135,8 @@ module ub_mem_ptw_harness (
     .fill_ready(fill_ready),
     .evt_valid(evt_valid),
     .evt_code(evt_code),
-    .evt_ready(evt_ready)
-  );
-
-  // Induction auxiliaries (asserts only). See ub_mem_ptw_inv.sv.
-  ub_mem_ptw_inv u_inv (
-    .core_clk(core_clk),
-    .rst_pyc(rst_pyc),
-    .st_idle(u_dut.st_idle),
-    .st_rd(u_dut.st_rd),
-    .st_dec(u_dut.st_dec),
-    .st_fill(u_dut.st_fill),
-    .st_flt(u_dut.st_flt),
-    .st_evt(u_dut.st_evt),
-    .rd_valid_q(u_dut.rd_valid_q),
-    .rd_len_q(u_dut.rd_len_q),
-    .rd_tag_q(u_dut.rd_tag_q)
+    .evt_ready(evt_ready),
+    .flt_valid(flt_valid)
   );
 
 endmodule

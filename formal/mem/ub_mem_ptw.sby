@@ -48,7 +48,6 @@ smtbmc yices
 [script]
 read -formal ub_mem_ptw.v
 read -formal ub_mem_ptw_if_props.sv
-read -formal ub_mem_ptw_inv.sv
 read -formal ub_mem_ptw_harness.sv
 # read -formal keeps modules as $abstract until hierarchy derives them.
 # After hierarchy, drop the inlined stub and splice in the $anyseq cut
@@ -66,7 +65,6 @@ opt -purge
 
 [files]
 ub_mem_ptw_if_props.sv
-ub_mem_ptw_inv.sv
 ub_mem_ptw_harness.sv
 ub_mem_ptw_desc_dec_cut.sv
 inc/pyc_reg.v

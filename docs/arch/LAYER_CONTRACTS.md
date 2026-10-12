@@ -261,7 +261,7 @@ PHY↔DLL、LMSM 侧带已在 [SPEC.md](../SPEC.md) §3.3 写死（M1）。此�
 
 - 无层间信用细胞。RTP 发送窗满（§6.5.1.4.1）= `ta2tp_op_ready=0`（第二波）。拥塞窗见 §6.6，属 `ub_tp_cc`（可选）。优先通路：反压只来自 NW/DLL `ready`。
 - 共享 TP 信道（§6.1、§6.3.1）：策略 **未知**；契约：不得对 TA 声明无限未决。建议优先通路未决上限 **未知**（实现后回填，至少 1）。
-- TP 计时器为 RTO 与 ACK 合并（§6.4.2.1）。`RETRY_WAIT_CYC` 归 DLL（§4.7.3.3）。`PROBE_WAIT_CYC` 归 LMSM（§3.4.3.2）。
+- `RETRY_WAIT_CYC` / `PROBE_WAIT_CYC`（323 拍超时）分别归属 DLL（§4.7.3.3）与 LMSM（§3.4.3.2）。TP 使用本层重传超时（RTO）与 ACK 合并计时器（§6.4.2.1）。
 
 **序**
 

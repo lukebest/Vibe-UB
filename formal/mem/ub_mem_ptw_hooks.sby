@@ -1,0 +1,56 @@
+# ub_mem_ptw HOOKS-netlist formal (验证-C). #55.
+# Binds rtl/mem/hooks/ub_mem_ptw.v so tb_mem_ptw_obs_st /
+# tb_mem_ptw_obs_rd_pend exist. PRODUCT bind stays in ub_mem_ptw.sby
+# (no tb_*). Auxiliaries are asserts only, never assumed.
+#
+# Encoding values: SPEC §10 table (not yet on #50); interim values from
+# #48 a06758a / designer posting. Cite SPEC §10 in the localparam block.
+#
+# Default tasks: cover + bmc 24. prove is not tagged default until it
+# converges. Manual: `sby -f ub_mem_ptw_hooks.sby prove`.
+# hooks-port-consistency may be red until #50 registers the ports.
+
+[tasks]
+cover default
+bmc default
+prove
+
+[options]
+cover:
+mode cover
+depth 16
+--
+bmc:
+mode bmc
+depth 24
+--
+prove:
+mode prove
+depth 20
+--
+
+[engines]
+smtbmc yices
+
+[script]
+read -formal ub_mem_ptw.v
+read -formal ub_mem_ptw_if_props.sv
+read -formal ub_mem_ptw_hooks_inv.sv
+read -formal ub_mem_ptw_hooks_harness.sv
+hierarchy -check -top ub_mem_ptw_hooks_harness
+delete ub_mem_ptw_desc_dec
+read -formal ub_mem_ptw_desc_dec_cut.sv
+hierarchy -check -top ub_mem_ptw_hooks_harness
+proc
+flatten
+opt
+memory -nomap
+opt -purge
+
+[files]
+ub_mem_ptw_if_props.sv
+ub_mem_ptw_hooks_inv.sv
+ub_mem_ptw_hooks_harness.sv
+ub_mem_ptw_desc_dec_cut.sv
+inc/pyc_reg.v
+../../rtl/mem/hooks/ub_mem_ptw.v

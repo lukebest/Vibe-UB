@@ -1,98 +1,137 @@
 #!/usr/bin/env python3
-"""Line A: pycircuit → emit → rtl consistency, hooks presence, PRODUCT↔hooks eqy.
+"""Line A: pycircuit → emit_rtl.py → rtl consistency, hooks, PRODUCT↔hooks eqy.
 
-Architecture-confirmed layout (will be SPEC §2.2 / §11):
-  pycircuit/<layer>/          source (including pycircuit/csr/)
-  scripts/emit_rtl.py         emit
-  rtl/<layer>/<module>.v      PRODUCT
-  rtl/<layer>/hooks/<module>.v
-  rtl/                        generated .v only (plus whitelist cells)
+Never assemble pycc argv here. scripts/emit_rtl.py is the only source of
+compile() + pycc --emit=verilog --logic-depth=64. Regen into an isolated
+tree and byte-compare rtl/<layer>/ and rtl/<layer>/hooks/.
 
-Skip the whole job when emit_rtl.py is missing.
+emit_rtl.py missing → skip (report-only). Present → blocking.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from gatelib import (
+    GATE_DIR,
     OUT_DIR,
     REPO_ROOT,
     Finding,
-    discover_layers,
-    discover_leaf_pairs,
-    emit_report,
-    is_handwritten_path,
-    is_legacy_path,
-    iter_rtl_sources,
+    collect_import_root_findings,
+    collect_layer_netlists,
     collect_placeholder_policy_findings,
     cmn_mem_bits,
     cmn_mem_is_large,
     cmn_mem_tag_of,
+    discover_layers,
+    discover_leaf_pairs,
     discover_rtl,
-    is_cmn_mem_module,
-    is_placeholder_module,
-    large_cmn_mem_lib_files,
+    emit_report,
     hooks_extra_for,
-    parse_cmn_mem_tag,
-    is_eqy_tie_low_port,
-    read_cmn_mem_threshold_bits,
+    is_cmn_mem_module,
+    is_handwritten_path,
+    is_legacy_path,
+    is_placeholder_module,
+    is_tb_obs_port,
+    is_tb_port,
+    iter_rtl_sources,
+    large_cmn_mem_lib_files,
+    leaf_process_env,
+    leaf_python_argv,
     looks_generated,
-    parse_ports,
+    packed_width,
+    parse_cmn_mem_tag,
+    parse_port_decls,
+    default_verilog_incdirs,
     print_tool_versions,
+    read_cmn_mem_threshold_bits,
     rel,
     run_cmd,
     shutil_which,
+    verilog_equal_except_module_name,
 )
+from hooks_port_consistency import compare_ports
+from large_mem_manifest import check_large_mem_manifest
+from pyc_lib_check import check_pyc_lib
 
-# --- architecture-owned knobs (confirm with Xia / design before editing) ---
+# Call only this script. Do not add pycc flags here.
 EMIT_SCRIPT = "scripts/emit_rtl.py"
-EMIT_CMD = [sys.executable, EMIT_SCRIPT]
-# --------------------------------------------------------------------------
 
-def write_hooks_wrapper(hooks_path: Path, module: str, dest: Path) -> list[str]:
-    """Wrap HOOKS: tb_test_mode=0 and extra inputs tied low (SPEC §11).
+def _port_decl(kind: str, name: str, packed: str) -> str:
+    rng = f"{packed} " if packed else ""
+    return f"  {kind} {rng}{name};"
 
-    Tie-low: tb_test_mode, tb_inj_*, tb_<inst>_bd_*, tb_<inst>_bd_vld_*.
-    Observe (tb_obs_*) left open. Other ports exposed 1:1 with PRODUCT.
+
+def _tie_low_expr(packed: str) -> str:
+    width = packed_width(packed)
+    if width <= 1:
+        return "1'b0"
+    return f"{width}'b0"
+
+
+def write_hooks_wrapper(
+    hooks_path: Path,
+    module: str,
+    dest: Path,
+    product_path: Path | None = None,
+    incdirs: list[Path] | None = None,
+    wrapper_module: str | None = None,
+) -> list[str]:
+    """Wrap a side so only PRODUCT ports are compared (SPEC §11).
+
+    Exposed ports keep the PRODUCT packed width (fixes gold/gate bus
+    mismatch). Extra HOOKS inputs (tb_test_mode / tb_inj_* /
+    tb_<inst>_bd_* / tb_<inst>_bd_vld_*) tie to 0 at their native width.
+    Observe (tb_obs_* / tb_<inst>_obs_*) left open. Other extra tb_*
+    inputs also tie low.
+
+    Gold and HOOKS both instantiate `u_leaf` so flatten names line up
+    and equiv_* can prove an identical sequential (e.g. ub_dll_bcrc)
+    without falling through to a 160-bit SAT BMC timeout.
     """
-    ports = parse_ports(hooks_path)
-    tied: list[str] = []
-    exposed: list[tuple[str, str]] = []
-    for kind, name in ports:
-        if is_eqy_tie_low_port(name):
-            tied.append(name)
-        elif name.startswith("tb_obs_"):
-            tied.append(name)  # observe-only; leave unconnected on the wrapper
-        else:
-            exposed.append((kind, name))
+    hooks = parse_port_decls(hooks_path, incdirs=incdirs, module=module)
+    if product_path is not None and product_path.is_file():
+        exposed = parse_port_decls(product_path, incdirs=incdirs, module=module)
+    else:
+        exposed = [(k, n, p) for k, n, p in hooks if not is_tb_port(n)]
+    tied: list[tuple[str, str, str]] = []
+    exposed_names = {n for _k, n, _p in exposed}
+    for kind, name, packed in hooks:
+        if name in exposed_names:
+            continue
+        tied.append((kind, name, packed))
+    wrap_mod = wrapper_module or f"{module}_eqy_hooks"
     lines = [
-        f"// Auto-generated eqy wrapper: {module} hooks with tb_test_mode=0,",
-        "// tb_inj_* / tb_<inst>_bd_* / tb_<inst>_bd_vld_* tied low. Do not commit.",
-        f"module {module}_eqy_hooks (",
+        f"// Auto-generated eqy wrapper: {module} PRODUCT ports only;",
+        "// extra HOOKS inputs tied low at native width. Do not commit.",
+        f"module {wrap_mod} (",
     ]
     if exposed:
-        lines.append("  " + ",\n  ".join(n for _k, n in exposed))
+        lines.append("  " + ",\n  ".join(n for _k, n, _p in exposed))
     lines.append(");")
-    for kind, name in exposed:
-        lines.append(f"  {kind} {name};")
-    conns = [f".{n}({n})" for _k, n in exposed]
-    for name in tied:
-        if name.startswith("tb_obs_"):
+    for kind, name, packed in exposed:
+        lines.append(_port_decl(kind, name, packed))
+    conns: list[str] = []
+    for _k, name, _p in exposed:
+        conns.append(f".{name}({name})")
+    for kind, name, packed in tied:
+        if is_tb_obs_port(name) or kind == "output":
             conns.append(f".{name}()")
         else:
-            conns.append(f".{name}(1'b0)")
-    lines.append(f"  {module} u_hooks (")
+            conns.append(f".{name}({_tie_low_expr(packed)})")
+    lines.append(f"  {module} u_leaf (")
     lines.append("    " + ",\n    ".join(conns))
     lines.append("  );")
     lines.append("endmodule")
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return tied
+    return [n for _k, n, _p in tied]
 
 
 def _lib_reads(lib_files: list[Path] | None) -> list[str]:
@@ -109,39 +148,399 @@ def _lib_reads(lib_files: list[Path] | None) -> list[str]:
     return out
 
 
-def _yosys_equiv_script(
-    product: Path,
+def _sv_read(path: Path, incdirs: list[Path] | None = None) -> str:
+    inc = " ".join(f"-I{d}" for d in (incdirs or []))
+    return f"read_verilog -sv {inc} {path}".replace("  ", " ")
+
+
+def _yosys_load_both(
+    gold_reads: list[str],
     gold_top: str,
     gate_reads: list[str],
     gate_top: str,
     lib_files: list[Path] | None = None,
+    incdirs: list[Path] | None = None,
+    extra_rtl: list[Path] | None = None,
+) -> list[str]:
+    """Read gold/gate, flatten, opt -full (fold tied-low hook muxes)."""
+    libs = _lib_reads(lib_files)
+    extras = [_sv_read(p, incdirs) for p in (extra_rtl or [])]
+    return [
+        *extras,
+        *gold_reads,
+        *libs,
+        f"hierarchy -check -top {gold_top}",
+        "proc",
+        "flatten",
+        "opt -full",
+        "design -save gold",
+        "design -reset",
+        *extras,
+        *gate_reads,
+        *libs,
+        f"hierarchy -check -top {gate_top}",
+        "proc",
+        "flatten",
+        "opt -full",
+        "design -save gate",
+        f"design -copy-from gold -as gold {gold_top}",
+        f"design -copy-from gate -as gate {gate_top}",
+    ]
+
+
+def _yosys_equiv_script(
+    gold_reads: list[str],
+    gold_top: str,
+    gate_reads: list[str],
+    gate_top: str,
+    lib_files: list[Path] | None = None,
+    incdirs: list[Path] | None = None,
+    extra_rtl: list[Path] | None = None,
 ) -> str:
     """Yosys equiv_make / equiv_simple / equiv_induct / equiv_status -assert."""
-    libs = _lib_reads(lib_files)
     return "\n".join(
         [
-            f"read_verilog -sv {product}",
-            *libs,
-            f"hierarchy -check -top {gold_top}",
-            "proc",
-            "opt",
-            "design -save gold",
-            "design -reset",
-            *gate_reads,
-            *libs,
-            f"hierarchy -check -top {gate_top}",
-            "proc",
-            "opt",
-            "design -save gate",
-            f"design -copy-from gold -as gold {gold_top}",
-            f"design -copy-from gate -as gate {gate_top}",
+            *_yosys_load_both(
+                gold_reads,
+                gold_top,
+                gate_reads,
+                gate_top,
+                lib_files,
+                incdirs,
+                extra_rtl,
+            ),
             "equiv_make gold gate equiv",
             "prep -top equiv",
-            "equiv_simple",
-            "equiv_induct",
+            "equiv_simple -undef",
+            "equiv_induct -undef",
             "equiv_status -assert",
         ]
     )
+
+
+def _yosys_miter_common(
+    gold_reads: list[str],
+    gold_top: str,
+    gate_reads: list[str],
+    gate_top: str,
+    lib_files: list[Path] | None = None,
+    incdirs: list[Path] | None = None,
+    extra_rtl: list[Path] | None = None,
+) -> list[str]:
+    return [
+        *_yosys_load_both(
+            gold_reads,
+            gold_top,
+            gate_reads,
+            gate_top,
+            lib_files,
+            incdirs,
+            extra_rtl,
+        ),
+        "miter -equiv -make_assert -flatten gold gate miter",
+        "hierarchy -top miter",
+        "opt -full",
+    ]
+
+
+def _yosys_miter_sat_script(
+    gold_reads: list[str],
+    gold_top: str,
+    gate_reads: list[str],
+    gate_top: str,
+    lib_files: list[Path] | None = None,
+    incdirs: list[Path] | None = None,
+    extra_rtl: list[Path] | None = None,
+) -> str:
+    """k-induction on the I/O miter. Caps length so it cannot walk off to k=36."""
+    return "\n".join(
+        [
+            *_yosys_miter_common(
+                gold_reads,
+                gold_top,
+                gate_reads,
+                gate_top,
+                lib_files,
+                incdirs,
+                extra_rtl,
+            ),
+            "sat -verify -tempinduct -seq 2 -maxsteps 4 "
+            "-set-init-zero -prove-asserts",
+        ]
+    )
+
+
+def _yosys_miter_bmc_script(
+    gold_reads: list[str],
+    gold_top: str,
+    gate_reads: list[str],
+    gate_top: str,
+    lib_files: list[Path] | None = None,
+    incdirs: list[Path] | None = None,
+    extra_rtl: list[Path] | None = None,
+) -> str:
+    """I/O miter BMC from zero init.
+
+    Used when PRODUCT/HOOKS are sequential and structurally different:
+    k-induction on ports alone cannot close (extra HOOKS state), but SAT
+    BMC from a shared init still proves the outputs match for N cycles
+    and catches a flipped bus bit.
+    """
+    return "\n".join(
+        [
+            *_yosys_miter_common(
+                gold_reads,
+                gold_top,
+                gate_reads,
+                gate_top,
+                lib_files,
+                incdirs,
+                extra_rtl,
+            ),
+            "sat -verify -seq 16 -set-init-zero -prove-asserts",
+        ]
+    )
+
+
+def _run_yosys_script(ys: Path, work: Path, timeout: int) -> tuple[int, str]:
+    """Run a Yosys script; timeout becomes a failed proof, not a crash."""
+    try:
+        proc = run_cmd(["yosys", "-s", str(ys)], cwd=work, timeout=timeout)
+    except Exception as exc:
+        return 1, f"{type(exc).__name__}: {exc}"
+    return proc.returncode, proc.stdout or ""
+
+
+def _equiv_proven(rc: int, text: str) -> bool:
+    if rc != 0:
+        return False
+    if "proof did fail" in text.lower():
+        return False
+    if "Equivalence successfully proven" in text:
+        return True
+    if "SAT proof finished - no model found: SUCCESS" in text:
+        return True
+    return False
+
+
+def _unproven_on_outputs(text: str, output_names: list[str]) -> bool:
+    """True when equiv_status left an exposed PRODUCT output unproven.
+
+    That is a real I/O mismatch — do not spend minutes on SAT BMC.
+    Internal $equiv (pyc_reg .q) still fall through to miter/BMC.
+    """
+    if not output_names:
+        return False
+    hits = []
+    for line in text.splitlines():
+        if "Unproven $equiv" not in line:
+            continue
+        hits.append(line)
+    if not hits:
+        return False
+    blob = "\n".join(hits)
+    for name in output_names:
+        if f".{name}_gold" in blob or f".{name}_gate" in blob:
+            return True
+        if f"\\{name} " in blob or f"\\{name}[" in blob:
+            return True
+    return False
+
+
+def _emit_python() -> str:
+    venv = REPO_ROOT / ".pycircuit-venv" / "bin" / "python"
+    return str(venv) if venv.is_file() else sys.executable
+
+
+def _prepare_pycc_path() -> None:
+    prefix = REPO_ROOT / ".pycircuit_out" / "toolchain" / "install" / "bin"
+    if prefix.is_dir():
+        os.environ["PATH"] = f"{prefix}{os.pathsep}{os.environ.get('PATH', '')}"
+        os.environ.setdefault("PYC_TOOLCHAIN_ROOT", str(prefix.parent))
+
+
+def compare_emitted_rtl(generated_rtl: Path, committed_rtl: Path) -> list[Finding]:
+    """Byte-compare isolated emit output to committed rtl/<layer>/ and hooks/."""
+    gen = collect_layer_netlists(generated_rtl)
+    committed = collect_layer_netlists(committed_rtl)
+    findings: list[Finding] = []
+    for key, gp in gen.items():
+        dest = f"rtl/{key}"
+        cp = committed.get(key)
+        if cp is None:
+            findings.append(
+                Finding(
+                    check="emit",
+                    module=Path(key).stem,
+                    file=dest,
+                    rule="EMIT_DIFF",
+                    message=f"emit_rtl.py produced {dest} not present in committed tree",
+                )
+            )
+            continue
+        if is_handwritten_path(cp):
+            continue
+        if gp.read_bytes() != cp.read_bytes():
+            findings.append(
+                Finding(
+                    check="emit",
+                    module=Path(key).stem,
+                    file=dest,
+                    rule="EMIT_DIFF",
+                    message=f"regenerated {dest} differs byte-for-byte from committed",
+                )
+            )
+    for key, cp in committed.items():
+        if is_handwritten_path(cp):
+            continue
+        if key in gen:
+            continue
+        if looks_generated(cp):
+            findings.append(
+                Finding(
+                    check="emit",
+                    module=Path(key).stem,
+                    file=f"rtl/{key}",
+                    rule="EMIT_DIFF",
+                    message=f"committed rtl/{key} was not regenerated by emit_rtl.py",
+                )
+            )
+    return findings
+
+
+def emit_unavailable_findings(
+    emit_path: Path | None = None,
+    pycc_ready: bool = True,
+    reason: str = "",
+) -> list[Finding]:
+    """Report-only skip when emit_rtl.py is missing or pycc cannot be installed."""
+    path = emit_path if emit_path is not None else REPO_ROOT / EMIT_SCRIPT
+    if not path.is_file():
+        msg = f"{EMIT_SCRIPT} missing; regen compare skipped"
+        print(f"skip emit+byte-compare: {msg}")
+        return [
+            Finding(
+                check="emit",
+                module="*",
+                file=EMIT_SCRIPT,
+                rule="EMIT_SKIP",
+                message=msg,
+                bucket="report",
+            )
+        ]
+    if not pycc_ready:
+        msg = reason or "pycc could not be installed from TOOLCHAIN.lock"
+        print(f"skip emit+byte-compare: {msg}")
+        return [
+            Finding(
+                check="emit",
+                module="*",
+                file=EMIT_SCRIPT,
+                rule="EMIT_SKIP",
+                message=f"pycc unavailable; regen compare skipped ({msg})",
+                bucket="report",
+            )
+        ]
+    return []
+
+
+def _setup_reason_from_log(log: str) -> str:
+    for line in (log or "").splitlines()[::-1]:
+        text = line.strip()
+        if text.startswith("BLOCKER:"):
+            return text
+    return "setup_pycircuit.sh did not reach SETUP_OK=1"
+
+
+def prepare_pycc_from_lock() -> tuple[bool, str]:
+    """Install pycc per TOOLCHAIN.lock. Missing toolchain is skip, not fail."""
+    setup = GATE_DIR / "setup_pycircuit.sh"
+    log = ""
+    if setup.is_file():
+        print(f"=== {rel(setup)} (TOOLCHAIN.lock pin; so emit_rtl.py can call pycc) ===")
+        proc = run_cmd(["bash", str(setup)], timeout=600)
+        log = proc.stdout or ""
+        print("\n".join(log.strip().splitlines()[-30:] or [""]))
+        setup_log = GATE_DIR / "out" / "pycircuit_setup.log"
+        if setup_log.is_file():
+            log = setup_log.read_text(encoding="utf-8", errors="replace")
+        if "SETUP_OK=1" in log:
+            _prepare_pycc_path()
+            return True, ""
+        return False, _setup_reason_from_log(log)
+    _prepare_pycc_path()
+    if shutil_which("pycc"):
+        return True, ""
+    return False, "setup_pycircuit.sh missing and pycc not on PATH"
+
+
+def run_emit_rtl_isolated() -> tuple[list[Finding], Path | None, dict[str, object]]:
+    """Run scripts/emit_rtl.py in a detached worktree; never build pycc argv.
+
+    Caller must drop the worktree (meta['worktree']) when finished. Generated
+    rtl stays available for the large-mem manifest sha256 check.
+    """
+    meta: dict[str, object] = {
+        "worktree": None,
+        "script_present": False,
+        "pycc_ready": False,
+        "reason": "",
+    }
+    emit_path = REPO_ROOT / EMIT_SCRIPT
+    meta["script_present"] = emit_path.is_file()
+    if not emit_path.is_file():
+        return emit_unavailable_findings(emit_path), None, meta
+
+    ready, reason = prepare_pycc_from_lock()
+    meta["pycc_ready"] = ready
+    meta["reason"] = reason
+    if not ready:
+        return emit_unavailable_findings(emit_path, False, reason), None, meta
+
+    tmp = Path(tempfile.mkdtemp(prefix="gate-emit-"))
+    add = run_cmd(["git", "worktree", "add", "--detach", str(tmp), "HEAD"])
+    if add.returncode != 0:
+        print(add.stdout or "")
+        return (
+            [
+                Finding(
+                    check="emit",
+                    module="*",
+                    file=EMIT_SCRIPT,
+                    rule="EMIT_FAIL",
+                    message=f"git worktree add failed: {(add.stdout or '')[:200]}",
+                )
+            ],
+            None,
+            meta,
+        )
+    meta["worktree"] = tmp
+    script = tmp / EMIT_SCRIPT
+    py = _emit_python()
+    argv = leaf_python_argv(script, python=py)
+    env = leaf_process_env(tmp)
+    print(
+        f"=== {' '.join(argv)} (isolated worktree; "
+        "PYTHONPATH=<worktree>/pycircuit first; python -P; "
+        "pycc argv comes only from this script) ==="
+    )
+    proc = run_cmd(argv, cwd=tmp, timeout=600, env=env)
+    print(proc.stdout or "")
+    if proc.returncode != 0:
+        return (
+            [
+                Finding(
+                    check="emit",
+                    module="*",
+                    file=EMIT_SCRIPT,
+                    rule="EMIT_FAIL",
+                    message=f"{EMIT_SCRIPT} exited {proc.returncode}",
+                )
+            ],
+            tmp / "rtl" if (tmp / "rtl").is_dir() else None,
+            meta,
+        )
+    return compare_emitted_rtl(tmp / "rtl", REPO_ROOT / "rtl"), tmp / "rtl", meta
 
 
 def run_equiv(
@@ -150,31 +549,74 @@ def run_equiv(
     hooks: Path,
     extra_ports: list[str] | None,
     lib_files: list[Path] | None = None,
+    incdirs: list[Path] | None = None,
+    extra_rtl: list[Path] | None = None,
 ) -> Finding | None:
-    """Prove PRODUCT≡HOOKS. Primary: Yosys equiv_*. eqy if available."""
+    """Prove PRODUCT≡HOOKS on PRODUCT ports only (SPEC §11 (d)).
+
+    Always wrap both sides so exposed ports keep PRODUCT packed widths
+    and flatten names share `u_leaf` (identical sequential, e.g. BCRC,
+    can close via equiv_*). Extra HOOKS inputs tie low at native width;
+    obs outputs float. Primary: Yosys equiv_*. Fallback: miter +
+    sat -tempinduct. Structurally different sequential (separate pycc
+    PRODUCT/HOOKS): tempinduct may not close; then miter SAT BMC from
+    zero init.
+    """
     work = OUT_DIR / "eqy" / module
     work.mkdir(parents=True, exist_ok=True)
-    gold_top = module
-    if extra_ports is None:
-        gate_top = module
-        gate_reads = [f"read_verilog -sv {hooks}"]
-        kind = "no-hook leaf, ports 1:1"
-    else:
-        wrap = work / f"{module}_eqy_hooks.v"
-        tied = write_hooks_wrapper(hooks, module, wrap)
-        gate_top = f"{module}_eqy_hooks"
-        gate_reads = [f"read_verilog -sv {hooks}", f"read_verilog -sv {wrap}"]
-        kind = f"hooked; extra inputs tied low ({tied or 'none'})"
+    incs = list(incdirs) if incdirs is not None else default_verilog_incdirs()
+    gold_wrap = work / f"{module}_eqy_gold.v"
+    write_hooks_wrapper(
+        product,
+        module,
+        gold_wrap,
+        product_path=product,
+        incdirs=incs,
+        wrapper_module=f"{module}_eqy_gold",
+    )
+    gold_top = f"{module}_eqy_gold"
+    wrap = work / f"{module}_eqy_hooks.v"
+    tied = write_hooks_wrapper(
+        hooks, module, wrap, product_path=product, incdirs=incs
+    )
+    gate_top = f"{module}_eqy_hooks"
+    gold_reads = [_sv_read(product, incs), _sv_read(gold_wrap, incs)]
+    gate_reads = [_sv_read(hooks, incs), _sv_read(wrap, incs)]
+    extra_note = (
+        "listed extras" if extra_ports is not None else "no hooks_ports row"
+    )
+    kind = (
+        f"PRODUCT-port-only wrapper; extras tied low "
+        f"({tied or 'none'}; {extra_note})"
+    )
+    del extra_ports  # compared via PRODUCT ports only; list is documentation
 
     eqy_bin = shutil_which("eqy")
     yosys_bin = shutil_which("yosys")
-    # This environment cannot install eqy. Yosys equiv_* is the primary path.
-    if yosys_bin and not eqy_bin:
-        tool = "yosys-equiv"
+    if not yosys_bin and not eqy_bin:
+        print(f"--- EQUIV tool=NONE {module}: yosys and eqy both missing ---")
+        return Finding(
+            check="emit",
+            module=module,
+            file=rel(product),
+            rule="EQUIV_TOOL_MISSING",
+            message="yosys not on PATH (eqy also missing); cannot prove PRODUCT≡hooks",
+        )
+
+    text = ""
+    tool = "yosys-equiv"
+    proven = False
+    if yosys_bin:
         ys = work / f"{module}_equiv.ys"
         ys.write_text(
             _yosys_equiv_script(
-                product, gold_top, gate_reads, gate_top, lib_files=lib_files
+                gold_reads,
+                gold_top,
+                gate_reads,
+                gate_top,
+                lib_files=lib_files,
+                incdirs=incs,
+                extra_rtl=extra_rtl,
             )
             + "\n",
             encoding="utf-8",
@@ -183,10 +625,78 @@ def run_equiv(
             f"--- EQUIV tool=yosys-equiv {module} ({kind}); "
             "equiv_make/equiv_simple/equiv_induct/equiv_status -assert ---"
         )
-        proc = run_cmd(["yosys", "-s", str(ys)], cwd=work, timeout=180)
+        rc, text = _run_yosys_script(ys, work, 180)
+        print("\n".join((text.strip().splitlines() or [""])[-40:]))
+        proven = _equiv_proven(rc, text)
+        exposed = parse_port_decls(product, incdirs=incs, module=module)
+        outputs = [n for k, n, _p in exposed if k == "output"]
+        if not proven and _unproven_on_outputs(text, outputs):
+            print(
+                f"EQUIV {module}: FAIL tool=yosys-equiv "
+                "(unproven PRODUCT output; skip SAT)"
+            )
+            return Finding(
+                check="emit",
+                module=module,
+                file=rel(product),
+                rule="EQUIV_FAIL",
+                message=(
+                    f"PRODUCT vs hooks not equivalent (tool=yosys-equiv, "
+                    f"{kind}; unproven PRODUCT output)"
+                ),
+            )
+        if not proven:
+            tool = "yosys-miter-sat"
+            ms = work / f"{module}_miter.ys"
+            ms.write_text(
+                _yosys_miter_sat_script(
+                    gold_reads,
+                    gold_top,
+                    gate_reads,
+                    gate_top,
+                    lib_files=lib_files,
+                    incdirs=incs,
+                    extra_rtl=extra_rtl,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            print(
+                f"--- EQUIV tool=yosys-miter-sat {module} ({kind}); "
+                "miter -equiv -flatten + sat -tempinduct -prove-asserts ---"
+            )
+            rc, text = _run_yosys_script(ms, work, 60)
+            print("\n".join((text.strip().splitlines() or [""])[-40:]))
+            proven = _equiv_proven(rc, text)
+        if not proven:
+            tool = "yosys-miter-sat"
+            bs = work / f"{module}_miter_bmc.ys"
+            bs.write_text(
+                _yosys_miter_bmc_script(
+                    gold_reads,
+                    gold_top,
+                    gate_reads,
+                    gate_top,
+                    lib_files=lib_files,
+                    incdirs=incs,
+                    extra_rtl=extra_rtl,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            print(
+                f"--- EQUIV tool=yosys-miter-sat {module} ({kind}); "
+                "miter -equiv -flatten + sat -seq 16 -set-init-zero "
+                "(BMC from zero; tempinduct step cannot close on "
+                "structurally different sequential) ---"
+            )
+            rc, text = _run_yosys_script(bs, work, 180)
+            print("\n".join((text.strip().splitlines() or [""])[-40:]))
+            proven = _equiv_proven(rc, text)
     elif eqy_bin:
         tool = "eqy"
         eqy_file = work / f"{module}.eqy"
+        gold_inc = " ".join(f"-I{d}" for d in incs)
         eqy_file.write_text(
             "\n".join(
                 [
@@ -194,7 +704,8 @@ def run_equiv(
                     "splitnets on",
                     "",
                     "[gold]",
-                    f"read_verilog -sv {product}",
+                    f"read_verilog -sv {gold_inc} {product}".replace("  ", " "),
+                    f"read_verilog -sv {gold_inc} {gold_wrap}".replace("  ", " "),
                     *_lib_reads(lib_files),
                     f"prep -top {gold_top}",
                     "",
@@ -210,27 +721,10 @@ def run_equiv(
         )
         print(f"--- EQUIV tool=eqy {module} ({kind}) ---")
         proc = run_cmd(["eqy", "-f", str(eqy_file)], cwd=work, timeout=180)
-    else:
-        print(f"--- EQUIV tool=NONE {module}: yosys and eqy both missing ---")
-        return Finding(
-            check="emit",
-            module=module,
-            file=rel(product),
-            rule="EQUIV_TOOL_MISSING",
-            message="yosys not on PATH (eqy also missing); cannot prove PRODUCT≡hooks",
-        )
+        text = proc.stdout or ""
+        print("\n".join((text.strip().splitlines() or [""])[-40:]))
+        proven = proc.returncode == 0
 
-    text = proc.stdout or ""
-    print("\n".join((text.strip().splitlines() or [""])[-40:]))
-    proven = (
-        proc.returncode == 0
-        and (
-            "Equivalence successfully proven" in text
-            or tool == "eqy"
-        )
-    )
-    if tool == "eqy" and proc.returncode == 0:
-        proven = True
     if not proven:
         return Finding(
             check="emit",
@@ -238,8 +732,7 @@ def run_equiv(
             file=rel(product),
             rule="EQUIV_FAIL",
             message=(
-                f"PRODUCT vs hooks not equivalent (tool={tool}, "
-                f"exit {proc.returncode}; {kind})"
+                f"PRODUCT vs hooks not equivalent (tool={tool}, {kind})"
             ),
         )
     print(f"EQUIV {module}: PASS tool={tool}")
@@ -256,8 +749,9 @@ def main() -> int:
     args = parser.parse_args()
     print_tool_versions(["python", "yosys", "eqy"])
     print(
-        f"emit knobs: EMIT_SCRIPT={EMIT_SCRIPT} EMIT_CMD={' '.join(EMIT_CMD)} "
-        f"equiv_only={args.equiv_only}"
+        f"emit knobs: EMIT_SCRIPT={EMIT_SCRIPT} "
+        "(no gate-built pycc argv; compile/--emit=verilog/--logic-depth=64 "
+        f"live only in that script) equiv_only={args.equiv_only}"
     )
     pyc_layers = discover_layers(REPO_ROOT / "pycircuit")
     rtl_layers = discover_layers(REPO_ROOT / "rtl")
@@ -269,47 +763,57 @@ def main() -> int:
     )
 
     findings: list[Finding] = []
-    if not args.equiv_only:
-        findings.extend(collect_placeholder_policy_findings("emit"))
-    emit_path = REPO_ROOT / EMIT_SCRIPT
-    if args.equiv_only:
-        print("equiv-only: skip emit+diff")
-    elif not emit_path.is_file():
-        print(f"skip emit+diff: {EMIT_SCRIPT} does not exist (pyCircuit emit not on this branch)")
-    else:
-        print(f"=== {' '.join(EMIT_CMD)} ===")
-        proc = run_cmd(EMIT_CMD)
-        print(proc.stdout or "")
-        if proc.returncode != 0:
-            findings.append(
-                Finding(
-                    check="emit",
-                    module="*",
-                    file=EMIT_SCRIPT,
-                    rule="EMIT_FAIL",
-                    message=f"{EMIT_SCRIPT} exited {proc.returncode}",
+    findings.extend(collect_import_root_findings("emit"))
+    worktree: Path | None = None
+    generated_rtl: Path | None = None
+    emit_meta: dict[str, object] = {
+        "script_present": False,
+        "pycc_ready": False,
+        "reason": "",
+    }
+    try:
+        if not args.equiv_only:
+            findings.extend(collect_placeholder_policy_findings("emit"))
+            emit_hits, generated_rtl, emit_meta = run_emit_rtl_isolated()
+            worktree = emit_meta.get("worktree")  # type: ignore[assignment]
+            findings.extend(emit_hits)
+            findings.extend(
+                check_large_mem_manifest(
+                    REPO_ROOT / "rtl",
+                    generated_rtl=generated_rtl,
+                    emit_available=bool(emit_meta.get("script_present")),
+                    pycc_ready=bool(emit_meta.get("pycc_ready")),
+                    skip_reason=str(emit_meta.get("reason") or ""),
                 )
             )
-            return emit_report("emit", findings)
-        diff = run_cmd(["git", "diff", "--exit-code", "--", "rtl"])
-        porcelain = run_cmd(["git", "status", "--porcelain", "--", "rtl"])
-        extra = [
-            line for line in (porcelain.stdout or "").splitlines() if line.startswith("?")
-        ]
-        if diff.returncode != 0 or extra:
-            msg = "rtl/ drifted after emit (hand-edit or stale generated files)"
-            if extra:
-                msg += f"; untracked: {[ln[3:] for ln in extra]}"
-            print(diff.stdout or "")
-            findings.append(
-                Finding(
-                    check="emit",
-                    module="*",
-                    file="rtl/",
-                    rule="EMIT_DIFF",
-                    message=msg,
+            findings.extend(
+                check_pyc_lib(
+                    REPO_ROOT / "rtl",
+                    lock_src=REPO_ROOT / ".pycircuit-src",
                 )
             )
+            if any(f.rule == "EMIT_FAIL" and f.bucket == "new" for f in findings):
+                return emit_report("emit", findings)
+        else:
+            print("equiv-only: skip emit+byte-compare")
+            findings.extend(
+                check_large_mem_manifest(
+                    REPO_ROOT / "rtl",
+                    generated_rtl=None,
+                    emit_available=False,
+                    pycc_ready=False,
+                    skip_reason="equiv-only",
+                )
+            )
+            findings.extend(
+                check_pyc_lib(
+                    REPO_ROOT / "rtl",
+                    lock_src=REPO_ROOT / ".pycircuit-src",
+                )
+            )
+    finally:
+        if worktree is not None:
+            run_cmd(["git", "worktree", "remove", "--force", str(worktree)])
 
     if not args.equiv_only:
         for path in iter_rtl_sources():
@@ -380,21 +884,25 @@ def main() -> int:
             bits = cmn_mem_bits(product, dims)
             print(
                 f"equiv skip full {module}: large ub_cmn_mem_1r1w "
-                f"({bits} bits > {thresh}); parents blackbox both sides"
+                f"({bits} bits > {thresh}); byte-compare except module name + ports"
             )
-            findings.append(
-                Finding(
-                    check="emit",
-                    module=module,
-                    file=leaf["product"],
-                    rule="CMN_MEM_LARGE",
-                    message=(
-                        f"large variant ({bits} bits > {thresh}); "
-                        "full PRODUCT≡HOOKS skipped; parents -lib the same cell"
-                    ),
-                    bucket="report",
+            if not verilog_equal_except_module_name(product, hooks):
+                findings.append(
+                    Finding(
+                        check="emit",
+                        module=module,
+                        file=leaf["product"],
+                        rule="CMN_MEM_BODY_DIFF",
+                        message=(
+                            f"large variant ({bits} bits > {thresh}): "
+                            "PRODUCT vs HOOKS must match byte-for-byte except module name"
+                        ),
+                    )
                 )
-            )
+            port_hits = compare_ports(module, product, hooks, extra)
+            for hit in port_hits:
+                hit.check = "emit"
+            findings.extend(port_hits)
             continue
         lib_files = large_cmn_mem_lib_files(module, disc)
         if lib_files:

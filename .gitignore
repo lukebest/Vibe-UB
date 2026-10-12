@@ -24,8 +24,13 @@ scripts/gate/out/
 .pycircuit-src/
 .pycircuit_out/
 .pycircuit-venv/
+.sby-src/
 formal/**/*.sby_*
 *.sbydir/
+formal/*/*_bmc/
+formal/*/*_cover/
+formal/*/*_prove/
+formal/*/*_live/
 
 # Impl quick-synth: never commit PDK / liberty / local work dirs
 .cache/sky130/

@@ -12,6 +12,8 @@ from contract_hash import contract_sha256
 from gatelib import Finding
 from private_leaves import (
     OWNED_PATH_MSG,
+    WAIVER_UNAPPROVED_MSG,
+    WAIVER_UNCHECKED_MSG,
     check_attests,
     check_hash_single,
     check_owned_paths,
@@ -585,24 +587,20 @@ def test_owned_paths_gatekeeper_ok() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         _set_flag(root, "owned_paths_required", True)
-        by_branch = check_owned_paths(
+        hits = check_owned_paths(
             root,
             OWNED_TOUCH,
-            labels=[],
-            branch="cursor/gate-private-leaves",
+            title="gate: S-01(b) private leaves",
+            comments="",
         )
-        _expect_none("owned-paths-branch", by_branch, "GATE_FILE_TOUCHED")
-        by_label = check_owned_paths(
-            root,
-            OWNED_TOUCH,
-            labels=["docs", "gate"],
-            branch="feature/leaf-fix",
-        )
-        _expect_none("owned-paths-label", by_label, "GATE_FILE_TOUCHED")
-        if not is_gatekeeper_pr(labels=[], branch="cursor/gate-foo"):
-            _fail("owned-paths-prefix", "cursor/gate- must be gatekeeper")
-        if is_gatekeeper_pr(labels=["gatekeeper"], branch="cursor/gateway"):
-            _fail("owned-paths-prefix", "near-miss label/branch must not match")
+        _expect_none("owned-paths-title", hits, "GATE_FILE_TOUCHED")
+        _expect_none("owned-paths-title-waiver", hits, "GATE_WAIVER_UNCHECKED")
+        if not is_gatekeeper_pr(title="gate: anything"):
+            _fail("owned-paths-prefix", "title gate: must be gatekeeper")
+        if is_gatekeeper_pr(title="Gate: wrong case"):
+            _fail("owned-paths-prefix", "title prefix is case-sensitive gate:")
+        if is_gatekeeper_pr(title="feat: leaf-fix"):
+            _fail("owned-paths-prefix", "non-gate title must not match")
 
 
 def test_owned_paths_non_gatekeeper() -> None:
@@ -612,8 +610,8 @@ def test_owned_paths_non_gatekeeper() -> None:
         hits = check_owned_paths(
             root,
             OWNED_TOUCH,
-            labels=[],
-            branch="feature/leaf-fix",
+            title="feat: leaf-fix",
+            comments="",
         )
         hit = _expect("owned-paths-neg", hits, "GATE_FILE_TOUCHED")
         if hit.message != OWNED_PATH_MSG:
@@ -622,19 +620,28 @@ def test_owned_paths_non_gatekeeper() -> None:
         expect = {
             "scripts/gate/private_leaves.py",
             ".github/workflows/gate.yml",
-            "waivers/formal.yml",
         }
         if files != expect:
             _fail("owned-paths-neg", f"file list {sorted(files)} != {sorted(expect)}")
+        if "waivers/formal.yml" in files:
+            _fail("owned-paths-neg", "waivers/ is the exception, not GATE_FILE_TOUCHED")
         if hit.bucket != "new":
             _fail("owned-paths-neg", "must be blocking when owned_paths_required")
         clean = check_owned_paths(
             root,
             ["docs/rules/verif_gate.md", "rtl/mem/ub_mem_ptw.v"],
-            labels=[],
-            branch="feature/leaf-fix",
+            title="feat: leaf-fix",
+            comments="",
         )
         _expect_none("owned-paths-unrelated", clean, "GATE_FILE_TOUCHED")
+        only_waiver = check_owned_paths(
+            root,
+            ["waivers/formal.yml"],
+            title="feat: leaf-fix",
+            comments="GATE-WAIVER-APPROVED: waivers/formal.yml\n",
+        )
+        _expect_none("owned-paths-waiver-ok", only_waiver, "GATE_FILE_TOUCHED")
+        _expect_none("owned-paths-waiver-ok", only_waiver, "GATE_WAIVER_UNAPPROVED")
 
 
 def test_owned_paths_report_until_main() -> None:
@@ -645,13 +652,41 @@ def test_owned_paths_report_until_main() -> None:
             check_owned_paths(
                 root,
                 ["scripts/gate/contract_check.py"],
-                labels=[],
-                branch="user/pr",
+                title="user/pr",
+                comments="",
             ),
             "GATE_FILE_TOUCHED",
         )
         if hit.bucket != "report":
             _fail("owned-paths-report", "must be report-only until #47 is on main")
+
+
+def test_owned_paths_waiver_approval() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        unchecked = check_owned_paths(
+            root,
+            ["waivers/lint.yml"],
+            title="feat: add lint waiver",
+        )
+        hit = _expect("waiver-unchecked", unchecked, "GATE_WAIVER_UNCHECKED")
+        if hit.message != WAIVER_UNCHECKED_MSG:
+            _fail("waiver-unchecked", f"message {hit.message!r}")
+        if hit.bucket != "report":
+            _fail("waiver-unchecked", "API-not-wired must stay report-only")
+        missing = check_owned_paths(
+            root,
+            ["waivers/lint.yml"],
+            title="feat: add lint waiver",
+            comments="LGTM\n",
+        )
+        hit = _expect("waiver-unapproved", missing, "GATE_WAIVER_UNAPPROVED")
+        if hit.message != WAIVER_UNAPPROVED_MSG:
+            _fail("waiver-unapproved", f"message {hit.message!r}")
+        if hit.bucket != "report":
+            _fail("waiver-unapproved", "until API is wired this stays report-only")
+        if hit.file != "waivers/lint.yml":
+            _fail("waiver-unapproved", f"id must be path, got {hit.file}")
 
 
 def test_role_cross_and_ok() -> None:
@@ -773,6 +808,7 @@ def run_all() -> None:
         test_owned_paths_gatekeeper_ok,
         test_owned_paths_non_gatekeeper,
         test_owned_paths_report_until_main,
+        test_owned_paths_waiver_approval,
         test_role_cross_and_ok,
         test_private_skip_helper,
         test_scan_includes_pcs_layer,

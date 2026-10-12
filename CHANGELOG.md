@@ -27,7 +27,7 @@
 
 ### Changed
 
-- 门禁 contract-check：`GATE-OWNED-PATHS`：非守门人 PR 改 `scripts/gate/`、`.github/workflows/`、`waivers/` → `GATE_FILE_TOUCHED`（「门禁文件由守门人维护」）。守门人 = 标签 `gate` 或分支前缀 `cursor/gate-`。#47 进 main 前 report-only。
+- 门禁 contract-check：`GATE-OWNED-PATHS`：非守门人 PR 改 `scripts/gate/`、`.github/workflows/` → `GATE_FILE_TOUCHED`（「门禁文件由守门人维护」）。守门人 = PR 标题以 `gate:` 开头。`waivers/` 可在任意 PR 添加，须守门人评论 `GATE-WAIVER-APPROVED: <path>`；API 未接通前只报告。#47 进 main 前 `GATE_FILE_TOUCHED` report-only。
 - 门禁 formal：`GATE-PRIVATE-PARENT-FREE`：默认 sby 任务不得 `assume` 私有叶子输出口（桩切掉，父级断言在自由输出下成立）。诊断任务可单独命名。#47 进 main 前 report-only。
 - 门禁 formal：`GATE-FORMAL-DEPTH`（prove 收敛则必跑并记 k/runtime；否则 BMC 覆盖两笔完整事务+余量并附归纳反例初态，标 `not fully proven`。BMC depth ≥ 最深 cover + 6，现为 report-only）。
 - 门禁 contract-check：扫描 `docs/arch/*/contracts/`（含 pcs）。pcs 的 `parent` 查 `docs/arch/pcs/UARCH.md` §3 叶子列，不看 mem 表。

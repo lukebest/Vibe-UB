@@ -69,8 +69,7 @@ jobs:
       - name: contract-check
         env:
           GATE_PR_TITLE: ${{ github.event.pull_request.title }}
-          GATE_PR_BRANCH: ${{ github.head_ref || github.ref_name }}
-          GATE_PR_LABELS: ${{ github.event.pull_request && join(github.event.pull_request.labels.*.name, ',') || '' }}
+          GATE_PR_NUMBER: ${{ github.event.pull_request.number }}
         run: scripts/gate/contract_check.sh
 
   rtl-emit-consistency:

@@ -51,9 +51,18 @@ ATTEST_DIR = "reports/private"
 CRIT_PATH_OK = {"public", "私有叶子内部"}
 STATUS_OK = {"PASS", "FAIL"}
 OWNED_PATH_PREFIXES = ("scripts/gate/", ".github/workflows/", "waivers/")
-GATEKEEPER_LABEL = "gate"
-GATEKEEPER_BRANCH_PREFIX = "cursor/gate-"
+GATE_FILE_PREFIXES = ("scripts/gate/", ".github/workflows/")
+WAIVER_PREFIX = "waivers/"
+GATEKEEPER_TITLE_PREFIX = "gate:"
 OWNED_PATH_MSG = "门禁文件由守门人维护"
+WAIVER_APPROVE_RE = re.compile(r"^GATE-WAIVER-APPROVED:\s*(\S+)\s*$", re.M)
+WAIVER_UNCHECKED_MSG = (
+    "waiver files changed; GATE-WAIVER-APPROVED comment not checked "
+    "(GitHub API not wired)"
+)
+WAIVER_UNAPPROVED_MSG = (
+    "missing gatekeeper comment line GATE-WAIVER-APPROVED: <waiver id>"
+)
 
 REQUIRED_TOP = (
     "leaf",
@@ -175,38 +184,15 @@ def owned_paths_required(root: Path) -> bool:
     return "GATE-OWNED-PATHS" in (proc.stdout or "")
 
 
-def parse_pr_labels(raw: str | None = None) -> list[str]:
-    text = raw if raw is not None else os.environ.get("GATE_PR_LABELS") or ""
-    return [part.strip() for part in re.split(r"[\s,]+", text) if part.strip()]
-
-
-def pr_branch(explicit: str | None = None, root: Path | None = None) -> str:
+def pr_title(explicit: str | None = None) -> str:
     if explicit is not None:
-        return explicit.strip().removeprefix("refs/heads/")
-    for key in ("GATE_PR_BRANCH", "GITHUB_HEAD_REF", "GITHUB_REF_NAME"):
-        val = (os.environ.get(key) or "").strip()
-        if val:
-            return val.removeprefix("refs/heads/")
-    if root is not None:
-        proc = run_cmd(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root)
-        if proc.returncode == 0:
-            return (proc.stdout or "").strip().removeprefix("refs/heads/")
-    return ""
+        return explicit.strip()
+    return (os.environ.get("GATE_PR_TITLE") or "").strip()
 
 
-def is_gatekeeper_pr(
-    *,
-    labels: list[str] | None = None,
-    branch: str | None = None,
-    root: Path | None = None,
-) -> bool:
-    """Gatekeeper = label `gate` or branch prefix `cursor/gate-`."""
-    labs = parse_pr_labels() if labels is None else [
-        str(item).strip() for item in labels if str(item).strip()
-    ]
-    if GATEKEEPER_LABEL in labs:
-        return True
-    return pr_branch(branch, root).startswith(GATEKEEPER_BRANCH_PREFIX)
+def is_gatekeeper_pr(*, title: str | None = None) -> bool:
+    """Gatekeeper = PR title starts with `gate:` (PM 2026-10-12)."""
+    return pr_title(title).startswith(GATEKEEPER_TITLE_PREFIX)
 
 
 def _norm_rel(rel: str) -> str:
@@ -216,24 +202,92 @@ def _norm_rel(rel: str) -> str:
     return norm.lstrip("/")
 
 
-def is_owned_path(rel: str) -> bool:
+def _under_prefix(rel: str, prefix: str) -> bool:
     norm = _norm_rel(rel)
-    for prefix in OWNED_PATH_PREFIXES:
-        if norm == prefix.rstrip("/") or norm.startswith(prefix):
-            return True
-    return False
+    return norm == prefix.rstrip("/") or norm.startswith(prefix)
 
 
-def touched_owned_paths(paths: list[str]) -> list[str]:
+def is_owned_path(rel: str) -> bool:
+    return any(_under_prefix(rel, prefix) for prefix in OWNED_PATH_PREFIXES)
+
+
+def is_gate_file_path(rel: str) -> bool:
+    return any(_under_prefix(rel, prefix) for prefix in GATE_FILE_PREFIXES)
+
+
+def is_waiver_path(rel: str) -> bool:
+    return _under_prefix(rel, WAIVER_PREFIX)
+
+
+def _unique_under(paths: list[str], pred) -> list[str]:
     hits: list[str] = []
     seen: set[str] = set()
     for raw in paths:
         norm = _norm_rel(raw)
-        if not is_owned_path(norm) or norm in seen:
+        if not pred(norm) or norm in seen:
             continue
         seen.add(norm)
         hits.append(norm)
     return hits
+
+
+def touched_owned_paths(paths: list[str]) -> list[str]:
+    return _unique_under(paths, is_owned_path)
+
+
+def touched_gate_files(paths: list[str]) -> list[str]:
+    return _unique_under(paths, is_gate_file_path)
+
+
+def touched_waiver_files(paths: list[str]) -> list[str]:
+    return _unique_under(paths, is_waiver_path)
+
+
+def approved_waiver_ids(comments: str) -> set[str]:
+    return {m.group(1) for m in WAIVER_APPROVE_RE.finditer(comments or "")}
+
+
+def fetch_pr_comment_text() -> str | None:
+    """Concatenate PR issue + review comments, or None if API is not wired."""
+    token = (
+        os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+    ).strip()
+    repo = (os.environ.get("GITHUB_REPOSITORY") or "").strip()
+    number = (
+        os.environ.get("GATE_PR_NUMBER")
+        or os.environ.get("GITHUB_PR_NUMBER")
+        or ""
+    ).strip()
+    if not token or not repo or not number:
+        return None
+    import json
+    import urllib.error
+    import urllib.request
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "vibe-ub-gate-owned-paths",
+    }
+    urls = (
+        f"https://api.github.com/repos/{repo}/issues/{number}/comments",
+        f"https://api.github.com/repos/{repo}/pulls/{number}/comments",
+    )
+    bodies: list[str] = []
+    for url in urls:
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError):
+            return None
+        if not isinstance(payload, list):
+            return None
+        for item in payload:
+            if isinstance(item, dict) and item.get("body"):
+                bodies.append(str(item["body"]))
+    return "\n".join(bodies)
 
 
 def contract_prose(text: str) -> str:
@@ -1174,33 +1228,76 @@ def check_hash_single(root: Path) -> list[Finding]:
     return findings
 
 
-def check_owned_paths(
-    root: Path,
-    paths: list[str] | None = None,
+def check_waiver_approvals(
+    paths: list[str],
     *,
-    labels: list[str] | None = None,
-    branch: str | None = None,
+    title: str | None = None,
+    comments: str | None = None,
 ) -> list[Finding]:
-    """GATE-OWNED-PATHS: non-gatekeeper PRs must not touch gate files."""
-    if paths is None:
-        paths = changed_paths_vs_main(root)
-    touched = touched_owned_paths(paths)
-    if not touched:
+    """Non-gatekeeper waiver edits need GATE-WAIVER-APPROVED; report-only until wired."""
+    touched = touched_waiver_files(paths)
+    if not touched or is_gatekeeper_pr(title=title):
         return []
-    if is_gatekeeper_pr(labels=labels, branch=branch, root=root):
+    text = comments if comments is not None else fetch_pr_comment_text()
+    if text is None:
+        return [
+            Finding(
+                check="contract",
+                module="*",
+                file=",".join(touched),
+                rule="GATE_WAIVER_UNCHECKED",
+                message=WAIVER_UNCHECKED_MSG,
+                bucket="report",
+                severity="warning",
+            )
+        ]
+    approved = approved_waiver_ids(text)
+    missing = [path for path in touched if path not in approved]
+    if not missing:
         return []
-    bucket = "new" if owned_paths_required(root) else "report"
     return [
         Finding(
             check="contract",
             module="*",
-            file=",".join(touched),
-            rule="GATE_FILE_TOUCHED",
-            message=OWNED_PATH_MSG,
-            bucket=bucket,
-            severity="error" if bucket == "new" else "warning",
+            file=",".join(missing),
+            rule="GATE_WAIVER_UNAPPROVED",
+            message=WAIVER_UNAPPROVED_MSG,
+            bucket="report",
+            severity="warning",
         )
     ]
+
+
+def check_owned_paths(
+    root: Path,
+    paths: list[str] | None = None,
+    *,
+    title: str | None = None,
+    comments: str | None = None,
+) -> list[Finding]:
+    """GATE-OWNED-PATHS: non-gatekeeper PRs must not touch gate files."""
+    if paths is None:
+        paths = changed_paths_vs_main(root)
+    findings: list[Finding] = []
+    if not is_gatekeeper_pr(title=title):
+        touched = touched_gate_files(paths)
+        if touched:
+            bucket = "new" if owned_paths_required(root) else "report"
+            findings.append(
+                Finding(
+                    check="contract",
+                    module="*",
+                    file=",".join(touched),
+                    rule="GATE_FILE_TOUCHED",
+                    message=OWNED_PATH_MSG,
+                    bucket=bucket,
+                    severity="error" if bucket == "new" else "warning",
+                )
+            )
+    findings.extend(
+        check_waiver_approvals(paths, title=title, comments=comments)
+    )
+    return findings
 
 
 def collect_contract_findings(
@@ -1208,8 +1305,7 @@ def collect_contract_findings(
     *,
     paths: list[str] | None = None,
     title: str | None = None,
-    labels: list[str] | None = None,
-    branch: str | None = None,
+    comments: str | None = None,
 ) -> list[Finding]:
     root = root or REPO_ROOT
     findings, contracts = check_all_contracts(root)
@@ -1220,7 +1316,7 @@ def collect_contract_findings(
         paths = changed_paths_vs_main(root)
     findings.extend(check_role_dirs(paths, title=title))
     findings.extend(
-        check_owned_paths(root, paths, labels=labels, branch=branch)
+        check_owned_paths(root, paths, title=title, comments=comments)
     )
     return findings
 

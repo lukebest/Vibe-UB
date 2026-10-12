@@ -41,6 +41,21 @@ ports:
   - {name: cfg_mtm_gp, dir: out, width: 8, desc: 流量监测组}
 params: []
 ill_cause_width: 4
+assertions:
+  - AP_TECTE_CLK
+  - AP_TECTE_HS_IN
+  - AP_TECTE_HS_OUT
+  - AP_TECTE_ILL_2MB
+  - AP_TECTE_ILL_AD
+  - AP_TECTE_ILL_EQ
+  - AP_TECTE_ILL_PRI
+  - AP_TECTE_ILL_S2
+  - AP_TECTE_ILL_ZERO
+  - AP_TECTE_IN_RDY_RST
+  - AP_TECTE_LAT1
+  - AP_TECTE_OUT_HOLD
+  - AP_TECTE_RDY
+  - AP_TECTE_RST
 status: draft
 ```
 

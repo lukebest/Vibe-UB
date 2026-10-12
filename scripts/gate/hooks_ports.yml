@@ -155,3 +155,16 @@ entries:
     approver: lukebest
     approved_date: 2026-10-10
     review_when: SPEC §10 ub_mem_tlb hook list changes
+
+  # obs_st bit order MSB->LSB = {st_evt, st_flt, st_fill, st_dec, st_rd, st_idle}; obs_rd_pend = rd_valid_q; read-only, not gated by tb_test_mode.
+  - id: HOOKS-UB-MEM-PTW
+    module: ub_mem_ptw
+    extra_ports:
+      - name: tb_mem_ptw_obs_st
+        width: 6
+      - name: tb_mem_ptw_obs_rd_pend
+        width: 1
+    reason: SPEC §10 / §10.5 — ub_mem_ptw observe (AP_TBLRD_REQ_HOLD k-induction)
+    approver: 验证
+    approved_date: 2026-10-12
+    review_when: SPEC §10 ub_mem_ptw hook list changes

@@ -401,13 +401,21 @@ def load_approvers() -> set[str]:
     names: set[str] = set()
     for row in data.get("gatekeepers") or []:
         login = str(row.get("login") or "").strip()
+        name = str(row.get("name") or "").strip()
         role = str(row.get("role") or "").strip().lower()
-        if login and role in {"verification", "verif", "gatekeeper", "工具守门"}:
-            names.add(login)
+        ok = row.get("gatekeeper") is True or role in {
+            "verification",
+            "verif",
+            "gatekeeper",
+            "工具守门",
+            "验证",
+        }
+        if not ok:
+            continue
         if login:
-            # login is accepted only when marked as the verification gatekeeper
-            if row.get("gatekeeper") is True or role:
-                names.add(login)
+            names.add(login)
+        if name:
+            names.add(name)
     return names
 
 

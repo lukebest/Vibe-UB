@@ -550,6 +550,7 @@ try_regpair() {
   local dump="${gold_read}
 ${gold_ch}
 hierarchy -check -top ${LEAF}
+${BB_YS}
 rename -top gold
 proc; flatten
 autoname
@@ -559,6 +560,7 @@ design -reset
 ${gate_read}
 ${gate_ch}
 hierarchy -check -top ${GATE_TOP}
+${BB_YS}
 rename -top gate
 proc; flatten
 autoname

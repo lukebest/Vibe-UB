@@ -100,19 +100,32 @@ def test_loader_parses_all_real_headers():
         assert header.has_port("out_ready")
 
 
-def test_derived_yaml_matches_43_head():
+def test_derived_yaml_matches_main_head():
     ok, detail = live_matches_derived()
     assert ok, detail
     recorded = load_derived()
     live = collect_live()
     assert recorded.get("final") is True
-    assert recorded.get("source_head") == SOURCE_HEAD == "3d08513a7e334d7deb3b3279b203b05277faf713"
+    assert recorded.get("source_head") == SOURCE_HEAD == "73cfa6e1b95c1e296f05bd66431ae3c67ae7972c"
     assert set(live["yaml_digests"]) == {f"{name}.md" for name in LEAF_NAMES}
     assert "README.md" not in live["yaml_digests"]
     assert set(live["ptw_enc_classes"]) == set(ENC_CLASSES)
     assert len(live["ptw_enc_cross"]) == 4
     for level in live["ptw_enc_cross"].values():
         assert set(level) == set(ENC_CLASSES)
+
+
+def test_live_yaml_assertions_list_is_consumed():
+    total = 0
+    for leaf in LEAF_NAMES:
+        header = load_leaf_header(leaf)
+        names = header.assertion_names()
+        assert names, f"{leaf} missing assertions list"
+        assert all(n.startswith("AP_") for n in names)
+        model = make_stub(leaf, header=header, seed=1)
+        assert model.checker.enabled == names
+        total += len(names)
+    assert total == 91
 
 
 def test_contract_sha256_is_canonical_json_not_raw_text(tmp_path: Path):

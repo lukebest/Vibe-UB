@@ -29,8 +29,8 @@ def digests_path() -> Path:
     return DERIVED_DIR / DIGESTS_NAME
 
 
-# #43 head the lockfile was last regenerated against.
-SOURCE_HEAD = "3d08513a7e334d7deb3b3279b203b05277faf713"
+# main head the lockfile was last regenerated against (#49 assertions lists).
+SOURCE_HEAD = "73cfa6e1b95c1e296f05bd66431ae3c67ae7972c"
 
 
 def collect_live() -> dict[str, Any]:

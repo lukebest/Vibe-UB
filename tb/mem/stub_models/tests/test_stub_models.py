@@ -179,6 +179,39 @@ def test_parse_assertions_shapes():
     assert [a.name for a in parse_assertions("AP_A: x\nAP_B: y")] == ["AP_A", "AP_B"]
     assert [a.name for a in parse_assertions({"AP_A": "x"})] == ["AP_A"]
     assert [a.name for a in parse_assertions([{"name": "AP_A", "text": "x"}])] == ["AP_A"]
+    assert [a.name for a in parse_assertions(["AP_A", "AP_B"])] == ["AP_A", "AP_B"]
+    assert parse_assertions([]) == ()
+
+
+def test_assertions_yaml_list_is_consumed():
+    """Xia will add ``assertions:`` as a YAML list; consume it, do not fall back."""
+    text = """
+leaf: ub_mem_ptw_desc_dec
+parent: ub_mem_ptw
+clock: {name: core_clk, period_ns: 12.412, reset: rst_pyc, reset_type: sync}
+latency: {kind: registered, cycles: 1, max_cycles: 1}
+ports:
+  - {name: core_clk, dir: in, width: 1, desc: clk}
+  - {name: rst_pyc, dir: in, width: 1, desc: rst}
+  - {name: in_valid, dir: in, width: 1, desc: v}
+  - {name: in_ready, dir: out, width: 1, desc: r}
+  - {name: raw, dir: in, width: 64, desc: raw}
+  - {name: out_valid, dir: out, width: 1, desc: ov}
+  - {name: out_ready, dir: in, width: 1, desc: or}
+  - {name: desc_illegal, dir: out, width: 1, desc: ill}
+  - {name: desc_ill_cause, dir: out, width: 4, desc: cause}
+params: []
+ill_cause_width: 4
+status: draft
+assertions:
+  - AP_PTW_CLK
+  - AP_PTW_RDY
+  - AP_PTW_OUT_HOLD
+"""
+    header = parse_contract_yaml(text, source="sample-assertions-list")
+    assert header.assertion_names() == ("AP_PTW_CLK", "AP_PTW_RDY", "AP_PTW_OUT_HOLD")
+    model = make_stub(PTW, header=header, seed=1)
+    assert model.checker.enabled == header.assertion_names()
 
 
 @pytest.mark.parametrize("leaf", LEAF_NAMES)

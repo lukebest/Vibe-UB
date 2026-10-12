@@ -9,7 +9,7 @@
 | 规范 | UB Base Spec Rev 2.0（D1）第 9 章，旁及 §7.2、§8.2、§8.3、§10.3、§11.4、§11.6、App. C.3.2、App. D.3.3、App. D.4.1 |
 | 引用约定 | 只写章节号和项目自己的短句。本文件不含任何表项字段的比特位置、编码取值或规范原文。表项内部怎么切字段，只出现在「解码叶子」里，解码叶子的源码能否公开等船长决定（见 §11 D-01） |
 | 提案标记 | 凡标「Xia 提案，待船长」的都是架构提案，规范没有裁定 |
-| 修订 | 2026-10-12 按船长裁定更新：C-D1 译码 L0 表放内存、由 `ub_mem_dec_walk` 取表；2 MB 映射粒度与硬件 A/D 写回暂缓（首轮），遇到时报 `ILL_MAP_2MB` / `ILL_HW_AD` |
+| 修订 | 2026-10-12 按船长裁定更新：C-D1 译码 L0 表放内存、由 `ub_mem_dec_walk` 取表；`ub_mem_dec_ent_dec` 的 L0 / L1 均接 walker 寄存读回、再寄存 1 拍；2 MB 映射粒度与硬件 A/D 写回暂缓（首轮），遇到时报 `ILL_MAP_2MB` / `ILL_HW_AD` |
 
 ---
 
@@ -21,7 +21,7 @@
    - **User 侧 UB 译码器**（§9.5）：输入主机 PA，输出 UBMD（EID、TokenID、UBA）和 TokenValue。
 3. 页表（MATT）采用 Arm VMSAv8-64 Stage 1、4 KB 粒度、最多 4 级、48 bit 输入输出，含 5 处适配（§9.4.3 末段把格式交给实现；Xia 提案，待船长）。
 4. **解码与结构分开**：每种规范表项有一个「解码叶子」，把原始表项拆成具名信号；所有「结构叶子」（缓存、流水线、遍历器）只认具名信号，不认比特位置。这样字段布局集中在少数几个文件里，结构叶子可以先写、先公开。
-5. 规范表项尽量在 **写入或填充时** 解码，缓存里存的是解码后的信号束。查找关键路径上只剩译码器 L0 表一处需要现场解码（它按原始 64 B 存）。
+5. 规范表项尽量在 **写入或填充时** 解码，缓存里存的是解码后的信号束。译码器 L0 / L1 原始表项经 `ub_mem_dec_walk` 从内存读回并寄存后，由 `ub_mem_dec_ent_dec` 再寄存 1 拍解码。
 6. 单时钟 `core_clk`（≈80.57 MHz，周期约 12.4 ns），叶子只接 `rst_pyc`，业务寄存器同步复位（`m.reset()`）。每个叶子只有一组参数；有多组参数时按 SPEC §2.2 出 `<leaf>_<tag>` 固定网表，生成的 Verilog 里不带 `parameter`。
 
 ## 2. 顶层框图
@@ -46,8 +46,7 @@ flowchart LR
   subgraph DEC [ub_mem_decoder]
     DS[基址相减 + 越界]
     DT[ub_mem_dec_tlb]
-    DL0[ub_mem_dec_l0<br/>片上 L0 表]
-    DW[ub_mem_dec_walk]
+    DW[ub_mem_dec_walk<br/>L0/L1 内存取表]
     DU[ub_mem_dec_uba]
     DCQ[ub_mem_dec_cmdq]
     DEQ[ub_mem_dec_evtq]
@@ -69,7 +68,7 @@ flowchart LR
   CSR --> DCQ
 
   LS[ch8 Load/Store 主机 PA] --> DS --> DT --> DU -->|UBMD + TokenValue| TA_USER[TA 发起侧]
-  DT -. 缺失 .-> DL0 --> DW
+  DT -. 缺失 .-> DW
   DW <--> MEM
   DCQ --> DT
   DS --> DEQ --> MEM
@@ -90,9 +89,8 @@ flowchart LR
 | （新增） | `ub_mem_cmdq` / `ub_mem_evtq` | 结构 | UMMU 命令队列消费、事件记录写回（格式待后续批 Q-E09） |
 | `ub_mem_decoder` | `ub_mem_decoder` | 层次 | 例化译码器叶子 |
 | — | `ub_mem_dec_tlb` | 结构 | 按 1 MB 粒度缓存最终译码结果 |
-| — | `ub_mem_dec_l0` | 结构 | 片上 L0 表（原始 64 B），只输出原始 512 bit 数据 |
-| — | `ub_mem_dec_walk` | 结构 | L1 表读取（完整方案），只输出原始表项数据 |
-| — | `ub_mem_dec_ent_dec` | 解码 | 在 `ub_mem_decoder` 这一层例化，接 `ub_mem_dec_l0` / `ub_mem_dec_walk` 的原始数据，输出 §5.5 信号束；选 PTE、比 PTRE 范围在其下游结构逻辑里做 |
+| — | `ub_mem_dec_walk` | 结构 | 从内存先读 L0 再读 L1，读回寄存，只输出原始表项数据 |
+| — | `ub_mem_dec_ent_dec` | 解码 | 在 `ub_mem_decoder` 这一层例化，接 `ub_mem_dec_walk` 寄存后的 L0 / L1 原始数据，输出 §5.5 信号束；L0 与 L1 均寄存 1 拍；选 PTE、比 PTRE 范围在其下游结构逻辑里做 |
 | — | `ub_mem_dec_uba` | 组合 | 按 §9.5.2 由 UBA 基值与 PA 低位算 UBA |
 | — | `ub_mem_dec_cmdq` / `ub_mem_dec_evtq` | 结构 | App. D.4.1 的 CMDQ / EVENTQ |
 | `ub_mem_ubmd` | 并入解码叶子 | 解码 | UBMD 与各信号束的拆包只在设计侧解码叶子里；参考模型由 Xia 独立拆包，两边只共享 §5 的信号名和位宽（D17） |
@@ -119,7 +117,8 @@ EID→ENT_IDX 映射放在 RSC（Xia 答复 Q-A02），UMMU 只接 ENT_IDX 和�
 | `ub_mem_inv` | 命令或 CSR | 各缓存 valid 清除、扫描请求 | 见 §7 |
 | `ub_mem_evtq` | 失败记录 | `mem2host_wr_*` | 队列满时置溢出标志、丢后续事件（等 Q-E09） |
 | `ub_mem_decoder`（对外） | `fun2dec_q_*`：主机 PA 64 bit、`tag` | `dec2fun_r_*`：目标 EID（`EID_W` bit）、TokenID、UBA、TokenValue、属性、成功 / 失败、`tag` | 1 查询 / 拍 |
-| `ub_mem_dec_l0` | PA 下标 | 原始 L0 大项 512 bit | 8 块并读；解码由 `ub_mem_decoder` 层例化的 `ub_mem_dec_ent_dec` 完成 |
+| `ub_mem_dec_walk` | 译码翻译缓存缺失、主机 PA | 原始 L0 大项 512 bit（一次取 64 B）；L1 原始表项 | 从内存先读 L0 再读 L1，读回寄存后交给 `ub_mem_dec_ent_dec` |
+| `ub_mem_dec_ent_dec` | `ub_mem_dec_walk` 寄存后的 L0 / L1 原始数据 | §5.5 信号束 | L0 与 L1 均寄存 1 拍 |
 | `ub_mem_dec_uba` | UBA 基值、PA 低位 | UBA 64 bit | 64 bit 加法，进位丢弃（Xia 答复 D-L09） |
 
 ## 5. 解码叶子 ↔ 结构叶子 具名信号契约
@@ -208,25 +207,25 @@ EID→ENT_IDX 映射放在 RSC（Xia 答复 Q-A02），UMMU 只接 ENT_IDX 和�
 
 合计 **214 bit**。
 
-### 5.5 `ub_mem_dec_ent_dec`（`ub_mem_decoder` 层例化，输入为 `ub_mem_dec_l0` / `ub_mem_dec_walk` 的原始数据）→ 译码器结构逻辑（§9.5.1）
+### 5.5 `ub_mem_dec_ent_dec`（`ub_mem_decoder` 层例化，输入为 `ub_mem_dec_walk` 寄存后的 L0 / L1 原始数据）→ 译码器结构逻辑（§9.5.1）
 
-L0 PTE、L0 PTRE、L1 PTE 的格式规范没有给出，由项目自定（Xia 提案，待船长）。下表是数据通路需要的解包信号，宽度里标「待」的随格式定。
+L0 PTE、L0 PTRE、L1 PTE 的格式规范没有给出，由项目自定（Xia 提案，待船长）。下表是数据通路需要的解包信号，宽度里标「待」的随格式定。L0 与 L1 均接 `ub_mem_dec_walk` 寄存后的内存读回，本叶子再寄存 1 拍（预算 R）。
 
 | 信号 | 位宽 | 含义 | 预算 |
 | --- | --- | --- | --- |
-| `dent_is_range` | 1 | 64 B 大项是范围项（否则是 8 个页表项） | **C ≤ 30%**（L0 表按原始存储，读出后现场解码；内容只是选位和一个小比较，实际远低于 30%） |
-| `dent_pte_v` | 1 | 选中的 L0 页表项有效（由 PA 的 3 bit 选） | C ≤ 30% |
-| `dent_rng_v` | 1 | 范围项有效 | C ≤ 30% |
-| `dent_rng_base` / `dent_rng_limit` | 15 / 15 | 范围（与 PA[34:20] 比） | C ≤ 30% |
-| `dent_rng_last` | 1 | 范围项本身是最后一级（Xia 提案，待船长） | C ≤ 30% |
-| `dent_l1_base` | 36（待） | L1 表基址（暂按 4 KB 对齐） | C ≤ 30% |
-| `dent_eid` | `EID_W`（第一波 20） | 目标 EID。`EID_W` 是叶子参数；128 bit 将来按 SPEC §2.2 出 `_eid128` 变体（待船长） | C ≤ 30%，下游先寄存 |
-| `dent_token_id` | 20 | TokenID | 同上 |
-| `dent_token_value` | 32 | TokenValue | 同上 |
-| `dent_uba_base` | 52 | UBA 基值（§9.5.2） | 同上 |
-| `dent_attr` | 8（待） | 其他相关属性 | 同上 |
+| `dent_is_range` | 1 | 64 B 大项是范围项（否则是 8 个页表项） | R |
+| `dent_pte_v` | 1 | 选中的 L0 页表项有效（由 PA 的 3 bit 选） | R |
+| `dent_rng_v` | 1 | 范围项有效 | R |
+| `dent_rng_base` / `dent_rng_limit` | 15 / 15 | 范围（与 PA[34:20] 比） | R |
+| `dent_rng_last` | 1 | 范围项本身是最后一级（Xia 提案，待船长） | R |
+| `dent_l1_base` | 36（待） | L1 表基址（暂按 4 KB 对齐） | R |
+| `dent_eid` | `EID_W`（第一波 20） | 目标 EID。`EID_W` 是叶子参数；128 bit 将来按 SPEC §2.2 出 `_eid128` 变体（待船长） | R |
+| `dent_token_id` | 20 | TokenID | R |
+| `dent_token_value` | 32 | TokenValue | R |
+| `dent_uba_base` | 52 | UBA 基值（§9.5.2） | R |
+| `dent_attr` | 8（待） | 其他相关属性 | R |
 
-译码结果束（EID + TokenID + TokenValue + UBA 基值 + 属性）= **112 + `EID_W` bit**，第一波 `EID_W=20` 时 132 bit；`_eid128` 变体为 240 bit。L1 表项走同一解码叶子，读回后先寄存（预算 R）。
+译码结果束（EID + TokenID + TokenValue + UBA 基值 + 属性）= **112 + `EID_W` bit**，第一波 `EID_W=20` 时 132 bit；`_eid128` 变体为 240 bit。
 
 ### 5.6 `ub_mem_ptw_desc_dec` → `ub_mem_ptw`（VMSAv8-64 描述符，§9.4.3 末段）
 
@@ -278,7 +277,7 @@ L0 PTE、L0 PTRE、L1 PTE 的格式规范没有给出，由项目自定（Xia �
 | D2 | 翻译缓存命中则取结果束并寄存 |
 | D3 | `ub_mem_dec_uba` 64 bit 加法；输出寄存 |
 
-缺失路径：首轮阻塞式，一次只处理一个缺失，后续请求在 D0 停住（ready=0）。`ub_mem_dec_walk` 先读 L0 大项；读回经 `ub_mem_dec_ent_dec` 现场解码：页表项用 PA[34:32] 选；范围项与 PA[34:20] 比。范围命中且是最后一级则得结果束；其余情形再读 L1。L1 页表项情形用 PA[31:20] 下标（每张 4096 项），范围项未命中或非最后一级用 PA[34:20] 下标（32768 项）；L1 读回经解码叶子寄存。走完后从 D0 重放该请求，命中路径给出结果。结果填译码翻译缓存（1 MB 粒度）。
+缺失路径：首轮阻塞式，一次只处理一个缺失，后续请求在 D0 停住（ready=0）。`ub_mem_dec_walk` 从内存读 L0 大项（一次 64 B、宽 512 bit），读回先寄存。`ub_mem_dec_ent_dec` 接该寄存响应，再寄存 1 拍给出 §5.5 信号束：页表项用 PA[34:32] 选；范围项与 PA[34:20] 比。范围命中且是最后一级则得结果束；其余情形 `ub_mem_dec_walk` 再读 L1，读回同样先寄存，`ub_mem_dec_ent_dec` 再寄存 1 拍。L1 页表项情形用 PA[31:20] 下标（每张 4096 项），范围项未命中或非最后一级用 PA[34:20] 下标（32768 项）。走完后从 D0 重放该请求，命中路径给出结果。结果填译码翻译缓存（1 MB 粒度）。
 
 ## 7. 失效机制
 

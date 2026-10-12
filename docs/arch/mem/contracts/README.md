@@ -137,7 +137,7 @@ D20 S-01 (b) 覆盖 C 线表项位布局。UARCH 把每一种规范表项做成�
 | `parent` | 字符串 | 父级例化点（主实例名） |
 | `clock` | 对象 | `{name: core_clk, period_ns: 12.412, reset: rst_pyc, reset_type: sync}` |
 | `latency` | 对象 | `{kind: registered \| combinational, cycles: <int>, max_cycles: <int>}`。记录第一波主路径。本批六片均为 `registered`，`cycles: 1`，`max_cycles: 1` |
-| `comb_budget_ns` | 数 | 仅 `kind: combinational` 出现。本批六片不写该键 |
+| `comb_budget_ns` | 数 | 仅当 `latency` 为 0 拍（`kind: combinational`）时必填；寄存叶子不写该键。门禁拦截：组合叶子缺该键，或寄存叶子带该键。本批六片均为 1 拍寄存，六份都不写该键。**Xia 裁定 2026-10-12。** |
 | `ports` | 列表 | 每项 `{name, dir, width, desc}`。`dir` 为 `in` / `out`。`width` 为整数、参数表达式（如 `EID_W`）、或 `unknown`（§6 未关的规范宽度） |
 | `params` | 列表 | 每项 `{name, default}`；无参数时为 `[]` |
 | `ill_cause_width` | 整数 | 恒为 `4` |

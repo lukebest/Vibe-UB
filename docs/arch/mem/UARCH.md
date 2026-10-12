@@ -82,8 +82,10 @@ flowchart LR
 | （新增） | `ub_mem_req_chk` | 结构 | 输入寄存、UBA 越界检查（等 TCTE 回来后做最终判定）、算各缓存下标 |
 | `ub_mem_cfg_lkup` | `ub_mem_cfg_lkup` + `ub_mem_tecte_dec` | 结构 + 解码 | 按 ENT_IDX 读 TECT；TECT 由 CSR 写入，写入时经解码叶子转成信号束 |
 | `ub_mem_ctx_lkup` | `ub_mem_ctx_lkup` + `ub_mem_tcte_dec` + `ub_mem_l1tct_dec` | 结构 + 解码 | TCT 缓存查找；缺失时读线性或两级 TCT，填充前解码 |
-| `ub_mem_xlat` | `ub_mem_tlb` + `ub_mem_ptw` + `ub_mem_ptw_desc_dec` | 结构 + 解码 | 4 路组相联 TLB；VMSAv8-64 遍历器；块描述符拆成 4 KB 项填 TLB |
-| `ub_mem_perm` | `ub_mem_plb` + `ub_mem_perm_walk` + `ub_mem_mapte_dec` + `ub_mem_perm_cmp` | 结构 + 解码 + 组合 | PLB 范围匹配；单项 / 多级 MAPT 遍历；TokenValue、排他位、访问类型比较与合成 |
+| `ub_mem_xlat` | `ub_mem_tlb` | 结构 | 4 路组相联 TLB；例化页表遍历器 `ub_mem_ptw` |
+| — | `ub_mem_ptw` | 结构 | 页表遍历器（VMSAv8-64）；例化私有解码叶子 `ub_mem_ptw_desc_dec`；块描述符拆成 4 KB 页并驱动 TLB 填充 |
+| `ub_mem_perm` | `ub_mem_plb` + `ub_mem_perm_cmp` | 结构 + 组合 | PLB 范围匹配；例化权限 / MAPT 遍历器 `ub_mem_perm_walk`；TokenValue、排他位、访问类型比较与合成 |
+| — | `ub_mem_perm_walk` | 结构 | 权限 / MAPT 遍历器；例化 `ub_mem_mapte_dec`；单项 / 多级 MAPT 遍历 |
 | （新增） | `ub_mem_tbl_rd` | 结构 | UMMU 内部所有内存表读汇成一个 valid/ready 读口，按 tag 回送 |
 | （新增） | `ub_mem_inv` | 结构 | 全部失效（一拍清 valid）、按条件扫描失效、SYNC |
 | （新增） | `ub_mem_cmdq` / `ub_mem_evtq` | 结构 | UMMU 命令队列消费、事件记录写回（格式待后续批 Q-E09） |
